@@ -5,8 +5,35 @@
  */
 
 export interface KbBinding {
-  kbId: string
+  /** Full KB API endpoint, e.g. https://<zone>.rag.progress.cloud/api/v1/kb/<id>. */
+  baseUrl: string
+  /** Service-account key with management permissions for the box. */
   token: string
+  /** Box id, for display only - derivable from baseUrl. */
+  kbId?: string
+}
+
+/** Hosts a knowledge box endpoint may live on - anything else is rejected (SSRF guard). */
+export const ALLOWED_KB_HOSTS = [
+  /\.rag\.progress\.cloud$/i,
+  /\.dp\.progress\.cloud$/i,
+  /\.nuclia\.cloud$/i,
+  /(^|\.)progress\.cloud$/i,
+]
+
+/** Parse and validate a pasted KB endpoint URL; returns null when unusable. */
+export function parseKbUrl(raw: string): { baseUrl: string; kbId: string } | null {
+  let url: URL
+  try {
+    url = new URL(raw.trim().replace(/\/+$/, ''))
+  } catch {
+    return null
+  }
+  if (url.protocol !== 'https:') return null
+  if (!ALLOWED_KB_HOSTS.some((h) => h.test(url.hostname))) return null
+  const match = url.pathname.match(/^\/api\/v1\/kb\/([^/]+)$/)
+  if (!match?.[1]) return null
+  return { baseUrl: `${url.origin}${url.pathname}`, kbId: match[1] }
 }
 
 export class AragApiError extends Error {
@@ -24,13 +51,12 @@ export const regionalBase = (zone: string) => `https://${zone}.rag.progress.clou
 
 export class KbClient {
   constructor(
-    private readonly zone: string,
     private readonly binding: KbBinding,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
   private url(path: string) {
-    return `${regionalBase(this.zone)}/kb/${this.binding.kbId}${path}`
+    return `${this.binding.baseUrl}${path}`
   }
 
   private headers(extra?: Record<string, string>): Record<string, string> {

@@ -96,5 +96,5 @@ export async function createKnowledgeBox(
     throw new Error(`Could not mint KB token (${key.status}): ${key.text.slice(0, 200)}`)
   }
 
-  return { kbId, token: key.json.token }
+  return { baseUrl: `${regionalBase(zone)}/kb/${kbId}`, token: key.json.token, kbId }
 }

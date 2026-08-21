@@ -11,7 +11,7 @@ const port = Number(process.env.PORT ?? 8787)
 const zone = process.env.ARAG_ZONE ?? 'aws-ap-southeast-2-1'
 
 const bindings = new BindingStore()
-const provider = new AragProvider({ zone, resolveBinding: (slug) => bindings.get(slug) })
+const provider = new AragProvider({ resolveBinding: (slug) => bindings.get(slug) })
 
 const app = buildApp({
   provider,

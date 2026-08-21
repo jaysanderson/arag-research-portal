@@ -212,10 +212,15 @@ describe('admin', () => {
     const dir = Deno.makeTempDirSync()
     const bindings = new BindingStore({
       BINDINGS_PATH: `${dir}/bindings.json`,
+      ARAG_ZONE: 'aws-ap-southeast-2-1',
       ARAG_KB_FRDC: 'demo-kb-id-000000',
       ARAG_KB_FRDC_TOKEN: 'demo-token-00000000000000',
     })
-    bindings.set('frdc', { kbId: 'connected-kb-111111', token: 'connected-token-1111111111' })
+    bindings.set('frdc', {
+      baseUrl: 'https://zone.rag.progress.cloud/api/v1/kb/connected-kb-111111',
+      token: 'connected-token-1111111111',
+      kbId: 'connected-kb-111111',
+    })
     expect(bindings.status('frdc').status).toBe('connected')
 
     const app = buildApp({ provider: new StubProvider(), bindings, adminPasscode: passcode })

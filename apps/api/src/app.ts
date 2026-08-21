@@ -4,9 +4,11 @@ import { streamSSE } from 'hono/streaming'
 import { z } from 'zod'
 import type { MigrationEvent, TenantConfig } from '@research-portal/core'
 import {
+  AragApiError,
   type AragProvider,
   KbClient,
   KnowledgeBoxNotConnectedError,
+  parseKbUrl,
   type RetrievalProvider,
 } from '@research-portal/retrieval'
 import { tenantConfig, tenantSummaries } from './tenants.ts'
@@ -25,7 +27,7 @@ const askBodySchema = z.object({
   topicIds: z.string().array().max(12).optional(),
 })
 const connectBodySchema = z.object({
-  kbId: z.string().min(8),
+  url: z.string().min(12),
   token: z.string().min(20),
 })
 const createKbBodySchema = z.object({ title: z.string().min(1).max(80).optional() })
@@ -341,27 +343,42 @@ export function buildApp(opts: BuildAppOptions): Hono {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     const raw = await c.req.json().catch(() => null) as
-      | { kbId?: unknown; token?: unknown }
+      | { url?: unknown; token?: unknown }
       | null
     const parsed = connectBodySchema.safeParse(
-      raw && typeof raw.kbId === 'string' && typeof raw.token === 'string'
-        ? { kbId: raw.kbId.trim(), token: cleanToken(raw.token) }
+      raw && typeof raw.url === 'string' && typeof raw.token === 'string'
+        ? { url: raw.url.trim(), token: cleanToken(raw.token) }
         : raw,
     )
     if (!parsed.success) return c.json({ error: 'invalid_binding' }, 400)
-    const zone = opts.zone ?? 'aws-ap-southeast-2-1'
-    const probe = new KbClient(zone, parsed.data)
+    const target = parseKbUrl(parsed.data.url)
+    if (!target) {
+      return c.json({
+        error: 'invalid_url',
+        message: 'Enter the full knowledge box API endpoint - it should look like ' +
+          'https://<region>.rag.progress.cloud/api/v1/kb/<box-id>.',
+      }, 400)
+    }
+    const candidate = { baseUrl: target.baseUrl, token: parsed.data.token, kbId: target.kbId }
+    const probe = new KbClient(candidate)
     let resourceCount = 0
     try {
-      const catalog = await probe.getJson<{ resources?: Record<string, unknown> }>(
-        '/catalog?page=0&size=100',
-      )
-      resourceCount = Object.keys(catalog.resources ?? {}).length
+      const counters = await probe.getJson<{ resources?: number }>('/counters')
+      resourceCount = counters.resources ?? 0
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'verification failed'
+      const status = err instanceof AragApiError ? err.status : 0
+      const text = err instanceof Error ? err.message : ''
+      const message = status === 401 || status === 403 ||
+          /jwt|decod|signature|unauthor|forbidden/i.test(text)
+        ? 'The API key was not accepted - check it is the full service-account key ' +
+          '(no Bearer prefix or quotes) and that it belongs to this box.'
+        : status === 404
+        ? 'The box was not found - check the URL ends with /api/v1/kb/<box-id> and the ' +
+          'region is right.'
+        : `Could not reach this knowledge box (${status || 'network error'}).`
       return c.json({ error: 'verification_failed', message }, 400)
     }
-    bindings.set(config.slug, parsed.data)
+    bindings.set(config.slug, candidate)
     opts.invalidate?.(config.slug)
     return c.json({ ok: true, status: bindings.status(config.slug), resourceCount })
   })

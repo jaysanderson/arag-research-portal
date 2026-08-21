@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import process from 'node:process'
 import type { KnowledgeBoxStatus } from '@research-portal/core'
-import { envBindings, type KbBinding } from '@research-portal/retrieval'
+import { envBindings, type KbBinding, regionalBase } from '@research-portal/retrieval'
 
 interface StoredBinding extends KbBinding {
   connectedAt: string
@@ -25,6 +25,14 @@ export class BindingStore {
     this.path = env.BINDINGS_PATH ?? './data/bindings.json'
     try {
       this.connected = JSON.parse(readFileSync(this.path, 'utf8'))
+      // Legacy entries stored a bare kbId before bindings became URL-based.
+      const zone = env.ARAG_ZONE
+      for (const entry of Object.values(this.connected)) {
+        const legacy = entry as StoredBinding & { baseUrl?: string }
+        if (!legacy.baseUrl && legacy.kbId && zone) {
+          legacy.baseUrl = `${regionalBase(zone)}/kb/${legacy.kbId}`
+        }
+      }
     } catch {
       this.connected = {}
     }
@@ -57,12 +65,15 @@ export class BindingStore {
   status(slug: string): KnowledgeBoxStatus {
     const connected = this.connected[slug]
     if (connected) {
-      return { slug, status: 'connected', kbId: truncate(connected.kbId) }
+      return { slug, status: 'connected', kbId: truncate(displayId(connected)) }
     }
     const demo = this.demo[slug]
-    if (demo) return { slug, status: 'demo', kbId: truncate(demo.kbId) }
+    if (demo) return { slug, status: 'demo', kbId: truncate(displayId(demo)) }
     return { slug, status: 'none' }
   }
 }
+
+const displayId = (binding: KbBinding) =>
+  binding.kbId ?? binding.baseUrl.split('/').pop() ?? binding.baseUrl
 
 const truncate = (id: string) => (id.length > 12 ? `${id.slice(0, 8)}…` : id)

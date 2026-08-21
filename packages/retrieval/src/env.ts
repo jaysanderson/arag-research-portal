@@ -1,4 +1,5 @@
 import { AragProvider } from './providers/arag/index.ts'
+import { regionalBase } from './providers/arag/client.ts'
 import process from 'node:process'
 import type { KbBinding } from './providers/arag/client.ts'
 
@@ -11,13 +12,17 @@ import type { KbBinding } from './providers/arag/client.ts'
 export function envBindings(
   env: Record<string, string | undefined> = process.env,
 ): Record<string, KbBinding> {
+  const zone = env.ARAG_ZONE
   const bindings: Record<string, KbBinding> = {}
+  if (!zone) return bindings
   for (const [key, value] of Object.entries(env)) {
     const match = key.match(/^ARAG_KB_([A-Z0-9]+)$/)
     if (!match?.[1] || !value) continue
     const slug = match[1].toLowerCase()
     const token = env[`ARAG_KB_${match[1]}_TOKEN`]
-    if (token) bindings[slug] = { kbId: value, token }
+    if (token) {
+      bindings[slug] = { baseUrl: `${regionalBase(zone)}/kb/${value}`, token, kbId: value }
+    }
   }
   return bindings
 }
@@ -38,5 +43,5 @@ export function createProviderFromEnv(env: Record<string, string | undefined> = 
       'No knowledge box bindings found (ARAG_KB_<SLUG> + ARAG_KB_<SLUG>_TOKEN) - run: deno task provision',
     )
   }
-  return new AragProvider({ zone, resolveBinding: (slug) => bindings[slug] })
+  return new AragProvider({ resolveBinding: (slug) => bindings[slug] })
 }

@@ -41,7 +41,7 @@ function StatusBadge({ status }: { status: AdminTenantOverview['knowledgeBox']['
 
 function TenantCard({ row, passcode }: { row: AdminTenantOverview; passcode: string }) {
   const queryClient = useQueryClient()
-  const [kbId, setKbId] = useState('')
+  const [url, setUrl] = useState('')
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
@@ -62,8 +62,8 @@ function TenantCard({ row, passcode }: { row: AdminTenantOverview; passcode: str
     setBusy(true)
     setMessage(null)
     try {
-      const outcome = await connectKnowledgeBox(row.tenant.slug, { kbId, token, passcode })
-      setKbId('')
+      const outcome = await connectKnowledgeBox(row.tenant.slug, { url, token, passcode })
+      setUrl('')
       setToken('')
       setMessage({
         tone: 'ok',
@@ -155,15 +155,15 @@ function TenantCard({ row, passcode }: { row: AdminTenantOverview; passcode: str
             className='mb-1.5 block text-sm font-medium text-neutral-900'
           >
             {row.knowledgeBox.status === 'connected'
-              ? 'Replace with knowledge box ID'
-              : 'Knowledge box ID'}
+              ? 'Replace with knowledge box endpoint'
+              : 'Knowledge box API endpoint'}
           </label>
           <input
             id={`kb-id-${row.tenant.slug}`}
             className={inputClass}
-            value={kbId}
-            onChange={(e) => setKbId(e.target.value)}
-            placeholder='Knowledge box ID'
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder='https://<region>.rag.progress.cloud/api/v1/kb/<box-id>'
             autoComplete='off'
             required
           />
@@ -173,7 +173,7 @@ function TenantCard({ row, passcode }: { row: AdminTenantOverview; passcode: str
             htmlFor={`kb-token-${row.tenant.slug}`}
             className='mb-1.5 block text-sm font-medium text-neutral-900'
           >
-            Service-account token
+            Service account API key
           </label>
           <input
             id={`kb-token-${row.tenant.slug}`}
@@ -181,7 +181,7 @@ function TenantCard({ row, passcode }: { row: AdminTenantOverview; passcode: str
             className={inputClass}
             value={token}
             onChange={(e) => setToken(e.target.value)}
-            placeholder='Paste the token'
+            placeholder='Paste the service account key'
             autoComplete='off'
             required
           />

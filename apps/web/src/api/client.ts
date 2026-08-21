@@ -122,7 +122,7 @@ export interface ConnectResult {
  */
 export function connectKnowledgeBox(
   slug: string,
-  input: { kbId: string; token: string; passcode: string },
+  input: { url: string; token: string; passcode: string },
 ): Promise<ConnectResult> {
   return adminRequest<ConnectResult>(
     `/api/admin/t/${encodeURIComponent(slug)}/knowledge-box`,
@@ -130,7 +130,7 @@ export function connectKnowledgeBox(
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ kbId: input.kbId, token: input.token }),
+      body: JSON.stringify({ url: input.url, token: input.token }),
     },
   )
 }

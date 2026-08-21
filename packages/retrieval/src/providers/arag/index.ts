@@ -52,7 +52,6 @@ export class KnowledgeBoxNotConnectedError extends Error {
 }
 
 export interface AragProviderOptions {
-  zone: string
   /** Resolve the current binding for a tenant slug - called per request so bindings can change at runtime. */
   resolveBinding: (slug: string) => KbBinding | undefined
   fetchImpl?: typeof fetch
@@ -75,12 +74,12 @@ export class AragProvider implements RetrievalProvider {
       this.invalidate(tenant.slug)
       throw new KnowledgeBoxNotConnectedError(tenant.slug)
     }
-    const key = `${tenant.slug}:${binding.kbId}`
+    const key = `${tenant.slug}:${binding.baseUrl}`
     const existing = this.clients.get(key)
     if (existing) return existing
     // A new binding for this slug invalidates anything cached for the old one.
     this.invalidate(tenant.slug)
-    const client = new KbClient(this.opts.zone, binding, this.opts.fetchImpl ?? fetch)
+    const client = new KbClient(binding, this.opts.fetchImpl ?? fetch)
     this.clients.set(key, client)
     return client
   }
