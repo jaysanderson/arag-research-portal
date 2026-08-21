@@ -73,6 +73,14 @@ export function TenantPicker() {
             ))
             : null}
         </div>
+        <div className='mt-10 text-center'>
+          <Link
+            to='/admin'
+            className='text-sm text-neutral-400 transition-colors duration-150 hover:text-neutral-700'
+          >
+            Administration
+          </Link>
+        </div>
       </div>
     </main>
   )

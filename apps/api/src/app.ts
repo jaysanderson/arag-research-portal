@@ -96,6 +96,36 @@ export function buildApp(opts: BuildAppOptions): Hono {
     await next()
   })
 
+  app.get('/api/admin/overview', async (c) => {
+    const rows = await Promise.all(
+      tenantSummaries().map(async (summary) => {
+        const config = tenant(summary.slug)
+        let resourceCount: number | null = null
+        if (config) {
+          try {
+            resourceCount = (await provider.listResources(config)).length
+          } catch {
+            resourceCount = null
+          }
+        }
+        return {
+          tenant: summary,
+          knowledgeBox: bindings.status(summary.slug),
+          resourceCount,
+        }
+      }),
+    )
+    return c.json(rows)
+  })
+
+  app.delete('/api/admin/t/:slug/knowledge-box', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    bindings.remove(config.slug)
+    opts.invalidate?.(config.slug)
+    return c.json({ ok: true, status: bindings.status(config.slug) })
+  })
+
   app.post('/api/admin/t/:slug/knowledge-box', async (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)

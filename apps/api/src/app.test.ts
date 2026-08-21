@@ -1,6 +1,7 @@
 import { describe, it } from '@std/testing/bdd'
 import { expect } from '@std/expect'
 import {
+  AdminTenantOverviewSchema,
   type AskEvent,
   AskEventSchema,
   type Question,
@@ -12,6 +13,7 @@ import {
 } from '@research-portal/core'
 import type { RetrievalProvider } from '@research-portal/retrieval'
 import { buildApp } from './app.ts'
+import { BindingStore } from './bindings.ts'
 
 // ---------------------------------------------------------------------------
 // StubProvider - a deterministic, in-memory RetrievalProvider double used only
@@ -157,5 +159,48 @@ describe('POST /api/t/:slug/ask', () => {
 
     const events = dataLines.map((line) => AskEventSchema.parse(JSON.parse(line)))
     expect(events.some((event) => event.type === 'done')).toBe(true)
+  })
+})
+
+describe('admin', () => {
+  const passcode = 'test-passcode'
+
+  it('rejects admin calls without the passcode', async () => {
+    const app = buildApp({ provider: new StubProvider(), adminPasscode: passcode })
+    const response = await app.request('/api/admin/overview')
+
+    expect(response.status).toBe(401)
+  })
+
+  it('returns a schema-valid overview with the passcode', async () => {
+    const app = buildApp({ provider: new StubProvider(), adminPasscode: passcode })
+    const response = await app.request('/api/admin/overview', {
+      headers: { 'x-admin-passcode': passcode },
+    })
+
+    expect(response.status).toBe(200)
+    const rows = (await response.json()) as unknown[]
+    expect(rows.length).toBe(2)
+    for (const row of rows) AdminTenantOverviewSchema.parse(row)
+  })
+
+  it('reverting a connected binding falls back to the demo box', async () => {
+    const dir = Deno.makeTempDirSync()
+    const bindings = new BindingStore({
+      BINDINGS_PATH: `${dir}/bindings.json`,
+      ARAG_KB_FRDC: 'demo-kb-id-000000',
+      ARAG_KB_FRDC_TOKEN: 'demo-token-00000000000000',
+    })
+    bindings.set('frdc', { kbId: 'connected-kb-111111', token: 'connected-token-1111111111' })
+    expect(bindings.status('frdc').status).toBe('connected')
+
+    const app = buildApp({ provider: new StubProvider(), bindings, adminPasscode: passcode })
+    const response = await app.request('/api/admin/t/frdc/knowledge-box', {
+      method: 'DELETE',
+      headers: { 'x-admin-passcode': passcode },
+    })
+
+    expect(response.status).toBe(200)
+    expect(bindings.status('frdc').status).toBe('demo')
   })
 })

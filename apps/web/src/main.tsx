@@ -6,7 +6,7 @@ import { TenantPicker } from './pages/TenantPicker.tsx'
 import { TenantLayout } from './pages/TenantLayout.tsx'
 import { ExplorePage } from './pages/ExplorePage.tsx'
 import { SearchPage } from './pages/SearchPage.tsx'
-import { ConnectPage } from './pages/ConnectPage.tsx'
+import { AdminPage } from './pages/AdminPage.tsx'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,10 +28,10 @@ createRoot(container).render(
       <BrowserRouter>
         <Routes>
           <Route path='/' element={<TenantPicker />} />
+          <Route path='/admin' element={<AdminPage />} />
           <Route path='/t/:slug' element={<TenantLayout />}>
             <Route index element={<ExplorePage />} />
             <Route path='search' element={<SearchPage />} />
-            <Route path='connect' element={<ConnectPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

@@ -1,8 +1,43 @@
-# Feature parity baseline - the demo that won the deal
+# Feature parity baselines
+
+Two reference apps set the floor. Every feature must exist in the portal (generalised to any
+tenant), executed to a higher standard.
+
+## Baseline B - the factory reference Research Portal (reviewed live 2026-08-21)
+
+Source: https://research-portal-arag.fly.dev - source code is LOCAL at
+`/Users/jsanders/Claude/arag-gtm/reference-repos/research-portal` (mine it for working ARAG
+call shapes; do not reinvent). What it does:
+
+1. **Dashboard** - live KB stats (resources, paragraphs, sentences, index MB), topic chips,
+   get-started cards.
+2. **Knowledge box switcher** - multiple KBs connected at once, switch active KB, "Add
+   Knowledge Box" in-app. (Ours maps this to tenants + the admin screen.)
+3. **Add content** - upload files (PDF/Word/PPT/text/images/audio/video), add links, paste
+   text, crawl a site; "Add a theme" seeds a topic by retrieving fresh resources; recent
+   additions list with per-item processing status ("Indexed").
+4. **Taxonomy** - label categories with per-label counts; add new categories in-app.
+5. **Search** - modes (Hybrid/Semantic/Keyword), content filters (Scanned OCR, Tables,
+   Transcripts), answer language picker, saved searches, image search, faceted filters with
+   counts (from taxonomy), cited AI answer alongside ranked results.
+6. **Library** - sort options, type filter, full faceted filtering, label-badged cards.
+7. **Assistant** - streaming chat, numbered inline citations mapped to a sources list, copy +
+   listen actions, multi-turn. (Live bug seen: 422 on multi-turn context author enum - ours
+   must handle context correctly.)
+8. **Agentic** - multi-step retrieval with visible pipeline/reasoning trace, live REMi
+   scoring, trace history (sources count, tokens, seconds).
+9. **Generate** - schema-enforced artifacts grounded in the KB: Comparison, Briefing,
+   Timeline, Pros & cons, FAQ, Assessment.
+10. **Knowledge graph** - entity/relation explorer: search a concept, neighbourhood view,
+    click-to-recentre.
+11. **⌘K** global search-or-ask.
+
+Ours adds on top: multi-tenant white-labelled portals from TenantConfig, own-system framing,
+demo-vs-connected binding model, passcode-gated admin screen, registry-free toolchain.
+
+## Baseline A - the demo that won the deal
 
 Source: https://frdc-6xdp.bolt.host/ ("FRDC Knowledge Hub"), reviewed in-browser 2026-08-21.
-This is the floor, not the ceiling: every feature here must exist in the portal (generalised to
-any tenant), and each should be executed to a higher standard.
 
 ## 1. Dashboard (home / explore)
 - Full-bleed hero: "What would you like to explore?" with a single large search box.

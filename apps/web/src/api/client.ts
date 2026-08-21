@@ -1,4 +1,5 @@
 import type {
+  AdminTenantOverview,
   KnowledgeBoxStatus,
   Question,
   ResourceSummary,
@@ -71,6 +72,40 @@ export function getKnowledgeBoxStatus(slug: string): Promise<KnowledgeBoxStatus>
   return request<KnowledgeBoxStatus>(`/api/t/${encodeURIComponent(slug)}/knowledge-box`)
 }
 
+async function adminRequest<T>(path: string, passcode: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      'x-admin-passcode': passcode,
+    },
+  })
+  const body: unknown = await res.json().catch(() => null)
+  if (!res.ok) {
+    const message = body && typeof body === 'object' && 'message' in body &&
+        typeof body.message === 'string'
+      ? body.message
+      : body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
+      ? body.error
+      : 'Request failed'
+    throw new ApiError(res.status, message)
+  }
+  return body as T
+}
+
+export function getAdminOverview(passcode: string): Promise<AdminTenantOverview[]> {
+  return adminRequest<AdminTenantOverview[]>('/api/admin/overview', passcode)
+}
+
+export function revertKnowledgeBox(
+  slug: string,
+  passcode: string,
+): Promise<{ ok: boolean; status: KnowledgeBoxStatus }> {
+  return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/knowledge-box`, passcode, {
+    method: 'DELETE',
+  })
+}
+
 export interface ConnectResult {
   ok: boolean
   status: KnowledgeBoxStatus
@@ -82,27 +117,17 @@ export interface ConnectResult {
  * service-account token and admin passcode into the form themselves; values
  * go straight to the server and are never stored client-side.
  */
-export async function connectKnowledgeBox(
+export function connectKnowledgeBox(
   slug: string,
   input: { kbId: string; token: string; passcode: string },
 ): Promise<ConnectResult> {
-  const res = await fetch(`/api/admin/t/${encodeURIComponent(slug)}/knowledge-box`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-admin-passcode': input.passcode,
+  return adminRequest<ConnectResult>(
+    `/api/admin/t/${encodeURIComponent(slug)}/knowledge-box`,
+    input.passcode,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ kbId: input.kbId, token: input.token }),
     },
-    body: JSON.stringify({ kbId: input.kbId, token: input.token }),
-  })
-  const body: unknown = await res.json().catch(() => null)
-  if (!res.ok) {
-    const message = body && typeof body === 'object' && 'message' in body &&
-        typeof body.message === 'string'
-      ? body.message
-      : body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
-      ? body.error
-      : 'Connection failed'
-    throw new ApiError(res.status, message)
-  }
-  return body as ConnectResult
+  )
 }

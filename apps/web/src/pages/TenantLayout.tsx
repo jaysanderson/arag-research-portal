@@ -109,7 +109,7 @@ export function TenantLayout() {
             </Link>
             {kbStatus?.status === 'demo' && (
               <Link
-                to={`/t/${config.slug}/connect`}
+                to='/admin'
                 className='inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800 transition-colors duration-150 hover:bg-amber-100'
                 title='This portal is running on the demo knowledge box - click to connect the real one'
               >
@@ -118,7 +118,7 @@ export function TenantLayout() {
             )}
             {kbStatus?.status === 'none' && (
               <Link
-                to={`/t/${config.slug}/connect`}
+                to='/admin'
                 className='inline-flex items-center rounded-full border border-neutral-300 bg-neutral-100 px-2.5 py-0.5 text-xs font-medium text-neutral-600 transition-colors duration-150 hover:bg-neutral-200'
               >
                 Not connected

@@ -74,3 +74,9 @@ in-app admin surface, not by hand.
   connects the two knowledge boxes** through the in-app admin "connect knowledge box" flow -
   bindings are not baked into the deploy. Local dev keeps `.env` bindings from the provision
   script.
+- **2026-08-21** - Scope direction (Jay): the bar is **every Progress Agentic RAG feature**,
+  with the factory reference app (`research-portal-arag.fly.dev`, source local in the GTM
+  factory's reference-repos) as merely the starting point. Near-term admin roadmap, in order:
+  (1) set up/create + connect knowledge boxes inside the app, (2) upload resources into a
+  knowledge box from inside the app, (3) **migrate resources from one knowledge box to
+  another** as an admin tool.

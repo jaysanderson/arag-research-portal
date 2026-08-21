@@ -40,6 +40,16 @@ export class BindingStore {
 
   set(slug: string, binding: KbBinding): void {
     this.connected[slug] = { ...binding, connectedAt: new Date().toISOString() }
+    this.persist()
+  }
+
+  /** Remove a connected binding; the tenant falls back to its demo box (if any). */
+  remove(slug: string): void {
+    delete this.connected[slug]
+    this.persist()
+  }
+
+  private persist(): void {
     mkdirSync(dirname(this.path), { recursive: true })
     writeFileSync(this.path, JSON.stringify(this.connected, null, 2))
   }

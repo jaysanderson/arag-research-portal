@@ -1,0 +1,326 @@
+import { type FormEvent, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
+import type { AdminTenantOverview } from '@research-portal/core'
+import {
+  ApiError,
+  connectKnowledgeBox,
+  getAdminOverview,
+  revertKnowledgeBox,
+} from '../api/client.ts'
+import { ErrorCard, Skeleton } from '../components/ui.tsx'
+
+const inputClass =
+  'w-full rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900'
+
+function StatusBadge({ status }: { status: AdminTenantOverview['knowledgeBox']['status'] }) {
+  if (status === 'connected') {
+    return (
+      <span className='inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800'>
+        Connected
+      </span>
+    )
+  }
+  if (status === 'demo') {
+    return (
+      <span className='inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800'>
+        Demo only
+      </span>
+    )
+  }
+  return (
+    <span className='inline-flex items-center rounded-full border border-neutral-300 bg-neutral-100 px-2.5 py-0.5 text-xs font-medium text-neutral-600'>
+      Not connected
+    </span>
+  )
+}
+
+function TenantCard({ row, passcode }: { row: AdminTenantOverview; passcode: string }) {
+  const queryClient = useQueryClient()
+  const [kbId, setKbId] = useState('')
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin-overview'] })
+
+  const onConnect = async (event: FormEvent) => {
+    event.preventDefault()
+    setBusy(true)
+    setMessage(null)
+    try {
+      const outcome = await connectKnowledgeBox(row.tenant.slug, { kbId, token, passcode })
+      setKbId('')
+      setToken('')
+      setMessage({
+        tone: 'ok',
+        text: `Connected - the knowledge box responded with ${outcome.resourceCount} ${
+          outcome.resourceCount === 1 ? 'resource' : 'resources'
+        }.`,
+      })
+      await refresh()
+    } catch (err) {
+      setMessage({
+        tone: 'error',
+        text: err instanceof Error ? err.message : 'Connection failed - please try again.',
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onRevert = async () => {
+    setBusy(true)
+    setMessage(null)
+    try {
+      await revertKnowledgeBox(row.tenant.slug, passcode)
+      setMessage({ tone: 'ok', text: 'Reverted to the demo knowledge box.' })
+      await refresh()
+    } catch (err) {
+      setMessage({
+        tone: 'error',
+        text: err instanceof Error ? err.message : 'Could not revert - please try again.',
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className='rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'>
+      <div className='flex flex-wrap items-center justify-between gap-3'>
+        <div>
+          <h2 className='text-lg font-semibold tracking-tight text-neutral-900'>
+            {row.tenant.productName}
+          </h2>
+          <p className='text-sm text-neutral-500'>{row.tenant.organisation}</p>
+        </div>
+        <div className='flex items-center gap-3'>
+          <StatusBadge status={row.knowledgeBox.status} />
+          <Link
+            to={`/t/${row.tenant.slug}`}
+            className='text-sm font-medium text-neutral-500 transition-colors duration-150 hover:text-neutral-900'
+          >
+            Open portal &rarr;
+          </Link>
+        </div>
+      </div>
+
+      <dl className='mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2'>
+        <div className='rounded-xl bg-neutral-50 px-4 py-3'>
+          <dt className='text-xs font-medium uppercase tracking-wide text-neutral-500'>
+            Knowledge box
+          </dt>
+          <dd className='mt-1 font-mono text-neutral-900'>
+            {row.knowledgeBox.kbId ?? 'none'}
+          </dd>
+        </div>
+        <div className='rounded-xl bg-neutral-50 px-4 py-3'>
+          <dt className='text-xs font-medium uppercase tracking-wide text-neutral-500'>
+            Documents
+          </dt>
+          <dd className='mt-1 text-neutral-900'>
+            {row.resourceCount === null ? 'unreachable' : row.resourceCount}
+          </dd>
+        </div>
+      </dl>
+
+      <form onSubmit={onConnect} className='mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2'>
+        <div>
+          <label
+            htmlFor={`kb-id-${row.tenant.slug}`}
+            className='mb-1.5 block text-sm font-medium text-neutral-900'
+          >
+            {row.knowledgeBox.status === 'connected'
+              ? 'Replace with knowledge box ID'
+              : 'Knowledge box ID'}
+          </label>
+          <input
+            id={`kb-id-${row.tenant.slug}`}
+            className={inputClass}
+            value={kbId}
+            onChange={(e) => setKbId(e.target.value)}
+            placeholder='Knowledge box ID'
+            autoComplete='off'
+            required
+          />
+        </div>
+        <div>
+          <label
+            htmlFor={`kb-token-${row.tenant.slug}`}
+            className='mb-1.5 block text-sm font-medium text-neutral-900'
+          >
+            Service-account token
+          </label>
+          <input
+            id={`kb-token-${row.tenant.slug}`}
+            type='password'
+            className={inputClass}
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder='Paste the token'
+            autoComplete='off'
+            required
+          />
+        </div>
+        <div className='flex items-center gap-3 sm:col-span-2'>
+          <button
+            type='submit'
+            disabled={busy}
+            className='inline-flex items-center rounded-full bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-neutral-800 disabled:opacity-60'
+          >
+            {busy ? 'Working…' : 'Verify and connect'}
+          </button>
+          {row.knowledgeBox.status === 'connected' && (
+            <button
+              type='button'
+              disabled={busy}
+              onClick={onRevert}
+              className='inline-flex items-center rounded-full border border-neutral-300 px-5 py-2.5 text-sm font-medium text-neutral-700 transition-colors duration-150 hover:bg-neutral-100 disabled:opacity-60'
+            >
+              Revert to demo box
+            </button>
+          )}
+        </div>
+      </form>
+      <p className='mt-2 text-xs text-neutral-500'>
+        The connection is verified against the live platform before it is saved. Tokens are stored
+        server-side only.
+      </p>
+
+      {message && (
+        <div
+          role={message.tone === 'error' ? 'alert' : 'status'}
+          className={`mt-4 rounded-xl border px-4 py-3 text-sm ${
+            message.tone === 'ok'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+              : 'border-rose-200 bg-rose-50 text-rose-800'
+          }`}
+        >
+          {message.text}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/**
+ * The management surface: passcode-gated overview of every portal, its
+ * knowledge box connection, and the controls to connect, replace or revert.
+ * The passcode lives in sessionStorage for the tab, never anywhere else.
+ */
+export function AdminPage() {
+  const [passcode, setPasscode] = useState(() => sessionStorage.getItem('rp-admin-passcode') ?? '')
+  const [draft, setDraft] = useState('')
+
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['admin-overview'],
+    queryFn: () => getAdminOverview(passcode),
+    enabled: passcode.length > 0,
+    retry: false,
+  })
+
+  const unauthorised = isError && error instanceof ApiError && error.status === 401
+
+  const submitPasscode = (event: FormEvent) => {
+    event.preventDefault()
+    sessionStorage.setItem('rp-admin-passcode', draft)
+    setPasscode(draft)
+  }
+
+  if (!passcode || unauthorised) {
+    return (
+      <main className='flex min-h-screen flex-col items-center justify-center bg-[#f7f7f5] px-6'>
+        <div className='w-full max-w-sm rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm'>
+          <p className='text-xs font-semibold uppercase tracking-[0.2em] text-neutral-400'>
+            Research portal
+          </p>
+          <h1 className='mt-1 text-xl font-semibold tracking-tight text-neutral-900'>
+            Administration
+          </h1>
+          <form onSubmit={submitPasscode} className='mt-5 space-y-4'>
+            <div>
+              <label
+                htmlFor='admin-passcode'
+                className='mb-1.5 block text-sm font-medium text-neutral-900'
+              >
+                Admin passcode
+              </label>
+              <input
+                id='admin-passcode'
+                type='password'
+                className={inputClass}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                autoComplete='off'
+                required
+              />
+            </div>
+            {unauthorised && (
+              <p role='alert' className='text-sm text-rose-700'>
+                That passcode was not accepted.
+              </p>
+            )}
+            <button
+              type='submit'
+              className='w-full rounded-full bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-neutral-800'
+            >
+              Enter
+            </button>
+          </form>
+          <Link
+            to='/'
+            className='mt-4 inline-block text-sm text-neutral-500 transition-colors duration-150 hover:text-neutral-900'
+          >
+            &larr; Back to portals
+          </Link>
+        </div>
+      </main>
+    )
+  }
+
+  return (
+    <main className='min-h-screen bg-[#f7f7f5]'>
+      <div className='mx-auto max-w-3xl px-6 py-12'>
+        <div className='flex items-center justify-between'>
+          <div>
+            <p className='text-xs font-semibold uppercase tracking-[0.2em] text-neutral-400'>
+              Research portal
+            </p>
+            <h1 className='mt-1 text-2xl font-semibold tracking-tight text-neutral-900'>
+              Administration
+            </h1>
+          </div>
+          <Link
+            to='/'
+            className='text-sm font-medium text-neutral-500 transition-colors duration-150 hover:text-neutral-900'
+          >
+            &larr; Back to portals
+          </Link>
+        </div>
+
+        {isLoading && (
+          <div className='mt-8 space-y-6'>
+            <Skeleton className='h-56 w-full' />
+            <Skeleton className='h-56 w-full' />
+          </div>
+        )}
+
+        {isError && !unauthorised && (
+          <div className='mt-8'>
+            <ErrorCard
+              message={error instanceof Error ? error.message : 'Could not load the overview.'}
+              onRetry={() => void refetch()}
+            />
+          </div>
+        )}
+
+        {data && (
+          <div className='mt-8 space-y-6'>
+            {data.map((row) => <TenantCard key={row.tenant.slug} row={row} passcode={passcode} />)}
+          </div>
+        )}
+      </div>
+    </main>
+  )
+}

@@ -65,6 +65,14 @@ export const KnowledgeBoxStatusSchema = z.object({
   kbId: z.string().optional(),
 })
 
+/** One row of the admin overview - everything the admin screen shows per tenant. */
+export const AdminTenantOverviewSchema = z.object({
+  tenant: TenantSummarySchema,
+  knowledgeBox: KnowledgeBoxStatusSchema,
+  /** Documents currently visible in the bound knowledge box; null when unreachable. */
+  resourceCount: z.number().int().nonnegative().nullable(),
+})
+
 // ---------------------------------------------------------------------------
 // Resources - documents, videos and web pages in the tenant's corpus.
 // ---------------------------------------------------------------------------
@@ -134,6 +142,7 @@ export type EntityType = z.infer<typeof EntityTypeSchema>
 export type TenantSummary = z.infer<typeof TenantSummarySchema>
 export type TenantConfig = z.infer<typeof TenantConfigSchema>
 export type KnowledgeBoxStatus = z.infer<typeof KnowledgeBoxStatusSchema>
+export type AdminTenantOverview = z.infer<typeof AdminTenantOverviewSchema>
 export type ResourceType = z.infer<typeof ResourceTypeSchema>
 export type ResourceSummary = z.infer<typeof ResourceSummarySchema>
 export type ScoredResource = z.infer<typeof ScoredResourceSchema>
