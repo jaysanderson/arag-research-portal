@@ -63,12 +63,44 @@ export class KbClient {
     return (await res.json()) as T
   }
 
-  /** POST returning the raw streaming response (NDJSON body). */
-  async postStream(path: string, body: unknown): Promise<Response> {
+  /** POST raw bytes (file upload). Filename rides base64-encoded in X-FILENAME. */
+  async postRaw(
+    path: string,
+    bytes: Uint8Array,
+    contentType: string,
+    filename: string,
+  ): Promise<unknown> {
     const url = this.url(path)
     const res = await this.fetchImpl(url, {
       method: 'POST',
+      headers: {
+        'content-type': contentType,
+        'x-filename': btoa(unescape(encodeURIComponent(filename))),
+        'x-nuclia-serviceaccount': `Bearer ${this.binding.token}`,
+      },
+      body: bytes as BodyInit,
+    })
+    if (!res.ok) throw new AragApiError(res.status, url, await res.text())
+    return await res.json().catch(() => ({}))
+  }
+
+  async patchJson<T = unknown>(path: string, body: unknown): Promise<T> {
+    const url = this.url(path)
+    const res = await this.fetchImpl(url, {
+      method: 'PATCH',
       headers: this.headers(),
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) throw new AragApiError(res.status, url, await res.text())
+    return (await res.json().catch(() => ({}))) as T
+  }
+
+  /** POST returning the raw streaming response (NDJSON body). */
+  async postStream(path: string, body: unknown, extra?: Record<string, string>): Promise<Response> {
+    const url = this.url(path)
+    const res = await this.fetchImpl(url, {
+      method: 'POST',
+      headers: this.headers({ accept: 'application/x-ndjson', ...extra }),
       body: JSON.stringify(body),
     })
     if (!res.ok) throw new AragApiError(res.status, url, await res.text())

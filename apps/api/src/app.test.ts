@@ -4,6 +4,9 @@ import {
   AdminTenantOverviewSchema,
   type AskEvent,
   AskEventSchema,
+  type CatalogPage,
+  type FacetCounts,
+  type Labelset,
   type Question,
   type ResourceSummary,
   type SearchResults,
@@ -61,6 +64,27 @@ class StubProvider implements RetrievalProvider {
       })),
       relatedQuestions: [{ id: 'rq-1', text: 'What else affects this species?' }],
     }
+  }
+
+  async catalog(_tenant: TenantConfig): Promise<CatalogPage> {
+    return {
+      items: this.resources.map((r) => ({
+        id: r.id,
+        title: r.title,
+        status: 'processed' as const,
+        topicIds: r.topicIds,
+      })),
+      total: this.resources.length,
+    }
+  }
+
+  async facets(_tenant: TenantConfig, labelsets: string[]): Promise<FacetCounts> {
+    const first = labelsets[0]
+    return first ? { [first]: { 'stock-assessment': 1 } } : {}
+  }
+
+  async labelsets(_tenant: TenantConfig): Promise<Labelset[]> {
+    return [{ id: 'topic', title: 'Topic', multiple: false, labels: ['stock-assessment'] }]
   }
 
   async suggest(_tenant: TenantConfig): Promise<Question[]> {

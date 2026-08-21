@@ -73,6 +73,41 @@ export const AdminTenantOverviewSchema = z.object({
   resourceCount: z.number().int().nonnegative().nullable(),
 })
 
+/** Live knowledge box counters, straight from the platform's /counters. */
+export const KbCountersSchema = z.object({
+  resources: z.number().int().nonnegative(),
+  paragraphs: z.number().int().nonnegative(),
+  sentences: z.number().int().nonnegative(),
+  indexMb: z.number().nonnegative(),
+})
+
+/** A recently added resource with its live processing state. */
+export const RecentResourceSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  status: z.enum(['pending', 'processed', 'error']),
+  created: z.string().optional(),
+})
+
+/** Progress events streamed by the knowledge-box migration tool. */
+export const MigrationEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('start'), total: z.number().int().nonnegative() }),
+  z.object({
+    type: z.literal('item'),
+    id: z.string(),
+    title: z.string(),
+    outcome: z.enum(['copied', 'skipped-exists', 'skipped-unsupported', 'error']),
+    detail: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('done'),
+    copied: z.number().int().nonnegative(),
+    skipped: z.number().int().nonnegative(),
+    errors: z.number().int().nonnegative(),
+  }),
+  z.object({ type: z.literal('error'), message: z.string() }),
+])
+
 // ---------------------------------------------------------------------------
 // Resources - documents, videos and web pages in the tenant's corpus.
 // ---------------------------------------------------------------------------
@@ -104,6 +139,33 @@ export const SearchResultsSchema = z.object({
   relatedQuestions: QuestionSchema.array(),
 })
 
+export const RetrievalModeSchema = z.enum(['hybrid', 'semantic', 'keyword'])
+
+/** One page of the tenant's catalogue (the Library view). */
+export const CatalogItemSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  status: z.enum(['pending', 'processed', 'error']),
+  created: z.string().optional(),
+  topicIds: z.string().array(),
+})
+
+export const CatalogPageSchema = z.object({
+  items: CatalogItemSchema.array(),
+  total: z.number().int().nonnegative(),
+})
+
+/** A taxonomy category (labelset) with its labels. */
+export const LabelsetSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  multiple: z.boolean(),
+  labels: z.string().array(),
+})
+
+/** Facet counts: labelset id -> label -> count of resources carrying it. */
+export const FacetCountsSchema = z.record(z.string(), z.record(z.string(), z.number()))
+
 // ---------------------------------------------------------------------------
 // Ask - the streamed, cited answer experience.
 // ---------------------------------------------------------------------------
@@ -127,6 +189,13 @@ export const AskEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('sources'), resources: ScoredResourceSchema.array() }),
   z.object({ type: z.literal('delta'), text: z.string() }),
   z.object({ type: z.literal('citation'), citation: CitationSchema }),
+  z.object({
+    type: z.literal('usage'),
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    firstChunkSec: z.number().nonnegative().optional(),
+    totalSec: z.number().nonnegative().optional(),
+  }),
   z.object({ type: z.literal('done') }),
   z.object({ type: z.literal('error'), message: z.string() }),
 ])
@@ -143,6 +212,14 @@ export type TenantSummary = z.infer<typeof TenantSummarySchema>
 export type TenantConfig = z.infer<typeof TenantConfigSchema>
 export type KnowledgeBoxStatus = z.infer<typeof KnowledgeBoxStatusSchema>
 export type AdminTenantOverview = z.infer<typeof AdminTenantOverviewSchema>
+export type KbCounters = z.infer<typeof KbCountersSchema>
+export type RecentResource = z.infer<typeof RecentResourceSchema>
+export type MigrationEvent = z.infer<typeof MigrationEventSchema>
+export type RetrievalMode = z.infer<typeof RetrievalModeSchema>
+export type CatalogItem = z.infer<typeof CatalogItemSchema>
+export type CatalogPage = z.infer<typeof CatalogPageSchema>
+export type Labelset = z.infer<typeof LabelsetSchema>
+export type FacetCounts = z.infer<typeof FacetCountsSchema>
 export type ResourceType = z.infer<typeof ResourceTypeSchema>
 export type ResourceSummary = z.infer<typeof ResourceSummarySchema>
 export type ScoredResource = z.infer<typeof ScoredResourceSchema>

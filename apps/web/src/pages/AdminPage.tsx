@@ -9,9 +9,13 @@ import {
   revertKnowledgeBox,
 } from '../api/client.ts'
 import { ErrorCard, Skeleton } from '../components/ui.tsx'
-
-const inputClass =
-  'w-full rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900'
+import { AddContent } from './admin/AddContent.tsx'
+import { CreateKbBox } from './admin/CreateKbBox.tsx'
+import { MessagePanel } from './admin/MessagePanel.tsx'
+import { MigratePanel } from './admin/MigratePanel.tsx'
+import { RecentList } from './admin/RecentList.tsx'
+import { inputClass } from './admin/shared.ts'
+import { StatTiles } from './admin/StatTiles.tsx'
 
 function StatusBadge({ status }: { status: AdminTenantOverview['knowledgeBox']['status'] }) {
   if (status === 'connected') {
@@ -42,7 +46,16 @@ function TenantCard({ row, passcode }: { row: AdminTenantOverview; passcode: str
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
 
+  const reachable = row.resourceCount !== null
+
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin-overview'] })
+
+  const onContentAdded = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['admin-recent', row.tenant.slug] }),
+      queryClient.invalidateQueries({ queryKey: ['admin-overview'] }),
+      queryClient.invalidateQueries({ queryKey: ['admin-counters', row.tenant.slug] }),
+    ])
 
   const onConnect = async (event: FormEvent) => {
     event.preventDefault()
@@ -125,6 +138,16 @@ function TenantCard({ row, passcode }: { row: AdminTenantOverview; passcode: str
         </div>
       </dl>
 
+      {reachable && (
+        <StatTiles
+          slug={row.tenant.slug}
+          passcode={passcode}
+          resourceCount={row.resourceCount ?? 0}
+        />
+      )}
+
+      <CreateKbBox row={row} passcode={passcode} onCreated={refresh} />
+
       <form onSubmit={onConnect} className='mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2'>
         <div>
           <label
@@ -188,17 +211,13 @@ function TenantCard({ row, passcode }: { row: AdminTenantOverview; passcode: str
         server-side only.
       </p>
 
-      {message && (
-        <div
-          role={message.tone === 'error' ? 'alert' : 'status'}
-          className={`mt-4 rounded-xl border px-4 py-3 text-sm ${
-            message.tone === 'ok'
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-              : 'border-rose-200 bg-rose-50 text-rose-800'
-          }`}
-        >
-          {message.text}
-        </div>
+      {message && <MessagePanel message={message} className='mt-4' />}
+
+      {reachable && (
+        <>
+          <AddContent slug={row.tenant.slug} passcode={passcode} onAdded={onContentAdded} />
+          <RecentList slug={row.tenant.slug} passcode={passcode} />
+        </>
       )}
     </section>
   )
@@ -318,6 +337,12 @@ export function AdminPage() {
         {data && (
           <div className='mt-8 space-y-6'>
             {data.map((row) => <TenantCard key={row.tenant.slug} row={row} passcode={passcode} />)}
+          </div>
+        )}
+
+        {data && (
+          <div className='mt-6'>
+            <MigratePanel rows={data} passcode={passcode} />
           </div>
         )}
       </div>

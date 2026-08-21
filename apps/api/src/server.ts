@@ -15,6 +15,7 @@ const provider = new AragProvider({ zone, resolveBinding: (slug) => bindings.get
 
 const app = buildApp({
   provider,
+  management: provider,
   bindings,
   zone,
   adminPasscode: process.env.ADMIN_PASSCODE,
