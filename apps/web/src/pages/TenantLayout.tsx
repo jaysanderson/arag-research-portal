@@ -1,4 +1,5 @@
 import { type CSSProperties, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Link, NavLink, Outlet, useParams } from 'react-router-dom'
 import type { TenantConfig } from '@research-portal/core'
@@ -22,6 +23,19 @@ function FullPageSpinner() {
 
 export function TenantLayout() {
   const { slug } = useParams<{ slug: string }>()
+  const navigate = useNavigate()
+
+  // Cmd/Ctrl+K jumps to search from anywhere in the portal.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        if (slug) navigate(`/t/${slug}/search`)
+      }
+    }
+    globalThis.addEventListener('keydown', onKey)
+    return () => globalThis.removeEventListener('keydown', onKey)
+  }, [slug, navigate])
   const {
     data: config,
     isLoading,
