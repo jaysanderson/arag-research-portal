@@ -1,0 +1,161 @@
+import { describe, it } from '@std/testing/bdd'
+import { expect } from '@std/expect'
+import {
+  type AskEvent,
+  AskEventSchema,
+  type Question,
+  type ResourceSummary,
+  type SearchResults,
+  SearchResultsSchema,
+  type TenantConfig,
+  TenantConfigSchema,
+} from '@research-portal/core'
+import type { RetrievalProvider } from '@research-portal/retrieval'
+import { buildApp } from './app.ts'
+
+// ---------------------------------------------------------------------------
+// StubProvider - a deterministic, in-memory RetrievalProvider double used only
+// in tests. It never ships in product code; the API server always gets a real
+// provider (currently `createProviderFromEnv`) injected via `buildApp`.
+// ---------------------------------------------------------------------------
+
+const resourceOne: ResourceSummary = {
+  id: 'res-1',
+  title: 'Abalone stock health in southern waters',
+  summary: 'An overview of abalone population trends and stressors.',
+  type: 'pdf',
+  topicIds: ['stock-assessment'],
+  keyFacts: ['Populations have declined 12% since 2019.'],
+  published: '2023-06-01',
+}
+
+const resourceTwo: ResourceSummary = {
+  id: 'res-2',
+  title: 'Marine heatwave impacts on rock lobster',
+  summary: 'Field study of thermal stress on rock lobster fisheries.',
+  type: 'web',
+  topicIds: ['marine-sustainability'],
+  keyFacts: ['Heatwave events correlate with reduced catch rates.'],
+}
+
+class StubProvider implements RetrievalProvider {
+  private resources: ResourceSummary[] = [resourceOne, resourceTwo]
+
+  async listResources(_tenant: TenantConfig): Promise<ResourceSummary[]> {
+    return this.resources
+  }
+
+  async resource(_tenant: TenantConfig, id: string): Promise<ResourceSummary | null> {
+    return this.resources.find((resource) => resource.id === id) ?? null
+  }
+
+  async search(_tenant: TenantConfig, query: string): Promise<SearchResults> {
+    return {
+      query,
+      resources: this.resources.map((resource, index) => ({
+        ...resource,
+        relevance: index === 0 ? 0.9 : 0.6,
+        citedCount: 0,
+      })),
+      relatedQuestions: [{ id: 'rq-1', text: 'What else affects this species?' }],
+    }
+  }
+
+  async suggest(_tenant: TenantConfig): Promise<Question[]> {
+    return [{ id: 'sq-1', text: 'What is known about abalone stock health?' }]
+  }
+
+  async *ask(_tenant: TenantConfig, query: string): AsyncIterable<AskEvent> {
+    yield { type: 'stage', stage: 'preprocessing', status: 'started' }
+    yield { type: 'stage', stage: 'preprocessing', status: 'completed' }
+    yield {
+      type: 'sources',
+      resources: [{ ...resourceOne, relevance: 0.9, citedCount: 1 }],
+    }
+    yield { type: 'delta', text: `Here is what we know about ${query}.` }
+    yield {
+      type: 'citation',
+      citation: { index: 1, resourceId: resourceOne.id, title: resourceOne.title },
+    }
+    yield { type: 'done' }
+  }
+}
+
+function makeApp() {
+  return buildApp({ provider: new StubProvider() })
+}
+
+describe('GET /api/tenants', () => {
+  it('returns both tenants with expected slugs', async () => {
+    const app = makeApp()
+    const response = await app.request('/api/tenants')
+
+    expect(response.status).toBe(200)
+    const body = await response.json() as Array<{ slug: string }>
+    const slugs = body.map((tenant) => tenant.slug)
+    expect(slugs).toContain('grdc')
+    expect(slugs).toContain('frdc')
+  })
+})
+
+describe('GET /api/t/:slug/config', () => {
+  it('parses with TenantConfigSchema for a known tenant', async () => {
+    const app = makeApp()
+    const response = await app.request('/api/t/grdc/config')
+
+    expect(response.status).toBe(200)
+    TenantConfigSchema.parse(await response.json())
+  })
+
+  it('returns 404 for an unknown tenant', async () => {
+    const app = makeApp()
+    const response = await app.request('/api/t/nope/config')
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ error: 'unknown_tenant' })
+  })
+})
+
+describe('GET /api/t/:slug/search', () => {
+  it('returns a SearchResultsSchema-valid payload', async () => {
+    const app = makeApp()
+    const response = await app.request('/api/t/frdc/search?q=abalone')
+
+    expect(response.status).toBe(200)
+    SearchResultsSchema.parse(await response.json())
+  })
+
+  it('returns 400 when q is missing', async () => {
+    const app = makeApp()
+    const response = await app.request('/api/t/frdc/search')
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'missing_query' })
+  })
+})
+
+describe('POST /api/t/:slug/ask', () => {
+  it('streams SSE data lines that parse with AskEventSchema, including a done event', async () => {
+    const app = makeApp()
+    const response = await app.request('/api/t/frdc/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'What is known about abalone stock health?' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('text/event-stream')
+
+    const payload = await response.text()
+    const dataLines = payload
+      .split('\n\n')
+      .map((chunk) => chunk.trim())
+      .filter((chunk) => chunk.startsWith('data: '))
+      .map((chunk) => chunk.slice('data: '.length))
+
+    expect(dataLines.length).toBeGreaterThan(0)
+
+    const events = dataLines.map((line) => AskEventSchema.parse(JSON.parse(line)))
+    expect(events.some((event) => event.type === 'done')).toBe(true)
+  })
+})

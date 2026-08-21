@@ -1,0 +1,75 @@
+{
+  "version": "5",
+  "specifiers": {
+    "jsr:@hono/hono@^4.6.0": "4.13.3",
+    "jsr:@std/assert@^1.0.19": "1.0.19",
+    "jsr:@std/expect@1": "1.0.20",
+    "jsr:@std/internal@^1.0.12": "1.0.14",
+    "jsr:@std/internal@^1.0.14": "1.0.14",
+    "jsr:@std/path@^1.1.6": "1.1.6",
+    "jsr:@std/testing@1": "1.0.20"
+  },
+  "jsr": {
+    "@hono/hono@4.13.3": {
+      "integrity": "2d277e78219ea145202359af5296cfa136eba5e75ffb08fda6fbd54d72032b4f"
+    },
+    "@std/assert@1.0.19": {
+      "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.12"
+      ]
+    },
+    "@std/expect@1.0.20": {
+      "integrity": "ffc4f3c33f732417e3e9acf3d995818c89984313c37d933b9ebbb4571d2887e9",
+      "dependencies": [
+        "jsr:@std/assert",
+        "jsr:@std/internal@^1.0.14",
+        "jsr:@std/path"
+      ]
+    },
+    "@std/internal@1.0.14": {
+      "integrity": "291516b3d4c35024d6ffbc0a9df5bf4c64116e05b50012cf846710152d2ffdf7"
+    },
+    "@std/path@1.1.6": {
+      "integrity": "c68485c2a4dfbb5ae3cc74fae4e8c4e5d874cf8a8ed12927917235c758b46cbe",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.14"
+      ]
+    },
+    "@std/testing@1.0.20": {
+      "integrity": "21380ed438672762e4ec549cbf4fe41c5b68f5598773a30b64abe7375513e721",
+      "dependencies": [
+        "jsr:@std/assert",
+        "jsr:@std/internal@^1.0.14"
+      ]
+    }
+  },
+  "redirects": {
+    "https://esm.sh/@types/react-dom@~18.3.7/client.d.ts": "https://esm.sh/@types/react-dom@18.3.7/client.d.ts",
+    "https://esm.sh/@types/react@~18.3.26/index.d.ts": "https://esm.sh/@types/react@18.3.31/index.d.ts",
+    "https://esm.sh/@types/react@~18.3.26/jsx-runtime.d.ts": "https://esm.sh/@types/react@18.3.31/jsx-runtime.d.ts",
+    "https://esm.sh/@types/react@~18.3.31/index.d.ts": "https://esm.sh/@types/react@18.3.31/index.d.ts",
+    "https://esm.sh/@types/react@~18.3.31/jsx-runtime.d.ts": "https://esm.sh/@types/react@18.3.31/jsx-runtime.d.ts"
+  },
+  "remote": {
+    "https://esm.sh/@tanstack/react-query@5.62.11?deps=react@18.3.1": "efef7d4c0279e8c61d9b2506bafa45206c3d2dedf4b9795dc41a8ca01fc296b1",
+    "https://esm.sh/react-dom@18.3.1/client": "21721a0da8572c9017131699230e73bd29b31cae9763948f5a7e3966315d07a2",
+    "https://esm.sh/react-router-dom@7.1.1?deps=react@18.3.1,react-dom@18.3.1": "9b027751a84b0084b987bffee543d4ee4dd9bc42586d5c72af033a4b9cd16d02",
+    "https://esm.sh/react@18.3.1": "336090fd1f03fdb9530dce4ac761717b5e1e1a630c775bac184ec4ee0809cf89",
+    "https://esm.sh/react@18.3.1/jsx-runtime": "fae022412d077731999a21e4ed1eac632822bab088f04c980b08750ba33ade9a",
+    "https://esm.sh/zod@3.25.76": "3fb2d6fc9ba6facc140a9875710339f90e89befb26fd9b39da83644d4dd6a701",
+    "https://esm.sh/zod@3.25.76/denonext/v3/ZodError.mjs": "7cb18052dad1b35a84cb7a3c1dc825e455f6c3fec0d89c4c4cc4059120042e30",
+    "https://esm.sh/zod@3.25.76/denonext/v3/errors.mjs": "9a89b379ac5877d8c0bf4d14d6535ec5e6ab3afb526922acdc61299bac97790c",
+    "https://esm.sh/zod@3.25.76/denonext/v3/external.mjs": "21935d798cd2c0c9709cabf9abfb0ed16b884a354beeaa214bfbe5f536267dcf",
+    "https://esm.sh/zod@3.25.76/denonext/v3/helpers/util.mjs": "06f7d99705d93b009c1929407b1636e9c78fa69069f89361ceb3998e3b78b053",
+    "https://esm.sh/zod@3.25.76/denonext/v3/locales/en.mjs": "6562956f1dd23d6a2d98b44b9e8116835a9fa6a7ec9cedd7f1d48d9e9dd1a7a0",
+    "https://esm.sh/zod@3.25.76/denonext/zod.mjs": "c5134912da19c386fa022c7c5be6a68ef4c8679e42f435324208ef6e76a64161"
+  },
+  "workspace": {
+    "dependencies": [
+      "jsr:@hono/hono@^4.6.0",
+      "jsr:@std/expect@1",
+      "jsr:@std/testing@1"
+    ]
+  }
+}

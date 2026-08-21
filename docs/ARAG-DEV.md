@@ -1,0 +1,105 @@
+# Developing on Progress Agentic RAG (ARAG / Nuclia) - hard-won reference
+
+This is the distilled, battle-tested knowledge for building against Progress Agentic RAG
+(the Nuclia-based platform). It exists so this session does NOT rediscover the platform's
+sharp edges the hard way. Read it before writing any retrieval/provisioning code. Source:
+the ARAG GTM factory's own field builds (Aug 2026).
+
+## Mental model
+ARAG = a managed RAG platform. Per **Knowledge Box (KB)** you: ingest content -> enrich it
+with **Data-Augmentation (DA) agents** (labeler, graph, synthetic-questions, ask/summarize) ->
+retrieve with grounded, **cited** answers (`/ask`) -> score answer quality with **REMi** ->
+optionally expose tools to an agent over **MCP**. Extraction, labels, a knowledge graph, and
+search configurations are all configurable objects ON the KB, viewable in the admin console.
+
+## Credentials (get this right first - most 403s are a wrong-token problem)
+- **Account:** all resources live under one account. Account id `86d1adc8-64ef-499b-86d6-72e9fd684ab0`
+  ("Progress | Jay Sanderson | R & D", dashboard slug `progress-jay-geo`). Never provision under
+  any other account.
+- **NUA key** = account-level ops only (create/list KBs). Put it in `.env` as `ARAG_NUA_KEY`
+  (never commit; Jay copies it from the factory `.env`). It **403s on KB-scoped writes** - do NOT
+  use it to write resources/tasks/configs on a KB.
+- **KB service-account token** (SOWNER) = KB-scoped reads AND writes (ingest, tasks, `/ask`, REMi).
+  Header: `X-NUCLIA-SERVICEACCOUNT: Bearer <token>`. Mint one per KB after creating it.
+- Verify a NUA key is scoped to the right account with `GET /api/v1/account/{ACCOUNT_ID}/kbs`
+  (200 + KB list = good; 403 = wrong account). Note `GET /api/v1/user` does NOT work for NUA keys
+  (always 403 "not valid in the global API") - a 403 there proves nothing.
+- Hosts: retrieval/`/ask` use the **rag-host** (`{region}.rag.progress.cloud`); DA tasks use the
+  **dp-host** (same, with `.rag.` swapped for `.dp.`). Only AU zone (`aws-ap-southeast-2-1`) is
+  provisionable with the current key.
+
+## Working call shapes (these are the ones that actually work)
+- **Ingest a file:** single-call `POST /kb/{id}/upload`, then PATCH metadata onto the created
+  resource. The two-step create-resource + PUT-file pattern **500s on PDFs** on this deployment.
+- **A resource's title is NOT searchable body text.** Any name that must ground an answer
+  (a person, a vehicle, a product) has to be written into the text field body too.
+- **Grounded answer:** `POST {rag-host}/api/v1/kb/{id}/ask` -> grounded, cited answer.
+- **Structured JSON answer (query-time):** `POST .../ask` with `answer_json_schema`
+  (OpenAI-function style: `name` + `parameters` as JSON Schema) -> schema-conformant `answer_json`
+  grounded in real content. **HARD CONSTRAINT: never send `citations:true` AND `answer_json_schema`
+  in the same `/ask` call - it crashes the backend (500/503).** For provenance in schema mode read
+  `retrieval_results.resources` (populated even with `citations:false`) or fire a second
+  citations-only `/ask`.
+- **REMi (answer-quality score):** `POST {kb}/predict/remi` with the **KB service-account token**
+  (NOT the NUA key). Score against the **FULL retrieved context** (all paragraphs `/ask` grounded
+  on), not just the citation excerpts - thin context makes groundedness swing wildly (0/5 then 5/5
+  on the same good answer). Full context -> stable 5/5.
+- **DA tasks:** `POST {dp-host}/api/v1/kb/{id}/task/start`, body `{name, parameters, apply, enabled}`.
+  `name` is the type enum: `labeler | llm-graph | synthetic-questions | ask | ...`. **Always pin
+  `parameters.llm.model`** to the KB's own model - unpinned tasks return 200 then fail silently
+  during execution. **DA output is stored under `da-<destination>-f-<fieldId>`**, not the plain
+  destination key - read the resource's real field list before reading it back. **Only ONE
+  `labeler`-type task can run at a time** (concurrent starts 422 and can leave a stale zombie
+  config; `DELETE /kb/{id}/task/{id}` clears it) - run labelers sequentially with polling.
+- **Extract strategies:** register the strategy, then apply it by uploading with an
+  `X-Extract-Strategy` header (e.g. table-aware for schedules, visual/OCR for scanned docs).
+- **Search configurations:** `GET/POST /kb/{id}/search_configurations` - named configs with a
+  baked-in `filter_expression`; wire each surface to its config rather than filtering ad hoc.
+- **Reading extracted text:** needs `show=extracted&extracted=text` TOGETHER (`show=values` alone
+  returns only the file pointer). The extracted text **flattens markdown line breaks into
+  whitespace runs** - normalize before rendering or raw `##`/`|` leaks on screen and position-based
+  citation highlighting breaks.
+
+## Known platform bugs - DO NOT burn cycles rediscovering these
+- **DA-Generator JSON output (`json:true` / `kv_schema_id`) is BROKEN** - 422s even on Progress's
+  own example, even schema-free. It is the ingest-time DA task path only. Workarounds: a plain-text
+  `ask` DA task that emits JSON-as-text parsed server-side, OR the query-time `/ask`
+  `answer_json_schema` path (which WORKS - see above). Disclose the gap; never fake it.
+- **RAO Retrieval-Agent live sessions (`/session/ephemeral`) are BROKEN** - fail with
+  `"unhandled errors in a TaskGroup"` even with zero tools. So "an ARAG agent orchestrating tool
+  calls over MCP" is not live today. If you need that pattern, app-orchestrate the same genuine
+  calls and disclose it, OR wait for the upstream fix.
+- **`/ask` honours `filter_expression` weakly vs `/find`** - filtered-out resources can still
+  ground an answer. Cross-check every citation server-side against the filter and withhold any
+  answer grounded only in excluded content.
+- **`filter_expression` is keyed differently per endpoint** - `{resource: ...}` on `/catalog` but
+  `{field: ...}` on `/find` and `/ask`, same concept.
+- **The legacy `filters` array silently returns ZERO for label paths** - use `filter_expression`.
+- **Pagination has THREE different shapes** - `/resources` keys on `pagination.last`; `/catalog`
+  on `fulltext.next_page`; there's no shared `pagination` object. A wrong key silently truncates to
+  the first 50. Never assume.
+- **Native faceted aggregation costs 40s+ per call** - unusable interactively; paginate-and-count.
+- **DA-generated fields can come back as citation hits** on later retrieval (e.g. a stored JSON
+  blob showing up as a "source"). Exclude any `da-`/`/t/da-` field id from citations.
+- **Task status reporting is unreliable** - a registered task can sit in `configs` and never show
+  in `/tasks` `done` even when its output is verifiably on every resource. Verify by fetching the
+  resource's fields, not just the status flag.
+
+## Clean architecture for THIS portal (so ARAG is swappable)
+- Put retrieval behind a **`RetrievalProvider` interface** on the server (methods like
+  `ask()`, `search()`, `graph()`, `provisionTenant()`). ARAG is one implementation; a stub/mock is
+  another for local dev without the platform. No ARAG/Nuclia types leak into the UI or components.
+- **Server-side only.** The KB service-account token NEVER reaches the browser - every ARAG call is
+  proxied through the server. No key in client code, ever.
+- **Provisioning engine (this portal's differentiator):** "point at a blank KB + a domain brief ->
+  configure everything" maps directly onto the calls above: create KB (NUA key) -> mint SA token ->
+  ingest the starter corpus (`/upload`) -> register DA tasks (labeler for the domain taxonomy,
+  llm-graph for the entity/relation types, synthetic-questions for suggested questions, ask for
+  summaries) -> register extract strategies + search configs -> done. Build it as an idempotent,
+  resumable pipeline (tasks are async; poll to completion; labelers strictly sequential).
+
+## When you hit something not covered here
+The ARAG factory (`/Users/jsanders/Claude/ARAG-PMK-1`) has deeper skills (`arag-kb`,
+`rao-workflow`, `arag-demo-app`) and a live memory of every gotcha. Ask Jay to relay a specific
+question to the factory session rather than probing the live platform blindly - the factory has
+almost certainly already paid for that lesson.
