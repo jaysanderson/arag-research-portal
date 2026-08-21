@@ -1,8 +1,8 @@
 import { type FormEvent, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useOutletContext } from 'react-router-dom'
-import type { ResourceSummary } from '@research-portal/core'
-import { getResources } from '../api/client.ts'
+import type { KbCounters, ResourceSummary } from '@research-portal/core'
+import { getCounters, getResources } from '../api/client.ts'
 import { ErrorCard, hueFromId, Skeleton, TypeBadge } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
@@ -34,6 +34,46 @@ function HeroSkeleton() {
       <Skeleton className='h-8 w-48 rounded-full' />
       <Skeleton className='h-8 w-36 rounded-full' />
       <Skeleton className='h-8 w-44 rounded-full' />
+    </div>
+  )
+}
+
+function StatsStripSkeleton() {
+  return (
+    <div className='mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-10 gap-y-3 px-6 py-6'>
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div key={index} className='flex flex-col items-center gap-1.5'>
+          <Skeleton className='h-6 w-14' />
+          <Skeleton className='h-3 w-20' />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function StatsStrip({ counters }: { counters: KbCounters }) {
+  const stats = [
+    { label: 'Resources', value: counters.resources.toLocaleString() },
+    { label: 'Paragraphs', value: counters.paragraphs.toLocaleString() },
+    { label: 'Sentences', value: counters.sentences.toLocaleString() },
+    {
+      label: 'Index MB',
+      value: counters.indexMb.toLocaleString(undefined, { maximumFractionDigits: 1 }),
+    },
+  ]
+
+  return (
+    <div className='mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-10 gap-y-3 px-6 py-6 text-center'>
+      {stats.map((stat) => (
+        <div key={stat.label} className='flex flex-col items-center'>
+          <span className='text-xl font-semibold tracking-tight text-neutral-900'>
+            {stat.value}
+          </span>
+          <span className='text-xs font-medium uppercase tracking-wide text-neutral-500'>
+            {stat.label}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -80,6 +120,15 @@ export function ExplorePage() {
   }, [resources, config.topics])
 
   const suggested = config.suggestedQuestions.slice(0, 4)
+
+  const {
+    data: counters,
+    isLoading: isCountersLoading,
+    isError: isCountersError,
+  } = useQuery({
+    queryKey: ['counters', config.slug],
+    queryFn: () => getCounters(config.slug),
+  })
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -148,6 +197,11 @@ export function ExplorePage() {
             : null}
         </div>
       </section>
+
+      {isCountersLoading ? <StatsStripSkeleton /> : null}
+      {!isCountersLoading && !isCountersError && counters
+        ? <StatsStrip counters={counters} />
+        : null}
 
       <section className='mx-auto max-w-6xl space-y-10 px-6 py-12'>
         {isError

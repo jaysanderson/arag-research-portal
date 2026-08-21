@@ -1,11 +1,19 @@
 import type {
   AdminTenantOverview,
+  AskEvent,
+  CatalogPage,
+  FacetCounts,
+  GenerateKind,
+  GenerateResult,
+  GraphData,
   KbCounters,
   KnowledgeBoxStatus,
+  Labelset,
   MigrationEvent,
   Question,
   RecentResource,
   ResourceSummary,
+  RetrievalMode,
   SearchResults,
   TenantConfig,
   TenantSummary,
@@ -73,6 +81,131 @@ export function getResource(slug: string, id: string): Promise<ResourceSummary> 
 
 export function getKnowledgeBoxStatus(slug: string): Promise<KnowledgeBoxStatus> {
   return request<KnowledgeBoxStatus>(`/api/t/${encodeURIComponent(slug)}/knowledge-box`)
+}
+
+export function searchTenantFull(
+  slug: string,
+  query: string,
+  opts: { mode?: RetrievalMode; topicIds?: string[] } = {},
+): Promise<SearchResults> {
+  const params = new URLSearchParams({ q: query })
+  if (opts.mode) params.set('mode', opts.mode)
+  if (opts.topicIds && opts.topicIds.length > 0) params.set('topics', opts.topicIds.join(','))
+  return request<SearchResults>(`/api/t/${encodeURIComponent(slug)}/search?${params.toString()}`)
+}
+
+export function getCatalog(
+  slug: string,
+  opts: {
+    page?: number
+    pageSize?: number
+    query?: string
+    topicIds?: string[]
+    sort?: 'created' | 'modified' | 'title'
+    order?: 'asc' | 'desc'
+  } = {},
+): Promise<CatalogPage> {
+  const params = new URLSearchParams()
+  if (opts.page) params.set('page', String(opts.page))
+  if (opts.pageSize) params.set('pageSize', String(opts.pageSize))
+  if (opts.query) params.set('q', opts.query)
+  if (opts.topicIds && opts.topicIds.length > 0) params.set('topics', opts.topicIds.join(','))
+  if (opts.sort) params.set('sort', opts.sort)
+  if (opts.order) params.set('order', opts.order)
+  return request<CatalogPage>(`/api/t/${encodeURIComponent(slug)}/catalog?${params.toString()}`)
+}
+
+export function getFacets(slug: string, labelsets: string[] = ['topic']): Promise<FacetCounts> {
+  return request<FacetCounts>(
+    `/api/t/${encodeURIComponent(slug)}/facets?ls=${labelsets.join(',')}`,
+  )
+}
+
+export function getLabelsets(slug: string): Promise<Labelset[]> {
+  return request<Labelset[]>(`/api/t/${encodeURIComponent(slug)}/labelsets`)
+}
+
+export function getCounters(slug: string): Promise<KbCounters> {
+  return request<KbCounters>(`/api/t/${encodeURIComponent(slug)}/counters`)
+}
+
+export function getGraph(
+  slug: string,
+  primary = 'topic',
+  secondary = 'kind',
+): Promise<GraphData> {
+  return request<GraphData>(
+    `/api/t/${encodeURIComponent(slug)}/graph?primary=${primary}&secondary=${secondary}`,
+  )
+}
+
+export function generateArtifact(
+  slug: string,
+  kind: GenerateKind,
+  query: string,
+): Promise<GenerateResult> {
+  return fetch(`/api/t/${encodeURIComponent(slug)}/generate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ kind, query }),
+  }).then(async (res) => {
+    if (!res.ok) {
+      const body: unknown = await res.json().catch(() => null)
+      const message = body && typeof body === 'object' && 'message' in body &&
+          typeof body.message === 'string'
+        ? body.message
+        : 'Generation failed - try a narrower request.'
+      throw new ApiError(res.status, message)
+    }
+    return (await res.json()) as GenerateResult
+  })
+}
+
+export interface AskRequest {
+  query: string
+  context?: { author: 'USER' | 'AGENT'; text: string }[]
+  resourceId?: string
+  topicIds?: string[]
+}
+
+/**
+ * Stream a grounded answer. Events arrive in order: stage events, a sources
+ * event, delta text chunks, citation events, optionally usage, then done (or
+ * error). Returns when the stream closes; abort via the signal.
+ */
+export async function streamAsk(
+  slug: string,
+  body: AskRequest,
+  onEvent: (event: AskEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(`/api/t/${encodeURIComponent(slug)}/ask`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!res.ok || !res.body) {
+    throw new ApiError(res.status, res.statusText || 'The answer service is unavailable')
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const emit = (frame: string) => {
+    const line = frame.trim()
+    if (!line) return
+    const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
+    onEvent(JSON.parse(data) as AskEvent)
+  }
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) emit(frame)
+  }
+  emit(buffer)
 }
 
 async function adminRequest<T>(path: string, passcode: string, init?: RequestInit): Promise<T> {
@@ -264,4 +397,29 @@ export async function migrateKb(
     for (const frame of frames) emit(frame)
   }
   emit(buffer)
+}
+
+export function discoverCrawl(
+  slug: string,
+  passcode: string,
+  url: string,
+  limit = 50,
+): Promise<{ source: string; count: number; links: string[] }> {
+  const params = new URLSearchParams({ url, limit: String(limit) })
+  return adminRequest(
+    `/api/admin/t/${encodeURIComponent(slug)}/crawl?${params.toString()}`,
+    passcode,
+  )
+}
+
+export function createAdminLabelset(
+  slug: string,
+  passcode: string,
+  input: { title: string; multiple: boolean; labels: string[] },
+): Promise<{ ok: boolean }> {
+  return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/labelsets`, passcode, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
 }

@@ -45,6 +45,7 @@
     }
   },
   "redirects": {
+    "https://esm.sh/@types/d3-force@~3.0.10/index.d.ts": "https://esm.sh/@types/d3-force@3.0.10/index.d.ts",
     "https://esm.sh/@types/react-dom@~18.3.7/client.d.ts": "https://esm.sh/@types/react-dom@18.3.7/client.d.ts",
     "https://esm.sh/@types/react@~18.3.26/index.d.ts": "https://esm.sh/@types/react@18.3.31/index.d.ts",
     "https://esm.sh/@types/react@~18.3.26/jsx-runtime.d.ts": "https://esm.sh/@types/react@18.3.31/jsx-runtime.d.ts",
@@ -53,6 +54,7 @@
   },
   "remote": {
     "https://esm.sh/@tanstack/react-query@5.62.11?deps=react@18.3.1": "efef7d4c0279e8c61d9b2506bafa45206c3d2dedf4b9795dc41a8ca01fc296b1",
+    "https://esm.sh/d3-force@3.0.0": "1a35f3dd1ff127dc27f2b009574d90304693b0a516eac9583df8d0333d61fd8e",
     "https://esm.sh/react-dom@18.3.1/client": "21721a0da8572c9017131699230e73bd29b31cae9763948f5a7e3966315d07a2",
     "https://esm.sh/react-router-dom@7.1.1?deps=react@18.3.1,react-dom@18.3.1": "9b027751a84b0084b987bffee543d4ee4dd9bc42586d5c72af033a4b9cd16d02",
     "https://esm.sh/react@18.3.1": "336090fd1f03fdb9530dce4ac761717b5e1e1a630c775bac184ec4ee0809cf89",

@@ -4,6 +4,7 @@ import type {
   CatalogPage,
   Citation,
   FacetCounts,
+  GraphData,
   KbCounters,
   Labelset,
   Question,
@@ -413,10 +414,15 @@ export class AragProvider implements RetrievalProvider {
     return { items, total: raw.fulltext?.total ?? raw.total ?? items.length }
   }
 
-  async facets(tenant: TenantConfig, labelsets: string[]): Promise<FacetCounts> {
+  async facets(
+    tenant: TenantConfig,
+    labelsets: string[],
+    filters?: string[],
+  ): Promise<FacetCounts> {
     if (labelsets.length === 0) return {}
     const params = new URLSearchParams({ page_size: '0' })
     for (const id of labelsets) params.append('faceted', `/classification.labels/${id}`)
+    for (const f of filters ?? []) params.append('filters', f)
     const raw = await this.client(tenant).getJson<{
       fulltext?: { facets?: Record<string, Record<string, number>> }
       facets?: Record<string, Record<string, number>>
@@ -447,6 +453,86 @@ export class AragProvider implements RetrievalProvider {
       multiple: ls.multiple ?? true,
       labels: (ls.labels ?? []).map((l) => l.title ?? '').filter(Boolean),
     }))
+  }
+
+  /**
+   * Label co-occurrence graph, the reference portal's model: primary labels
+   * become weighted nodes; for each, the secondary facet counts WITHIN that
+   * primary filter become edges. N+1 catalog calls, so primaries are capped.
+   */
+  async graphData(tenant: TenantConfig, primary: string, secondary: string): Promise<GraphData> {
+    const primaryCounts = (await this.facets(tenant, [primary]))[primary] ?? {}
+    const primaries = Object.entries(primaryCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 14)
+    const nodes: GraphData['nodes'] = primaries.map(([label, weight]) => ({
+      id: `${primary}:${label}`,
+      label,
+      group: 'primary',
+      weight,
+    }))
+    const edges: GraphData['edges'] = []
+    const secondaryTotals = new Map<string, number>()
+    for (const [label] of primaries) {
+      const within = await this.facets(
+        tenant,
+        [secondary],
+        [`/classification.labels/${primary}/${label}`],
+      )
+      for (const [secLabel, count] of Object.entries(within[secondary] ?? {})) {
+        if (count <= 0) continue
+        edges.push({
+          source: `${primary}:${label}`,
+          target: `${secondary}:${secLabel}`,
+          weight: count,
+        })
+        secondaryTotals.set(secLabel, (secondaryTotals.get(secLabel) ?? 0) + count)
+      }
+    }
+    for (const [label, weight] of secondaryTotals) {
+      nodes.push({ id: `${secondary}:${label}`, label, group: 'secondary', weight })
+    }
+    return { primary, secondary, nodes, edges }
+  }
+
+  /** Query-time structured generation. Citations must stay OFF here - the
+   * platform 500s when citations and answer_json_schema are combined; sources
+   * come from the retrieval event instead. */
+  async askStructured(
+    tenant: TenantConfig,
+    schema: { name: string; description: string; parameters: unknown },
+    query: string,
+  ): Promise<{ object: unknown; sources: ResourceSummary[] }> {
+    const client = this.client(tenant)
+    const catalogue = await this.listResources(tenant).catch(() => [] as ResourceSummary[])
+    const byId = new Map(catalogue.map((r) => [r.id, r]))
+    const res = await client.postStream('/ask', {
+      query,
+      features: ['keyword', 'semantic'],
+      answer_json_schema: schema,
+      show: ['basic', 'origin'],
+      // The default cap triggers 412 "Error generating json: max_tokens" on
+      // large payloads like comparison matrices.
+      max_tokens: 4096,
+    })
+    let object: unknown = null
+    let sources: ResourceSummary[] = []
+    for await (const line of ndjson(res)) {
+      const item = (line as { item?: { type?: string } & Record<string, unknown> }).item
+      if (!item?.type) continue
+      if (item.type === 'retrieval') {
+        const results = item.results as { resources?: Record<string, RawResource> } | undefined
+        sources = Object.entries(results?.resources ?? {})
+          .map(([id, raw]) => byId.get(id) ?? this.toSummary(id, raw))
+          .slice(0, 12)
+      } else if (item.type === 'answer_json' && item.object !== undefined) {
+        object = item.object
+      }
+    }
+    if (object === null) {
+      throw new Error('The platform returned no structured answer - try a narrower request')
+    }
+    return { object, sources }
   }
 
   async createLabelset(

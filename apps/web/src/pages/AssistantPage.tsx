@@ -1,0 +1,666 @@
+import {
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
+import { useOutletContext } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import type { AskEvent, Citation } from '@research-portal/core'
+import { getSuggestedQuestions, streamAsk } from '../api/client.ts'
+import type { TenantOutletContext } from './TenantLayout.tsx'
+
+// ---------------------------------------------------------------------------
+// Local types + localStorage persistence
+// ---------------------------------------------------------------------------
+
+type ChatMessage = {
+  id: string
+  author: 'USER' | 'AGENT'
+  text: string
+  citations: Citation[]
+  usage?: {
+    inputTokens: number
+    outputTokens: number
+    firstChunkSec?: number
+    totalSec?: number
+  }
+  error?: string
+  pending?: boolean
+}
+
+type ChatSession = {
+  id: string
+  createdAt: number
+  updatedAt: number
+  messages: ChatMessage[]
+}
+
+const SESSION_CAP = 20
+
+function storageKey(slug: string): string {
+  return `rp-chat-${slug}`
+}
+
+function loadSessions(slug: string): ChatSession[] {
+  try {
+    const raw = localStorage.getItem(storageKey(slug))
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed as ChatSession[]
+  } catch {
+    return []
+  }
+}
+
+function saveSessions(slug: string, sessions: ChatSession[]) {
+  try {
+    localStorage.setItem(storageKey(slug), JSON.stringify(sessions.slice(0, SESSION_CAP)))
+  } catch {
+    // localStorage unavailable or full - sessions simply won't persist this run.
+  }
+}
+
+function makeId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function relativeAge(timestamp: number): string {
+  const diffMs = Date.now() - timestamp
+  const minutes = Math.round(diffMs / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.round(hours / 24)
+  return `${days}d ago`
+}
+
+function sessionTitle(session: ChatSession): string {
+  const first = session.messages.find((message) => message.author === 'USER')
+  if (!first || first.text.trim().length === 0) return 'New conversation'
+  return first.text.length > 60 ? `${first.text.slice(0, 60)}…` : first.text
+}
+
+// ---------------------------------------------------------------------------
+// Minimal markdown-ish renderer - no libraries. Supports paragraphs split on
+// blank lines, "### " headings, "- " bullet lists and **bold** spans.
+// ---------------------------------------------------------------------------
+
+function renderInline(text: string): ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g)
+  return parts.map((part, index) =>
+    part.startsWith('**') && part.endsWith('**')
+      ? <strong key={index}>{part.slice(2, -2)}</strong>
+      : <span key={index}>{part}</span>
+  )
+}
+
+function renderMarkdown(text: string): ReactNode {
+  const blocks = text.split(/\n{2,}/).filter((block) => block.trim().length > 0)
+  return (
+    <div className='space-y-3'>
+      {blocks.map((block, index) => {
+        const trimmed = block.trim()
+        if (trimmed.startsWith('### ')) {
+          return (
+            <h3 key={index} className='text-sm font-semibold text-neutral-900'>
+              {renderInline(trimmed.slice(4))}
+            </h3>
+          )
+        }
+        const lines = trimmed.split('\n').map((line) => line.trim())
+        const isList = lines.length > 0 && lines.every((line) => line.startsWith('- '))
+        if (isList) {
+          return (
+            <ul key={index} className='list-disc space-y-1 pl-5'>
+              {lines.map((line, lineIndex) => (
+                <li key={lineIndex} className='text-sm leading-relaxed text-neutral-700'>
+                  {renderInline(line.slice(2))}
+                </li>
+              ))}
+            </ul>
+          )
+        }
+        return (
+          <p key={index} className='text-sm leading-relaxed text-neutral-700'>
+            {renderInline(trimmed)}
+          </p>
+        )
+      })}
+    </div>
+  )
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  preprocessing: 'Preparing your question…',
+  retrieval: 'Retrieving sources…',
+  generating: 'Generating…',
+  validating: 'Checking the answer…',
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar
+// ---------------------------------------------------------------------------
+
+function SessionList({
+  sessions,
+  activeSessionId,
+  onSelect,
+  onNew,
+}: {
+  sessions: ChatSession[]
+  activeSessionId: string | null
+  onSelect: (id: string) => void
+  onNew: () => void
+}) {
+  return (
+    <div className='flex h-full flex-col'>
+      <button
+        type='button'
+        onClick={onNew}
+        className='inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold text-white transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
+        style={{ backgroundColor: 'var(--rp-primary)', outlineColor: 'var(--rp-accent)' }}
+      >
+        + New session
+      </button>
+
+      <nav aria-label='Chat sessions' className='mt-4 flex-1 space-y-1.5 overflow-y-auto'>
+        {sessions.length === 0
+          ? <p className='px-1 py-2 text-xs text-neutral-500'>No sessions yet.</p>
+          : sessions.map((session) => {
+            const isActive = session.id === activeSessionId
+            return (
+              <button
+                key={session.id}
+                type='button'
+                onClick={() => onSelect(session.id)}
+                aria-current={isActive ? 'true' : undefined}
+                className={`w-full rounded-xl px-3 py-2.5 text-left transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                  isActive ? 'bg-white shadow-sm' : 'hover:bg-white/60'
+                }`}
+                style={{ outlineColor: 'var(--rp-accent)' }}
+              >
+                <p className='rp-clamp-2 text-sm font-medium text-neutral-900'>
+                  {sessionTitle(session)}
+                </p>
+                <p className='mt-0.5 text-xs text-neutral-500'>
+                  {session.messages.length} {session.messages.length === 1 ? 'message' : 'messages'}
+                  {' · '}
+                  {relativeAge(session.updatedAt)}
+                </p>
+              </button>
+            )
+          })}
+      </nav>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Message bubbles
+// ---------------------------------------------------------------------------
+
+function UserBubble({ message }: { message: ChatMessage }) {
+  return (
+    <div className='flex justify-end'>
+      <div
+        className='max-w-[85%] rounded-2xl rounded-tr-sm px-4 py-3 text-sm leading-relaxed text-neutral-900 sm:max-w-[70%]'
+        style={{ backgroundColor: 'color-mix(in srgb, var(--rp-accent) 14%, white)' }}
+      >
+        {message.text}
+      </div>
+    </div>
+  )
+}
+
+function AssistantCard({
+  message,
+  activeStage,
+  onRetry,
+}: {
+  message: ChatMessage
+  activeStage: string | null
+  onRetry: () => void
+}) {
+  if (message.error) {
+    return (
+      <div className='rounded-2xl border border-rose-200 bg-rose-50 p-5'>
+        <p className='text-sm font-medium text-rose-800'>Something went wrong</p>
+        <p className='mt-1 text-sm text-rose-700'>{message.error}</p>
+        <button
+          type='button'
+          onClick={onRetry}
+          className='mt-3 inline-flex items-center rounded-full bg-rose-700 px-4 py-1.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-rose-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-700'
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className='rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm'>
+      {message.pending && activeStage
+        ? (
+          <p className='mb-2 flex items-center gap-2 text-xs font-medium text-neutral-500'>
+            <span
+              className='h-1.5 w-1.5 animate-pulse rounded-full'
+              style={{ backgroundColor: 'var(--rp-accent)' }}
+              aria-hidden='true'
+            />
+            {activeStage}
+          </p>
+        )
+        : null}
+
+      {message.text.length > 0
+        ? renderMarkdown(message.text)
+        : message.pending
+        ? <p className='text-sm text-neutral-400'>Thinking…</p>
+        : null}
+
+      {message.pending && message.text.length > 0
+        ? (
+          <span
+            className='ml-0.5 inline-block h-4 w-1.5 animate-pulse align-text-bottom'
+            style={{ backgroundColor: 'var(--rp-accent)' }}
+            aria-hidden='true'
+          />
+        )
+        : null}
+
+      {message.citations.length > 0
+        ? (
+          <div className='mt-4 border-t border-neutral-100 pt-3'>
+            <p className='text-xs font-medium text-neutral-500'>
+              Sources: {message.citations.length}
+            </p>
+            <div className='mt-2 flex flex-wrap gap-1.5'>
+              {message.citations.map((citation) => (
+                <span
+                  key={citation.index}
+                  title={citation.title}
+                  className='inline-flex items-center gap-1 rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-xs font-medium text-neutral-600'
+                >
+                  <span
+                    className='inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold text-white'
+                    style={{ backgroundColor: 'var(--rp-accent)' }}
+                  >
+                    {citation.index}
+                  </span>
+                  <span className='rp-clamp-2 max-w-[10rem]'>{citation.title}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )
+        : null}
+
+      {message.usage
+        ? (
+          <p className='mt-3 text-xs text-neutral-400'>
+            {message.usage.inputTokens} in / {message.usage.outputTokens} out tokens
+          </p>
+        )
+        : null}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+export function AssistantPage() {
+  const { config } = useOutletContext<TenantOutletContext>()
+
+  const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions(config.slug))
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [draft, setDraft] = useState('')
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [activeStageLabel, setActiveStageLabel] = useState<string | null>(null)
+  const [showSidebar, setShowSidebar] = useState(false)
+
+  const abortRef = useRef<AbortController | null>(null)
+  const threadEndRef = useRef<HTMLDivElement | null>(null)
+
+  const { data: suggestions } = useQuery({
+    queryKey: ['suggested-questions', config.slug],
+    queryFn: () => getSuggestedQuestions(config.slug),
+  })
+
+  // Re-load sessions if the tenant slug changes.
+  useEffect(() => {
+    setSessions(loadSessions(config.slug))
+    setActiveSessionId(null)
+    setMessages([])
+  }, [config.slug])
+
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [messages])
+
+  function persist(nextMessages: ChatMessage[], sessionId: string) {
+    setSessions((prev) => {
+      const existing = prev.find((session) => session.id === sessionId)
+      const now = Date.now()
+      const updatedSession: ChatSession = existing
+        ? { ...existing, messages: nextMessages, updatedAt: now }
+        : { id: sessionId, createdAt: now, updatedAt: now, messages: nextMessages }
+      const rest = prev.filter((session) => session.id !== sessionId)
+      const next = [updatedSession, ...rest].slice(0, SESSION_CAP)
+      saveSessions(config.slug, next)
+      return next
+    })
+  }
+
+  function startNewSession() {
+    setActiveSessionId(null)
+    setMessages([])
+    setShowSidebar(false)
+  }
+
+  function selectSession(id: string) {
+    const session = sessions.find((item) => item.id === id)
+    if (!session) return
+    setActiveSessionId(id)
+    setMessages(session.messages.map((message) => ({ ...message, pending: false })))
+    setShowSidebar(false)
+  }
+
+  async function runAsk(query: string, baseMessages: ChatMessage[], sessionId: string) {
+    const assistantId = makeId()
+    // baseMessages ends with the question being asked (as a USER message) - the
+    // request sends that as `query`, so prior turns exclude it here.
+    const contextTurns = baseMessages
+      .slice(0, -1)
+      .filter((message) => !message.error)
+      .map((message) => ({ author: message.author, text: message.text }))
+
+    let working: ChatMessage[] = [
+      ...baseMessages,
+      { id: assistantId, author: 'AGENT', text: '', citations: [], pending: true },
+    ]
+    setMessages(working)
+    setIsStreaming(true)
+    setActiveStageLabel(null)
+
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    function update(mutate: (message: ChatMessage) => ChatMessage) {
+      working = working.map((message) => message.id === assistantId ? mutate(message) : message)
+      setMessages(working)
+    }
+
+    try {
+      await streamAsk(
+        config.slug,
+        { query, context: contextTurns },
+        (event: AskEvent) => {
+          switch (event.type) {
+            case 'stage':
+              setActiveStageLabel(
+                event.status === 'started' ? STAGE_LABELS[event.stage] ?? null : null,
+              )
+              break
+            case 'sources':
+              break
+            case 'delta':
+              update((message) => ({ ...message, text: message.text + event.text }))
+              break
+            case 'citation':
+              update((message) =>
+                message.citations.some((citation) => citation.index === event.citation.index)
+                  ? message
+                  : { ...message, citations: [...message.citations, event.citation] }
+              )
+              break
+            case 'usage':
+              update((message) => ({
+                ...message,
+                usage: {
+                  inputTokens: event.inputTokens,
+                  outputTokens: event.outputTokens,
+                  firstChunkSec: event.firstChunkSec,
+                  totalSec: event.totalSec,
+                },
+              }))
+              break
+            case 'done':
+              update((message) => ({ ...message, pending: false }))
+              break
+            case 'error':
+              update((message) => ({
+                ...message,
+                pending: false,
+                error: event.message,
+              }))
+              break
+          }
+        },
+        controller.signal,
+      )
+    } catch (thrown) {
+      if (controller.signal.aborted) {
+        update((existing) =>
+          existing.text.length > 0
+            ? { ...existing, pending: false }
+            : { ...existing, pending: false, error: 'Stopped before an answer arrived.' }
+        )
+      } else {
+        const message = thrown instanceof Error
+          ? thrown.message
+          : 'The assistant could not complete this answer.'
+        update((existing) => ({ ...existing, pending: false, error: message }))
+      }
+    } finally {
+      setIsStreaming(false)
+      setActiveStageLabel(null)
+      abortRef.current = null
+      persist(working, sessionId)
+    }
+  }
+
+  function send(query: string) {
+    const trimmed = query.trim()
+    if (trimmed.length === 0 || isStreaming) return
+
+    const sessionId = activeSessionId ?? makeId()
+    if (!activeSessionId) setActiveSessionId(sessionId)
+
+    const userMessage: ChatMessage = {
+      id: makeId(),
+      author: 'USER',
+      text: trimmed,
+      citations: [],
+    }
+    const baseMessages = [...messages, userMessage]
+    setMessages(baseMessages)
+    setDraft('')
+    void runAsk(trimmed, baseMessages, sessionId)
+  }
+
+  function retry(forMessageId: string) {
+    // Find the user message immediately preceding the failed assistant message.
+    const index = messages.findIndex((message) => message.id === forMessageId)
+    if (index <= 0) return
+    const userMessage = messages[index - 1]
+    if (!userMessage || userMessage.author !== 'USER') return
+    const baseMessages = messages.slice(0, index)
+    const sessionId = activeSessionId ?? makeId()
+    if (!activeSessionId) setActiveSessionId(sessionId)
+    setMessages(baseMessages)
+    void runAsk(userMessage.text, baseMessages, sessionId)
+  }
+
+  function stop() {
+    abortRef.current?.abort()
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    send(draft)
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      send(draft)
+    }
+  }
+
+  const isEmpty = messages.length === 0
+
+  return (
+    <main
+      aria-label='Research assistant'
+      className='mx-auto flex h-[calc(100vh-65px)] max-w-6xl gap-6 px-4 py-6 sm:px-6'
+    >
+      <div className='flex items-center justify-between lg:hidden'>
+        <button
+          type='button'
+          onClick={() => setShowSidebar(true)}
+          className='inline-flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
+          style={{ outlineColor: 'var(--rp-accent)' }}
+        >
+          Sessions
+        </button>
+      </div>
+
+      <aside
+        aria-label='Chat sessions'
+        className='hidden w-64 shrink-0 rounded-2xl border border-neutral-200 bg-neutral-50 p-3 lg:flex'
+      >
+        <SessionList
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          onSelect={selectSession}
+          onNew={startNewSession}
+        />
+      </aside>
+
+      {showSidebar
+        ? (
+          <div className='fixed inset-0 z-40 flex lg:hidden'>
+            <button
+              type='button'
+              aria-label='Close sessions'
+              onClick={() => setShowSidebar(false)}
+              className='flex-1 bg-black/30'
+            />
+            <div className='h-full w-72 max-w-[80vw] bg-neutral-50 p-3 shadow-xl'>
+              <SessionList
+                sessions={sessions}
+                activeSessionId={activeSessionId}
+                onSelect={selectSession}
+                onNew={startNewSession}
+              />
+            </div>
+          </div>
+        )
+        : null}
+
+      <div className='flex min-w-0 flex-1 flex-col'>
+        <section
+          aria-label='Conversation'
+          className='flex-1 space-y-4 overflow-y-auto pb-4'
+        >
+          {isEmpty
+            ? (
+              <div className='space-y-4'>
+                <div className='rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'>
+                  <h1 className='text-lg font-semibold tracking-tight text-neutral-900'>
+                    Ask {config.branding.productName}
+                  </h1>
+                  <p className='mt-1 text-sm text-neutral-500'>
+                    Ask a question in plain language and get a grounded, cited answer drawn from the
+                    corpus.
+                  </p>
+                </div>
+                {suggestions && suggestions.length > 0
+                  ? (
+                    <div className='flex flex-wrap gap-2'>
+                      {suggestions.slice(0, 6).map((question) => (
+                        <button
+                          key={question.id}
+                          type='button'
+                          onClick={() => send(question.text)}
+                          className='rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm text-neutral-700 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
+                          style={{ outlineColor: 'var(--rp-accent)' }}
+                        >
+                          {question.text}
+                        </button>
+                      ))}
+                    </div>
+                  )
+                  : null}
+              </div>
+            )
+            : (
+              messages.map((message, index) =>
+                message.author === 'USER'
+                  ? <UserBubble key={message.id} message={message} />
+                  : (
+                    <AssistantCard
+                      key={message.id}
+                      message={message}
+                      activeStage={index === messages.length - 1 ? activeStageLabel : null}
+                      onRetry={() => retry(message.id)}
+                    />
+                  )
+              )
+            )}
+          <div ref={threadEndRef} />
+        </section>
+
+        <form onSubmit={handleSubmit} className='mt-2 shrink-0'>
+          <div className='flex items-end gap-2 rounded-2xl border border-neutral-200 bg-white p-2 shadow-sm'>
+            <label htmlFor='assistant-composer' className='sr-only'>
+              Ask a question
+            </label>
+            <textarea
+              id='assistant-composer'
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isStreaming}
+              rows={1}
+              placeholder={config.searchPlaceholder}
+              className='max-h-40 min-w-0 flex-1 resize-none rounded-xl border-0 bg-transparent px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none disabled:opacity-60'
+            />
+            {isStreaming
+              ? (
+                <button
+                  type='button'
+                  onClick={stop}
+                  className='shrink-0 rounded-full border border-neutral-300 bg-white px-4 py-2.5 text-sm font-semibold text-neutral-700 transition-colors duration-150 hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
+                  style={{ outlineColor: 'var(--rp-accent)' }}
+                >
+                  Stop
+                </button>
+              )
+              : (
+                <button
+                  type='submit'
+                  disabled={draft.trim().length === 0}
+                  className='shrink-0 rounded-full px-5 py-2.5 text-sm font-semibold text-white transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40'
+                  style={{ backgroundColor: 'var(--rp-primary)', outlineColor: 'var(--rp-accent)' }}
+                >
+                  Send
+                </button>
+              )}
+          </div>
+          <p className='mt-1.5 px-1 text-xs text-neutral-400'>
+            Enter to send &middot; Shift+Enter for a new line
+          </p>
+        </form>
+      </div>
+    </main>
+  )
+}

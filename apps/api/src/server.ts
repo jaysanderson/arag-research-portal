@@ -19,6 +19,7 @@ const app = buildApp({
   bindings,
   zone,
   adminPasscode: process.env.ADMIN_PASSCODE,
+  adminPrefill: process.env.ADMIN_PASSCODE_PREFILL,
   invalidate: (slug) => provider.invalidate(slug),
 })
 

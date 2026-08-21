@@ -49,6 +49,6 @@ export interface RetrievalProvider {
   suggest(tenant: TenantConfig): Promise<Question[]>
   ask(tenant: TenantConfig, query: string, opts?: AskOptions): AsyncIterable<AskEvent>
   catalog(tenant: TenantConfig, opts?: CatalogOptions): Promise<CatalogPage>
-  facets(tenant: TenantConfig, labelsets: string[]): Promise<FacetCounts>
+  facets(tenant: TenantConfig, labelsets: string[], filters?: string[]): Promise<FacetCounts>
   labelsets(tenant: TenantConfig): Promise<Labelset[]>
 }

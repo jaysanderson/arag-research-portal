@@ -166,6 +166,39 @@ export const LabelsetSchema = z.object({
 /** Facet counts: labelset id -> label -> count of resources carrying it. */
 export const FacetCountsSchema = z.record(z.string(), z.record(z.string(), z.number()))
 
+/** Label co-occurrence graph (the reference portal's knowledge-graph model). */
+export const GraphDataSchema = z.object({
+  primary: z.string(),
+  secondary: z.string(),
+  nodes: z
+    .object({
+      id: z.string(),
+      label: z.string(),
+      group: z.enum(['primary', 'secondary']),
+      weight: z.number().nonnegative(),
+    })
+    .array(),
+  edges: z
+    .object({ source: z.string(), target: z.string(), weight: z.number().nonnegative() })
+    .array(),
+})
+
+/** Grounded, schema-enforced artifact kinds the Generate surface offers. */
+export const GenerateKindSchema = z.enum([
+  'comparison',
+  'briefing',
+  'timeline',
+  'proscons',
+  'faq',
+  'assessment',
+])
+
+export const GenerateResultSchema = z.object({
+  kind: GenerateKindSchema,
+  object: z.unknown(),
+  sources: z.lazy(() => ResourceSummarySchema.array()),
+})
+
 // ---------------------------------------------------------------------------
 // Ask - the streamed, cited answer experience.
 // ---------------------------------------------------------------------------
@@ -220,6 +253,13 @@ export type CatalogItem = z.infer<typeof CatalogItemSchema>
 export type CatalogPage = z.infer<typeof CatalogPageSchema>
 export type Labelset = z.infer<typeof LabelsetSchema>
 export type FacetCounts = z.infer<typeof FacetCountsSchema>
+export type GraphData = z.infer<typeof GraphDataSchema>
+export type GenerateKind = z.infer<typeof GenerateKindSchema>
+export type GenerateResult = {
+  kind: GenerateKind
+  object: unknown
+  sources: ResourceSummary[]
+}
 export type ResourceType = z.infer<typeof ResourceTypeSchema>
 export type ResourceSummary = z.infer<typeof ResourceSummarySchema>
 export type ScoredResource = z.infer<typeof ScoredResourceSchema>

@@ -2,6 +2,7 @@ import { type Context, Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
 import { z } from 'zod'
+import { GenerateKindSchema } from '@research-portal/core'
 import type { MigrationEvent, TenantConfig } from '@research-portal/core'
 import {
   AragApiError,
@@ -14,6 +15,8 @@ import {
 import { tenantConfig, tenantSummaries } from './tenants.ts'
 import { BindingStore } from './bindings.ts'
 import { accountOpsAvailable, createKnowledgeBox } from './arag-account.ts'
+import { GENERATE_SCHEMAS } from './generate-schemas.ts'
+import { discoverLinks } from './crawl.ts'
 
 const searchQuerySchema = z.object({ q: z.string().min(1) })
 const askBodySchema = z.object({
@@ -34,6 +37,15 @@ const createKbBodySchema = z.object({ title: z.string().min(1).max(80).optional(
 const linkBodySchema = z.object({ url: z.string().url(), title: z.string().optional() })
 const textBodySchema = z.object({ title: z.string().min(1), body: z.string().min(1) })
 const migrateBodySchema = z.object({ from: z.string().min(1), to: z.string().min(1) })
+const generateBodySchema = z.object({
+  kind: GenerateKindSchema,
+  query: z.string().min(3).max(2000),
+})
+const labelsetBodySchema = z.object({
+  title: z.string().min(1).max(60),
+  multiple: z.boolean(),
+  labels: z.string().min(1).array().max(40),
+})
 
 /** Strip quotes, whitespace and an accidental "Bearer " prefix from a pasted token. */
 const cleanToken = (raw: string) =>
@@ -46,6 +58,8 @@ export interface BuildAppOptions {
   bindings?: BindingStore
   zone?: string
   adminPasscode?: string
+  /** Passcode value the admin login should prefill (pre-release convenience). */
+  adminPrefill?: string
   /** Called after a tenant is rebound so the provider can drop its caches. */
   invalidate?: (slug: string) => void
 }
@@ -141,6 +155,46 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     return c.json(bindings.status(config.slug))
   })
+
+  app.get('/api/t/:slug/counters', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
+    return c.json(await opts.management.counters(config))
+  })
+
+  app.get('/api/t/:slug/graph', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
+    const primary = c.req.query('primary') ?? 'topic'
+    const secondary = c.req.query('secondary') ?? 'kind'
+    return c.json(await opts.management.graphData(config, primary, secondary))
+  })
+
+  app.post('/api/t/:slug/generate', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
+    const parsed = generateBodySchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    const schema = GENERATE_SCHEMAS[parsed.data.kind]
+    try {
+      const result = await opts.management.askStructured(config, schema, parsed.data.query)
+      return c.json({ kind: parsed.data.kind, ...result })
+    } catch (err) {
+      const text = err instanceof Error ? err.message : ''
+      const status = err instanceof AragApiError ? err.status : 0
+      const message = /max_tokens|token|json/i.test(text) || status === 412 || status === 422
+        ? 'The request was too large to generate - try a narrower or simpler ask.'
+        : 'Generation failed - please try again.'
+      return c.json({ error: 'generation_failed', message }, 502)
+    }
+  })
+
+  // Convenience: which passcode to prefill on the admin login (pre-release
+  // only; set ADMIN_PASSCODE_PREFILL empty to turn the prefill off).
+  app.get('/api/admin-prefill', (c) => c.json({ passcode: opts.adminPrefill ?? '' }))
 
   // Admin: connect a knowledge box to a tenant. The administrator enters the
   // KB id and service-account token in the app; both stay server-side. When
@@ -262,6 +316,33 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (bytes.length === 0) return c.json({ error: 'empty_file' }, 400)
     if (bytes.length > 100 * 1024 * 1024) return c.json({ error: 'file_too_large' }, 413)
     return c.json(await management!.uploadFile(config, { filename, contentType, bytes }))
+  })
+
+  app.get('/api/admin/t/:slug/crawl', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const url = c.req.query('url')
+    if (!url) return c.json({ error: 'missing_url' }, 400)
+    const limit = Math.min(Number(c.req.query('limit') ?? 50) || 50, 200)
+    try {
+      return c.json(await discoverLinks(url, limit))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'discovery failed'
+      return c.json({ error: 'crawl_failed', message }, 400)
+    }
+  })
+
+  app.post('/api/admin/t/:slug/labelsets', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailableLs = requireManagement(c)
+    if (unavailableLs) return unavailableLs
+    const parsed = labelsetBodySchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    const id = parsed.data.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    if (!id) return c.json({ error: 'invalid_request' }, 400)
+    await management!.createLabelset(config, { id, ...parsed.data })
+    return c.json({ ok: true, id })
   })
 
   app.post('/api/admin/migrate', async (c) => {

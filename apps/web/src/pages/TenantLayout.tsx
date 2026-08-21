@@ -125,28 +125,33 @@ export function TenantLayout() {
               </Link>
             )}
           </div>
-          <nav aria-label='Primary' className='flex items-center gap-5'>
-            <NavLink
-              to={`/t/${config.slug}`}
-              end
-              className={navLinkClass}
-              style={({ isActive }) => ({
-                borderColor: isActive ? 'var(--rp-accent)' : undefined,
-                outlineColor: 'var(--rp-accent)',
-              })}
-            >
-              Explore
-            </NavLink>
-            <NavLink
-              to={`/t/${config.slug}/search`}
-              className={navLinkClass}
-              style={({ isActive }) => ({
-                borderColor: isActive ? 'var(--rp-accent)' : undefined,
-                outlineColor: 'var(--rp-accent)',
-              })}
-            >
-              Search
-            </NavLink>
+          <nav
+            aria-label='Primary'
+            className='flex items-center gap-4 overflow-x-auto whitespace-nowrap'
+          >
+            {[
+              ['', 'Explore', true],
+              ['/search', 'Search', false],
+              ['/library', 'Library', false],
+              ['/assistant', 'Assistant', false],
+              ['/agentic', 'Agentic', false],
+              ['/generate', 'Generate', false],
+              ['/graph', 'Graph', false],
+              ['/taxonomy', 'Taxonomy', false],
+            ].map(([path, label, end]) => (
+              <NavLink
+                key={label as string}
+                to={`/t/${config.slug}${path as string}`}
+                end={end as boolean}
+                className={navLinkClass}
+                style={({ isActive }) => ({
+                  borderColor: isActive ? 'var(--rp-accent)' : undefined,
+                  outlineColor: 'var(--rp-accent)',
+                })}
+              >
+                {label as string}
+              </NavLink>
+            ))}
           </nav>
         </div>
       </header>
