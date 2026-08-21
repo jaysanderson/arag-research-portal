@@ -33,9 +33,17 @@ interface RawResource {
   metadata?: { status?: string }
 }
 
+export class KnowledgeBoxNotConnectedError extends Error {
+  constructor(readonly slug: string) {
+    super(`No knowledge box connected for tenant '${slug}'`)
+    this.name = 'KnowledgeBoxNotConnectedError'
+  }
+}
+
 export interface AragProviderOptions {
   zone: string
-  bindings: Record<string, KbBinding>
+  /** Resolve the current binding for a tenant slug - called per request so bindings can change at runtime. */
+  resolveBinding: (slug: string) => KbBinding | undefined
   fetchImpl?: typeof fetch
 }
 
@@ -51,17 +59,27 @@ export class AragProvider implements RetrievalProvider {
   constructor(private readonly opts: AragProviderOptions) {}
 
   private client(tenant: TenantConfig): KbClient {
-    const existing = this.clients.get(tenant.slug)
-    if (existing) return existing
-    const binding = this.opts.bindings[tenant.slug]
+    const binding = this.opts.resolveBinding(tenant.slug)
     if (!binding) {
-      throw new Error(
-        `No knowledge box bound for tenant '${tenant.slug}' - set ARAG_KB_${tenant.slug.toUpperCase()} and ARAG_KB_${tenant.slug.toUpperCase()}_TOKEN (run the provision script)`,
-      )
+      this.invalidate(tenant.slug)
+      throw new KnowledgeBoxNotConnectedError(tenant.slug)
     }
+    const key = `${tenant.slug}:${binding.kbId}`
+    const existing = this.clients.get(key)
+    if (existing) return existing
+    // A new binding for this slug invalidates anything cached for the old one.
+    this.invalidate(tenant.slug)
     const client = new KbClient(this.opts.zone, binding, this.opts.fetchImpl ?? fetch)
-    this.clients.set(tenant.slug, client)
+    this.clients.set(key, client)
     return client
+  }
+
+  /** Drop cached clients and catalogue entries for a tenant (call after rebinding). */
+  invalidate(slug: string): void {
+    for (const key of this.clients.keys()) {
+      if (key.startsWith(`${slug}:`)) this.clients.delete(key)
+    }
+    this.catalogCache.delete(slug)
   }
 
   private toSummary(id: string, raw: RawResource): ResourceSummary {

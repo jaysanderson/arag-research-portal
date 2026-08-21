@@ -1,5 +1,5 @@
 export type { RetrievalProvider } from './provider.ts'
-export { AragProvider } from './providers/arag/index.ts'
+export { AragProvider, KnowledgeBoxNotConnectedError } from './providers/arag/index.ts'
 export { AragApiError, KbClient, ndjson, regionalBase } from './providers/arag/client.ts'
 export type { KbBinding } from './providers/arag/client.ts'
-export { createProviderFromEnv } from './env.ts'
+export { createProviderFromEnv, envBindings } from './env.ts'

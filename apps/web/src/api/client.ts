@@ -1,4 +1,5 @@
 import type {
+  KnowledgeBoxStatus,
   Question,
   ResourceSummary,
   SearchResults,
@@ -64,4 +65,44 @@ export function getResource(slug: string, id: string): Promise<ResourceSummary> 
   return request<ResourceSummary>(
     `/api/t/${encodeURIComponent(slug)}/resources/${encodeURIComponent(id)}`,
   )
+}
+
+export function getKnowledgeBoxStatus(slug: string): Promise<KnowledgeBoxStatus> {
+  return request<KnowledgeBoxStatus>(`/api/t/${encodeURIComponent(slug)}/knowledge-box`)
+}
+
+export interface ConnectResult {
+  ok: boolean
+  status: KnowledgeBoxStatus
+  resourceCount: number
+}
+
+/**
+ * Connect a knowledge box to a tenant. The administrator types the KB id,
+ * service-account token and admin passcode into the form themselves; values
+ * go straight to the server and are never stored client-side.
+ */
+export async function connectKnowledgeBox(
+  slug: string,
+  input: { kbId: string; token: string; passcode: string },
+): Promise<ConnectResult> {
+  const res = await fetch(`/api/admin/t/${encodeURIComponent(slug)}/knowledge-box`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-admin-passcode': input.passcode,
+    },
+    body: JSON.stringify({ kbId: input.kbId, token: input.token }),
+  })
+  const body: unknown = await res.json().catch(() => null)
+  if (!res.ok) {
+    const message = body && typeof body === 'object' && 'message' in body &&
+        typeof body.message === 'string'
+      ? body.message
+      : body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
+      ? body.error
+      : 'Connection failed'
+    throw new ApiError(res.status, message)
+  }
+  return body as ConnectResult
 }

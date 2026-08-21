@@ -2,7 +2,7 @@ import { type CSSProperties, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, NavLink, Outlet, useParams } from 'react-router-dom'
 import type { TenantConfig } from '@research-portal/core'
-import { ApiError, getTenantConfig } from '../api/client.ts'
+import { ApiError, getKnowledgeBoxStatus, getTenantConfig } from '../api/client.ts'
 
 export type TenantOutletContext = {
   config: TenantConfig
@@ -30,6 +30,12 @@ export function TenantLayout() {
   } = useQuery({
     queryKey: ['tenant-config', slug],
     queryFn: () => getTenantConfig(slug ?? ''),
+    enabled: Boolean(slug),
+  })
+
+  const { data: kbStatus } = useQuery({
+    queryKey: ['kb-status', slug],
+    queryFn: () => getKnowledgeBoxStatus(slug ?? ''),
     enabled: Boolean(slug),
   })
 
@@ -93,13 +99,32 @@ export function TenantLayout() {
     >
       <header className='border-b border-neutral-200 bg-white/80 backdrop-blur'>
         <div className='mx-auto flex max-w-6xl items-center justify-between px-6 py-4'>
-          <Link
-            to={`/t/${config.slug}`}
-            className='text-lg font-semibold tracking-tight text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-            style={{ outlineColor: 'var(--rp-accent)' }}
-          >
-            {config.branding.productName}
-          </Link>
+          <div className='flex items-center gap-3'>
+            <Link
+              to={`/t/${config.slug}`}
+              className='text-lg font-semibold tracking-tight text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
+              style={{ outlineColor: 'var(--rp-accent)' }}
+            >
+              {config.branding.productName}
+            </Link>
+            {kbStatus?.status === 'demo' && (
+              <Link
+                to={`/t/${config.slug}/connect`}
+                className='inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800 transition-colors duration-150 hover:bg-amber-100'
+                title='This portal is running on the demo knowledge box - click to connect the real one'
+              >
+                Demo only
+              </Link>
+            )}
+            {kbStatus?.status === 'none' && (
+              <Link
+                to={`/t/${config.slug}/connect`}
+                className='inline-flex items-center rounded-full border border-neutral-300 bg-neutral-100 px-2.5 py-0.5 text-xs font-medium text-neutral-600 transition-colors duration-150 hover:bg-neutral-200'
+              >
+                Not connected
+              </Link>
+            )}
+          </div>
           <nav aria-label='Primary' className='flex items-center gap-5'>
             <NavLink
               to={`/t/${config.slug}`}

@@ -52,6 +52,20 @@ export const TenantConfigSchema = z.object({
 })
 
 // ---------------------------------------------------------------------------
+// Knowledge box connection status - which backing store a tenant is wired to.
+// "demo" = the seeded demo knowledge box shipped with the app; "connected" =
+// a knowledge box an administrator connected in the app; "none" = not wired.
+// Never carries credentials.
+// ---------------------------------------------------------------------------
+
+export const KnowledgeBoxStatusSchema = z.object({
+  slug: z.string().min(1),
+  status: z.enum(['demo', 'connected', 'none']),
+  /** Truncated knowledge box id for display - never the token. */
+  kbId: z.string().optional(),
+})
+
+// ---------------------------------------------------------------------------
 // Resources - documents, videos and web pages in the tenant's corpus.
 // ---------------------------------------------------------------------------
 
@@ -119,6 +133,7 @@ export type Question = z.infer<typeof QuestionSchema>
 export type EntityType = z.infer<typeof EntityTypeSchema>
 export type TenantSummary = z.infer<typeof TenantSummarySchema>
 export type TenantConfig = z.infer<typeof TenantConfigSchema>
+export type KnowledgeBoxStatus = z.infer<typeof KnowledgeBoxStatusSchema>
 export type ResourceType = z.infer<typeof ResourceTypeSchema>
 export type ResourceSummary = z.infer<typeof ResourceSummarySchema>
 export type ScoredResource = z.infer<typeof ScoredResourceSchema>

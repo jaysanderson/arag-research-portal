@@ -11,7 +11,7 @@ describe('createProviderFromEnv', () => {
 
   it('throws a clear error when no bindings are present', () => {
     expect(() => createProviderFromEnv({ ARAG_ZONE: 'aws-ap-southeast-2-1' })).toThrow(
-      /npm run provision/,
+      /deno task provision/,
     )
   })
 
