@@ -1,5 +1,6 @@
 import type {
   AdminTenantOverview,
+  AnalyseEvent,
   AskEvent,
   CatalogPage,
   FacetCounts,
@@ -439,4 +440,49 @@ export function removePortal(slug: string, passcode: string): Promise<{ ok: bool
   return adminRequest(`/api/admin/tenants/${encodeURIComponent(slug)}`, passcode, {
     method: 'DELETE',
   })
+}
+
+export function setPortalDisabled(
+  slug: string,
+  passcode: string,
+  disabled: boolean,
+): Promise<{ ok: boolean }> {
+  return adminRequest(
+    `/api/admin/t/${encodeURIComponent(slug)}/${disabled ? 'disable' : 'enable'}`,
+    passcode,
+    { method: 'POST' },
+  )
+}
+
+/** Run corpus analysis and stream its progress events. */
+export async function analysePortal(
+  slug: string,
+  passcode: string,
+  onEvent: (event: AnalyseEvent) => void,
+): Promise<void> {
+  const res = await fetch(`/api/admin/t/${encodeURIComponent(slug)}/analyse`, {
+    method: 'POST',
+    headers: { 'x-admin-passcode': passcode },
+  })
+  if (!res.ok || !res.body) {
+    throw new ApiError(res.status, res.statusText || 'Analysis failed to start')
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const emit = (frame: string) => {
+    const line = frame.trim()
+    if (!line) return
+    const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
+    onEvent(JSON.parse(data) as AnalyseEvent)
+  }
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) emit(frame)
+  }
+  emit(buffer)
 }

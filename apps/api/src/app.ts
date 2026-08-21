@@ -16,6 +16,7 @@ import { type NewTenantInput, TenantStore } from './tenants.ts'
 import { BindingStore } from './bindings.ts'
 import { accountOpsAvailable, createKnowledgeBox } from './arag-account.ts'
 import { GENERATE_SCHEMAS } from './generate-schemas.ts'
+import { analyseTenant } from './analyse.ts'
 import { discoverLinks } from './crawl.ts'
 
 const searchQuerySchema = z.object({ q: z.string().min(1) })
@@ -216,7 +217,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
 
   app.get('/api/admin/overview', async (c) => {
     const rows = await Promise.all(
-      tenants.list().map(async (summary) => {
+      tenants.list(true).map(async (summary) => {
         const config = tenant(summary.slug)
         let resourceCount: number | null = null
         if (config) {
@@ -231,6 +232,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
           knowledgeBox: bindings.status(summary.slug),
           resourceCount,
           custom: tenants.isCustom(summary.slug),
+          disabled: tenants.isDisabled(summary.slug),
         }
       }),
     )
@@ -346,6 +348,48 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (bytes.length === 0) return c.json({ error: 'empty_file' }, 400)
     if (bytes.length > 100 * 1024 * 1024) return c.json({ error: 'file_too_large' }, 413)
     return c.json(await management!.uploadFile(config, { filename, contentType, bytes }))
+  })
+
+  app.post('/api/admin/t/:slug/disable', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    tenants.setDisabled(config.slug, true)
+    return c.json({ ok: true })
+  })
+
+  app.post('/api/admin/t/:slug/enable', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    tenants.setDisabled(config.slug, false)
+    return c.json({ ok: true })
+  })
+
+  app.post('/api/admin/t/:slug/analyse', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailableAn = requireManagement(c)
+    if (unavailableAn) return unavailableAn
+    return streamSSE(c, async (stream) => {
+      try {
+        for await (
+          const event of analyseTenant(
+            management!,
+            tenants,
+            config,
+            (slug) => opts.invalidate?.(slug),
+          )
+        ) {
+          await stream.writeSSE({ data: JSON.stringify(event) })
+        }
+      } catch (err) {
+        await stream.writeSSE({
+          data: JSON.stringify({
+            type: 'error',
+            message: err instanceof Error ? err.message : 'analysis failed',
+          }),
+        })
+      }
+    })
   })
 
   app.get('/api/admin/t/:slug/crawl', async (c) => {

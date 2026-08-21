@@ -73,6 +73,8 @@ export const AdminTenantOverviewSchema = z.object({
   resourceCount: z.number().int().nonnegative().nullable(),
   /** True for portals added in-app (removable), false for the seeded pair. */
   custom: z.boolean().optional(),
+  /** True when the portal is hidden from the switcher and portal list. */
+  disabled: z.boolean().optional(),
 })
 
 /** Live knowledge box counters, straight from the platform's /counters. */
@@ -90,6 +92,21 @@ export const RecentResourceSchema = z.object({
   status: z.enum(['pending', 'processed', 'error']),
   created: z.string().optional(),
 })
+
+/** Progress events streamed by corpus analysis (interrogate the box, derive
+ * taxonomy + graph strategy + questions, and apply them). */
+export const AnalyseEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('stage'), label: z.string() }),
+  z.object({ type: z.literal('item'), label: z.string(), detail: z.string().optional() }),
+  z.object({
+    type: z.literal('done'),
+    topics: z.number().int().nonnegative(),
+    kinds: z.number().int().nonnegative(),
+    labelled: z.number().int().nonnegative(),
+    questions: z.number().int().nonnegative(),
+  }),
+  z.object({ type: z.literal('error'), message: z.string() }),
+])
 
 /** Progress events streamed by the knowledge-box migration tool. */
 export const MigrationEventSchema = z.discriminatedUnion('type', [
@@ -250,6 +267,7 @@ export type AdminTenantOverview = z.infer<typeof AdminTenantOverviewSchema>
 export type KbCounters = z.infer<typeof KbCountersSchema>
 export type RecentResource = z.infer<typeof RecentResourceSchema>
 export type MigrationEvent = z.infer<typeof MigrationEventSchema>
+export type AnalyseEvent = z.infer<typeof AnalyseEventSchema>
 export type RetrievalMode = z.infer<typeof RetrievalModeSchema>
 export type CatalogItem = z.infer<typeof CatalogItemSchema>
 export type CatalogPage = z.infer<typeof CatalogPageSchema>

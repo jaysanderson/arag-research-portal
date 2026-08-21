@@ -104,8 +104,9 @@ export class AragProvider implements RetrievalProvider {
     })()
     return ResourceSummarySchema.parse({
       id,
-      title: raw.title ?? id,
-      summary: meta.summary ?? raw.summary ?? raw.title ?? id,
+      title: raw.title || id,
+      // Platform fields can be empty strings, which ?? would keep - use ||.
+      summary: meta.summary || raw.summary || raw.title || id,
       type,
       topicIds: topicFromLabels.length > 0 ? topicFromLabels : meta.topic ? [meta.topic] : [],
       keyFacts: meta.keyFacts ?? [],
@@ -428,12 +429,20 @@ export class AragProvider implements RetrievalProvider {
       facets?: Record<string, Record<string, number>>
     }>(`/catalog?${params.toString()}`)
     const source = raw.fulltext?.facets ?? raw.facets ?? {}
+    // The index can surface platform-computed classifications under the same
+    // paths - keep only labels the labelset actually defines.
+    const defined = new Map(
+      (await this.labelsets(tenant)).map((ls) => [ls.id, new Set(ls.labels)]),
+    )
     const out: FacetCounts = {}
     for (const [facetKey, counts] of Object.entries(source)) {
       const labelsetId = facetKey.split('/').pop() ?? facetKey
+      const allowed = defined.get(labelsetId)
       const byLabel: Record<string, number> = {}
       for (const [labelPath, count] of Object.entries(counts)) {
-        byLabel[labelPath.split('/').pop() ?? labelPath] = count
+        const label = labelPath.split('/').pop() ?? labelPath
+        if (allowed && !allowed.has(label)) continue
+        byLabel[label] = count
       }
       out[labelsetId] = byLabel
     }
@@ -533,6 +542,18 @@ export class AragProvider implements RetrievalProvider {
       throw new Error('The platform returned no structured answer - try a narrower request')
     }
     return { object, sources }
+  }
+
+  /** Replace a resource's classifications (used by corpus analysis). */
+  async patchResourceClassifications(
+    tenant: TenantConfig,
+    resourceId: string,
+    classifications: { labelset: string; label: string }[],
+  ): Promise<void> {
+    await this.client(tenant).patchJson(`/resource/${resourceId}`, {
+      usermetadata: { classifications },
+    })
+    this.invalidateCatalogue(tenant.slug)
   }
 
   async createLabelset(

@@ -151,17 +151,35 @@ export interface NewTenantInput {
   tagline?: string
 }
 
+/** Config fields corpus analysis is allowed to rewrite. */
+export interface TenantPatch {
+  topics?: TenantConfig['topics']
+  suggestedQuestions?: TenantConfig['suggestedQuestions']
+  searchPlaceholder?: string
+}
+
 export class TenantStore {
   private custom: Record<string, TenantConfig> = {}
+  /** Analysis-derived overrides, applicable to seeded portals too. */
+  private overrides: Record<string, TenantPatch> = {}
+  private disabled = new Set<string>()
   private readonly path: string
 
   constructor(env: Record<string, string | undefined> = process.env) {
     this.path = env.TENANTS_PATH ?? './data/tenants.json'
     try {
       const raw = JSON.parse(readFileSync(this.path, 'utf8')) as Record<string, unknown>
-      for (const [slug, value] of Object.entries(raw)) {
+      // v2 format: { custom, overrides, disabled }. v1 was a bare custom map.
+      const customSource = (raw.custom ?? raw) as Record<string, unknown>
+      for (const [slug, value] of Object.entries(customSource)) {
         const parsed = TenantConfigSchema.safeParse(value)
         if (parsed.success) this.custom[slug] = parsed.data
+      }
+      if (raw.overrides && typeof raw.overrides === 'object') {
+        this.overrides = raw.overrides as Record<string, TenantPatch>
+      }
+      if (Array.isArray(raw.disabled)) {
+        this.disabled = new Set(raw.disabled.filter((s): s is string => typeof s === 'string'))
       }
     } catch {
       this.custom = {}
@@ -169,15 +187,34 @@ export class TenantStore {
   }
 
   get(slug: string): TenantConfig | undefined {
-    return tenantsBySlug[slug] ?? this.custom[slug]
+    const base = tenantsBySlug[slug] ?? this.custom[slug]
+    if (!base) return undefined
+    const override = this.overrides[slug]
+    return override ? { ...base, ...override } : base
   }
 
   isCustom(slug: string): boolean {
     return slug in this.custom && !(slug in tenantsBySlug)
   }
 
-  list(): TenantSummary[] {
-    return [
+  isDisabled(slug: string): boolean {
+    return this.disabled.has(slug)
+  }
+
+  setDisabled(slug: string, disabled: boolean): void {
+    if (disabled) this.disabled.add(slug)
+    else this.disabled.delete(slug)
+    this.persist()
+  }
+
+  /** Apply analysis-derived config (topics, questions, placeholder). */
+  patch(slug: string, patch: TenantPatch): void {
+    this.overrides[slug] = { ...this.overrides[slug], ...patch }
+    this.persist()
+  }
+
+  list(includeDisabled = false): TenantSummary[] {
+    const all = [
       ...tenantSummaries(),
       ...Object.values(this.custom).map((tenant) => ({
         slug: tenant.slug,
@@ -186,6 +223,7 @@ export class TenantStore {
         tagline: tenant.branding.tagline,
       })),
     ]
+    return includeDisabled ? all : all.filter((t) => !this.disabled.has(t.slug))
   }
 
   add(input: NewTenantInput): TenantConfig {
@@ -215,12 +253,21 @@ export class TenantStore {
   remove(slug: string): boolean {
     if (!this.isCustom(slug)) return false
     delete this.custom[slug]
+    delete this.overrides[slug]
+    this.disabled.delete(slug)
     this.persist()
     return true
   }
 
   private persist(): void {
     mkdirSync(dirname(this.path), { recursive: true })
-    writeFileSync(this.path, JSON.stringify(this.custom, null, 2))
+    writeFileSync(
+      this.path,
+      JSON.stringify(
+        { custom: this.custom, overrides: this.overrides, disabled: [...this.disabled] },
+        null,
+        2,
+      ),
+    )
   }
 }
