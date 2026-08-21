@@ -6,10 +6,12 @@ import {
   ApiError,
   connectKnowledgeBox,
   getAdminOverview,
+  removePortal,
   revertKnowledgeBox,
 } from '../api/client.ts'
 import { ErrorCard, Skeleton } from '../components/ui.tsx'
 import { AddContent } from './admin/AddContent.tsx'
+import { AddPortal } from './admin/AddPortal.tsx'
 import { CreateKbBox } from './admin/CreateKbBox.tsx'
 import { MessagePanel } from './admin/MessagePanel.tsx'
 import { MigratePanel } from './admin/MigratePanel.tsx'
@@ -82,6 +84,25 @@ function TenantCard({ row, passcode }: { row: AdminTenantOverview; passcode: str
     }
   }
 
+  const onRemove = async () => {
+    if (!globalThis.confirm(`Remove the '${row.tenant.productName}' portal from the app?`)) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      await removePortal(row.tenant.slug, passcode)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin-overview'] }),
+        queryClient.invalidateQueries({ queryKey: ['tenants'] }),
+      ])
+    } catch (err) {
+      setMessage({
+        tone: 'error',
+        text: err instanceof Error ? err.message : 'Could not remove the portal.',
+      })
+      setBusy(false)
+    }
+  }
+
   const onRevert = async () => {
     setBusy(true)
     setMessage(null)
@@ -110,6 +131,17 @@ function TenantCard({ row, passcode }: { row: AdminTenantOverview; passcode: str
         </div>
         <div className='flex items-center gap-3'>
           <StatusBadge status={row.knowledgeBox.status} />
+          {row.custom && (
+            <button
+              type='button'
+              disabled={busy}
+              onClick={onRemove}
+              className='text-sm font-medium text-rose-500 transition-colors duration-150 hover:text-rose-700 disabled:opacity-60'
+              title='Removes this portal from the app - the knowledge box itself is untouched'
+            >
+              Remove
+            </button>
+          )}
           <Link
             to={`/t/${row.tenant.slug}`}
             className='text-sm font-medium text-neutral-500 transition-colors duration-150 hover:text-neutral-900'
@@ -348,6 +380,7 @@ export function AdminPage() {
 
         {data && (
           <div className='mt-8 space-y-6'>
+            <AddPortal passcode={passcode} />
             {data.map((row) => <TenantCard key={row.tenant.slug} row={row} passcode={passcode} />)}
           </div>
         )}

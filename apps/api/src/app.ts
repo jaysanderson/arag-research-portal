@@ -12,7 +12,7 @@ import {
   parseKbUrl,
   type RetrievalProvider,
 } from '@research-portal/retrieval'
-import { tenantConfig, tenantSummaries } from './tenants.ts'
+import { type NewTenantInput, TenantStore } from './tenants.ts'
 import { BindingStore } from './bindings.ts'
 import { accountOpsAvailable, createKnowledgeBox } from './arag-account.ts'
 import { GENERATE_SCHEMAS } from './generate-schemas.ts'
@@ -41,6 +41,11 @@ const generateBodySchema = z.object({
   kind: GenerateKindSchema,
   query: z.string().min(3).max(2000),
 })
+const newTenantSchema = z.object({
+  name: z.string().min(2).max(60),
+  organisation: z.string().max(120).optional(),
+  tagline: z.string().max(160).optional(),
+})
 const labelsetBodySchema = z.object({
   title: z.string().min(1).max(60),
   multiple: z.boolean(),
@@ -53,6 +58,8 @@ const cleanToken = (raw: string) =>
 
 export interface BuildAppOptions {
   provider: RetrievalProvider
+  /** Tenant registry; a fresh store (seeds only) when omitted. */
+  tenants?: TenantStore
   /** The live provider's management surface; absent in tests. */
   management?: AragProvider
   bindings?: BindingStore
@@ -67,6 +74,7 @@ export interface BuildAppOptions {
 export function buildApp(opts: BuildAppOptions): Hono {
   const { provider } = opts
   const bindings = opts.bindings ?? new BindingStore({})
+  const tenants = opts.tenants ?? new TenantStore({})
   const app = new Hono()
 
   app.use('/api/*', cors({ origin: (origin) => origin }))
@@ -79,9 +87,9 @@ export function buildApp(opts: BuildAppOptions): Hono {
     return c.json({ error: 'internal_error' }, 500)
   })
 
-  const tenant = (slug: string): TenantConfig | undefined => tenantConfig(slug)
+  const tenant = (slug: string): TenantConfig | undefined => tenants.get(slug)
 
-  app.get('/api/tenants', (c) => c.json(tenantSummaries()))
+  app.get('/api/tenants', (c) => c.json(tenants.list()))
 
   app.get('/api/t/:slug/config', (c) => {
     const config = tenant(c.req.param('slug'))
@@ -208,7 +216,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
 
   app.get('/api/admin/overview', async (c) => {
     const rows = await Promise.all(
-      tenantSummaries().map(async (summary) => {
+      tenants.list().map(async (summary) => {
         const config = tenant(summary.slug)
         let resourceCount: number | null = null
         if (config) {
@@ -222,6 +230,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
           tenant: summary,
           knowledgeBox: bindings.status(summary.slug),
           resourceCount,
+          custom: tenants.isCustom(summary.slug),
         }
       }),
     )
@@ -240,6 +249,27 @@ export function buildApp(opts: BuildAppOptions): Hono {
   const management = opts.management
   const requireManagement = (c: Context) =>
     management ? null : c.json({ error: 'management_unavailable' }, 503)
+
+  app.post('/api/admin/tenants', async (c) => {
+    const parsed = newTenantSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    try {
+      const config = tenants.add(parsed.data as NewTenantInput)
+      return c.json({ ok: true, slug: config.slug })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'could not add the portal'
+      return c.json({ error: 'invalid_request', message }, 400)
+    }
+  })
+
+  app.delete('/api/admin/tenants/:slug', (c) => {
+    const slug = c.req.param('slug')
+    if (!tenants.isCustom(slug)) return c.json({ error: 'not_removable' }, 400)
+    tenants.remove(slug)
+    bindings.remove(slug)
+    opts.invalidate?.(slug)
+    return c.json({ ok: true })
+  })
 
   app.post('/api/admin/t/:slug/knowledge-box/create', async (c) => {
     const config = tenant(c.req.param('slug'))

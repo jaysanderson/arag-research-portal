@@ -423,3 +423,20 @@ export function createAdminLabelset(
     body: JSON.stringify(input),
   })
 }
+
+export function addPortal(
+  passcode: string,
+  input: { name: string; organisation?: string; tagline?: string },
+): Promise<{ ok: boolean; slug: string }> {
+  return adminRequest('/api/admin/tenants', passcode, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+export function removePortal(slug: string, passcode: string): Promise<{ ok: boolean }> {
+  return adminRequest(`/api/admin/tenants/${encodeURIComponent(slug)}`, passcode, {
+    method: 'DELETE',
+  })
+}

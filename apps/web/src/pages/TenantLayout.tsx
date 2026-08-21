@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, NavLink, Outlet, useParams } from 'react-router-dom'
 import type { TenantConfig } from '@research-portal/core'
 import { ApiError, getKnowledgeBoxStatus, getTenantConfig } from '../api/client.ts'
+import { KbSwitcher } from '../components/KbSwitcher.tsx'
 
 export type TenantOutletContext = {
   config: TenantConfig
@@ -114,13 +115,7 @@ export function TenantLayout() {
       <header className='border-b border-neutral-200 bg-white/80 backdrop-blur'>
         <div className='mx-auto flex max-w-6xl items-center justify-between px-6 py-4'>
           <div className='flex items-center gap-3'>
-            <Link
-              to={`/t/${config.slug}`}
-              className='text-lg font-semibold tracking-tight text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-              style={{ outlineColor: 'var(--rp-accent)' }}
-            >
-              {config.branding.productName}
-            </Link>
+            <KbSwitcher config={config} />
             {kbStatus?.status === 'demo' && (
               <Link
                 to='/admin'

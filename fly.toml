@@ -6,6 +6,7 @@ primary_region = "syd"
 [env]
   PORT = "8787"
   BINDINGS_PATH = "/app/data/bindings.json"
+  TENANTS_PATH = "/app/data/tenants.json"
 
 [http_service]
   internal_port = 8787

@@ -71,6 +71,8 @@ export const AdminTenantOverviewSchema = z.object({
   knowledgeBox: KnowledgeBoxStatusSchema,
   /** Documents currently visible in the bound knowledge box; null when unreachable. */
   resourceCount: z.number().int().nonnegative().nullable(),
+  /** True for portals added in-app (removable), false for the seeded pair. */
+  custom: z.boolean().optional(),
 })
 
 /** Live knowledge box counters, straight from the platform's /counters. */

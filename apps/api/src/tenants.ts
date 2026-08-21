@@ -1,3 +1,6 @@
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
+import process from 'node:process'
 import { type TenantConfig, TenantConfigSchema, type TenantSummary } from '@research-portal/core'
 
 // ---------------------------------------------------------------------------
@@ -127,4 +130,97 @@ export function tenantSummaries(): TenantSummary[] {
     productName: tenant.branding.productName,
     tagline: tenant.branding.tagline,
   }))
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic tenant store: the two seeds above plus knowledge box portals added
+// in the app, persisted as JSON (TENANTS_PATH, default ./data/tenants.json).
+// ---------------------------------------------------------------------------
+
+/** Neutral dark palette for portals added in-app (until a theming pass). */
+const DEFAULT_COLOURS = {
+  primary: '#27364b',
+  accent: '#5a8bd6',
+  heroFrom: '#141d2b',
+  heroTo: '#27364b',
+}
+
+export interface NewTenantInput {
+  name: string
+  organisation?: string
+  tagline?: string
+}
+
+export class TenantStore {
+  private custom: Record<string, TenantConfig> = {}
+  private readonly path: string
+
+  constructor(env: Record<string, string | undefined> = process.env) {
+    this.path = env.TENANTS_PATH ?? './data/tenants.json'
+    try {
+      const raw = JSON.parse(readFileSync(this.path, 'utf8')) as Record<string, unknown>
+      for (const [slug, value] of Object.entries(raw)) {
+        const parsed = TenantConfigSchema.safeParse(value)
+        if (parsed.success) this.custom[slug] = parsed.data
+      }
+    } catch {
+      this.custom = {}
+    }
+  }
+
+  get(slug: string): TenantConfig | undefined {
+    return tenantsBySlug[slug] ?? this.custom[slug]
+  }
+
+  isCustom(slug: string): boolean {
+    return slug in this.custom && !(slug in tenantsBySlug)
+  }
+
+  list(): TenantSummary[] {
+    return [
+      ...tenantSummaries(),
+      ...Object.values(this.custom).map((tenant) => ({
+        slug: tenant.slug,
+        organisation: tenant.branding.organisation,
+        productName: tenant.branding.productName,
+        tagline: tenant.branding.tagline,
+      })),
+    ]
+  }
+
+  add(input: NewTenantInput): TenantConfig {
+    const base = input.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    if (!base) throw new Error('The portal name must contain letters or numbers')
+    let slug = base
+    for (let i = 2; this.get(slug); i++) slug = `${base}-${i}`
+    const config = TenantConfigSchema.parse({
+      slug,
+      branding: {
+        productName: input.name,
+        organisation: input.organisation?.trim() || input.name,
+        tagline: input.tagline?.trim() || 'Research, discovery and development',
+        colours: DEFAULT_COLOURS,
+      },
+      searchPlaceholder: 'Search this knowledge box...',
+      topics: [],
+      suggestedQuestions: [],
+      entityTypes: [],
+      relationTypes: [],
+    })
+    this.custom[slug] = config
+    this.persist()
+    return config
+  }
+
+  remove(slug: string): boolean {
+    if (!this.isCustom(slug)) return false
+    delete this.custom[slug]
+    this.persist()
+    return true
+  }
+
+  private persist(): void {
+    mkdirSync(dirname(this.path), { recursive: true })
+    writeFileSync(this.path, JSON.stringify(this.custom, null, 2))
+  }
 }
