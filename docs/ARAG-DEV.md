@@ -133,3 +133,8 @@ almost certainly already paid for that lesson.
 - **`/find` paragraph scores mix scales** - semantic ~0-1, BM25 unbounded
   (5-30 typical). Calibrate (logistic squash for >1) instead of normalising
   to the top hit, or every top result reads "100%".
+- **Graph queries: filter to agent-extracted relations with
+  `{prop:'generated', by:'data-augmentation'}`** (combinable via `{and:[...]}`
+  with a path/node query). Without it, once real PDFs land the built-in NER
+  pipeline floods `/graph` with PERSON/DATE/LOC paths and the curated llm-graph
+  relations fall outside `top_k`.
