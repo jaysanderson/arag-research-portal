@@ -1245,7 +1245,9 @@ export class AragProvider implements RetrievalProvider {
         }
         return {
           ...(byId.get(id) ?? this.toSummary(id, raw)),
-          relevance: 1,
+          // Same calibration as search: semantic scores pass through, BM25
+          // squashes - a weak grounding source must LOOK weak.
+          relevance: Math.round((best <= 1 ? Math.max(0, best) : best / (best + 2)) * 100) / 100,
           citedCount: 0,
           matchedPassage: passage,
         }
