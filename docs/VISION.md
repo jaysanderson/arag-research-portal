@@ -88,3 +88,14 @@ in-app admin surface, not by hand.
   hidden-resource draft/publish curation, scheduled source re-syncs (one Fly machine now stays
   up for the daily job), entity dossier pages, server-synced research trails with export,
   saved searches with change badges, and the conversation-memory DA agent.
+- **2026-08-23** - External expert audit received (research-portal expert +
+  research-scientist walkthrough of the FRDC portal). Verdict: AI plumbing
+  ahead of peers; blocked from professional use by corpus corruption
+  (bot-challenge pages cited as sources), answer-level-only citations, and
+  the absence of a research workspace. Response in progress, following the
+  audit's own priority order: corpus purge + ingestion quality gate, real
+  research documents ingested (13 NCCP final reports, the R&D Plan 2025-30),
+  calibrated search scores + working mode switch, claim-level citation
+  prompting, structured refusal states, persistent evidence tables replacing
+  the ephemeral journey verdicts, and Investigations - a first-class research
+  question that accumulates Evidence with provenance.

@@ -2,7 +2,8 @@ import { type FormEvent, useCallback, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useOutletContext } from 'react-router-dom'
 import type { KbCounters, ResourceSummary, TenantConfig } from '@research-portal/core'
-import { getCounters, getResources } from '../api/client.ts'
+import { getCounters, getFacets, getResources } from '../api/client.ts'
+import { prettyLabel } from '../components/ui.tsx'
 import { EmptyState, ErrorCard, Skeleton, TypeBadge } from '../components/ui.tsx'
 import { ResourceThumb } from '../components/ResourceThumb.tsx'
 import { TypeaheadDropdown, type TypeaheadItem, useTypeahead } from '../components/Typeahead.tsx'
@@ -191,6 +192,35 @@ function StatTile({ label, value }: { label: string; value: string }) {
 }
 
 /** Floating glass tiles that overlap the hero's bottom edge. */
+/**
+ * Coverage statement: what KINDS of content the hub holds, so a researcher
+ * knows the boundaries before investing time - counts alone say nothing.
+ */
+function CoverageStrip({ slug, organisation }: { slug: string; organisation: string }) {
+  const { data } = useQuery({
+    queryKey: ['coverage', slug],
+    queryFn: () => getFacets(slug, ['kind']),
+    staleTime: 5 * 60 * 1000,
+  })
+  const kinds = Object.entries(data?.kind ?? {})
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+  if (kinds.length === 0) return null
+  return (
+    <p className='mx-auto mt-4 max-w-3xl px-6 text-center text-sm text-ink-2'>
+      Holding {kinds.map(([label, count], index) => (
+        <span key={label}>
+          {index > 0 ? (index === kinds.length - 1 ? ' and ' : ', ') : ''}
+          <span className='font-medium text-ink'>
+            {count} {prettyLabel(label, organisation).toLowerCase()}
+            {count === 1 ? '' : 's'}
+          </span>
+        </span>
+      ))}.
+    </p>
+  )
+}
+
 function StatsStrip({ counters }: { counters: KbCounters }) {
   const stats = [
     { label: 'Resources', value: counters.resources.toLocaleString() },
@@ -353,6 +383,7 @@ export function ExplorePage() {
         : !isCountersError && counters
         ? <StatsStrip counters={counters} />
         : null}
+      <CoverageStrip slug={config.slug} organisation={config.branding.organisation} />
 
       <section className='mx-auto max-w-6xl space-y-10 px-6 pb-16 pt-12'>
         {isError

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { AskEvent, AskStage, Citation, ScoredResource } from '@research-portal/core'
 import { getSuggestedQuestions, streamAsk } from '../api/client.ts'
 import { citationHref, ContextJourney } from '../components/AnswerStream.tsx'
+import { type EvidenceSource, EvidenceTable } from '../components/EvidenceTable.tsx'
 import { type QualityScores, TrustSignals } from '../components/QualityGauge.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
@@ -335,6 +336,7 @@ export function AgenticPage() {
     } | null
   >(null)
   const [quality, setQuality] = useState<QualityScores | null>(null)
+  const [refused, setRefused] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [traces, setTraces] = useState<Trace[]>(() => loadTraces(config.slug))
 
@@ -363,6 +365,7 @@ export function AgenticPage() {
     setSources([])
     setUsage(null)
     setQuality(null)
+    setRefused(false)
     setErrorMessage(null)
     setStageStatuses(IDLE_STAGES)
     startedAtRef.current = Date.now()
@@ -424,6 +427,7 @@ export function AgenticPage() {
               setQuality(finalQuality)
               break
             case 'done':
+              setRefused(event.refused === true)
               break
             case 'error':
               setErrorMessage(event.message)
@@ -491,6 +495,12 @@ export function AgenticPage() {
   }
 
   const examples = suggestions?.slice(0, 4) ?? []
+  const evidenceSources: EvidenceSource[] = sources.map((resource) => ({
+    id: resource.id,
+    title: resource.title,
+    passage: resource.matchedPassage,
+    score: resource.relevance,
+  }))
 
   return (
     <main aria-label='Agentic retrieval' className='mx-auto max-w-6xl px-4 py-8 sm:px-6'>
@@ -557,6 +567,21 @@ export function AgenticPage() {
         )
         : null}
 
+      {hasStarted && !refused && quality?.groundedness !== null &&
+          quality?.groundedness !== undefined && quality.groundedness <= 2
+        ? (
+          <div
+            className='mt-6 rounded-[calc(var(--rp-radius)+4px)] border p-4'
+            style={{ borderColor: 'var(--rp-warn-line)', background: 'var(--rp-warn-bg)' }}
+          >
+            <p className='text-sm font-medium text-[var(--rp-warn-ink)]'>
+              Thinly grounded - this answer goes beyond what the retrieved passages establish. Treat
+              it as a lead, not a finding.
+            </p>
+          </div>
+        )
+        : null}
+
       {hasStarted
         ? (
           <div className='mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]'>
@@ -564,65 +589,111 @@ export function AgenticPage() {
               aria-label='Answer'
               className='min-w-0 rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-6 shadow-sm'
             >
-              {answerText.length > 0
-                ? renderMarkdown(answerText)
-                : isRunning
-                ? <p className='text-sm text-ink-3'>Working on it…</p>
-                : !errorMessage
-                ? <p className='text-sm text-ink-3'>No answer yet.</p>
-                : null}
-
-              {isRunning && answerText.length > 0
+              {refused
                 ? (
-                  <span
-                    className='ml-0.5 inline-block h-4 w-1.5 animate-pulse align-text-bottom'
-                    style={{ backgroundColor: 'var(--rp-accent)' }}
-                    aria-hidden='true'
-                  />
-                )
-                : null}
-
-              {citations.length > 0
-                ? (
-                  <div className='mt-4 border-t border-line pt-3'>
-                    <p className='text-xs font-medium text-ink-3'>
-                      Sources: {citations.length}
-                    </p>
-                    <div className='mt-2 flex flex-wrap gap-1.5'>
-                      {citations.map((citation) => {
-                        const matchedPassage = sources.find((resource) =>
-                          resource.id === citation.resourceId
-                        )?.matchedPassage
-                        return (
-                          <Link
-                            key={citation.index}
-                            to={citationHref(config.slug, citation.resourceId, matchedPassage)}
-                            title={citation.title}
-                            className='rp-chip'
-                            style={{ outlineColor: 'var(--rp-accent)' }}
-                          >
-                            <span
-                              className='inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold text-white'
-                              style={{ backgroundColor: 'var(--rp-accent)' }}
-                            >
-                              {citation.index}
-                            </span>
-                            <span className='rp-clamp-2 max-w-[10rem]'>{citation.title}</span>
-                          </Link>
-                        )
-                      })}
+                  <>
+                    <div className='mb-2'>
+                      <span className='rp-badge rp-badge-quiet'>No direct evidence found</span>
                     </div>
-                  </div>
+                    {answerText.length > 0 ? renderMarkdown(answerText) : null}
+                    {sources.length > 0
+                      ? (
+                        <div className='mt-4 border-t border-line pt-3'>
+                          <EvidenceTable
+                            slug={config.slug}
+                            question={lastQuestion}
+                            sources={evidenceSources}
+                            judge={false}
+                            title='Closest passages found'
+                          />
+                        </div>
+                      )
+                      : null}
+                  </>
                 )
-                : null}
+                : (
+                  <>
+                    {answerText.length > 0
+                      ? renderMarkdown(answerText)
+                      : isRunning
+                      ? <p className='text-sm text-ink-3'>Working on it…</p>
+                      : !errorMessage
+                      ? <p className='text-sm text-ink-3'>No answer yet.</p>
+                      : null}
 
-              {!isRunning && sources.length > 0
-                ? (
-                  <div className='mt-4 border-t border-line pt-3'>
-                    <ContextJourney slug={config.slug} sources={sources} query={lastQuestion} />
-                  </div>
-                )
-                : null}
+                    {isRunning && answerText.length > 0
+                      ? (
+                        <span
+                          className='ml-0.5 inline-block h-4 w-1.5 animate-pulse align-text-bottom'
+                          style={{ backgroundColor: 'var(--rp-accent)' }}
+                          aria-hidden='true'
+                        />
+                      )
+                      : null}
+
+                    {citations.length > 0
+                      ? (
+                        <div className='mt-4 border-t border-line pt-3'>
+                          <p className='text-xs font-medium text-ink-3'>
+                            Sources: {citations.length}
+                          </p>
+                          <div className='mt-2 flex flex-wrap gap-1.5'>
+                            {citations.map((citation) => {
+                              const matchedPassage = sources.find((resource) =>
+                                resource.id === citation.resourceId
+                              )?.matchedPassage
+                              return (
+                                <Link
+                                  key={citation.index}
+                                  to={citationHref(
+                                    config.slug,
+                                    citation.resourceId,
+                                    matchedPassage,
+                                  )}
+                                  title={citation.title}
+                                  className='rp-chip'
+                                  style={{ outlineColor: 'var(--rp-accent)' }}
+                                >
+                                  <span
+                                    className='inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold text-white'
+                                    style={{ backgroundColor: 'var(--rp-accent)' }}
+                                  >
+                                    {citation.index}
+                                  </span>
+                                  <span className='rp-clamp-2 max-w-[10rem]'>{citation.title}</span>
+                                </Link>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                      : null}
+
+                    {!isRunning && sources.length > 0
+                      ? (
+                        <div className='mt-4 border-t border-line pt-3'>
+                          <EvidenceTable
+                            slug={config.slug}
+                            question={lastQuestion}
+                            sources={evidenceSources}
+                          />
+                        </div>
+                      )
+                      : null}
+
+                    {!isRunning && sources.length > 0
+                      ? (
+                        <div className='mt-4 border-t border-line pt-3'>
+                          <ContextJourney
+                            slug={config.slug}
+                            sources={sources}
+                            query={lastQuestion}
+                          />
+                        </div>
+                      )
+                      : null}
+                  </>
+                )}
             </section>
 
             <aside aria-label='Retrieval pipeline'>

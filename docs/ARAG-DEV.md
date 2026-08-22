@@ -125,3 +125,11 @@ The ARAG factory (`/Users/jsanders/Claude/ARAG-PMK-1`) has deeper skills (`arag-
 `rao-workflow`, `arag-demo-app`) and a live memory of every gotcha. Ask Jay to relay a specific
 question to the factory session rather than probing the live platform blindly - the factory has
 almost certainly already paid for that lesson.
+
+- **`search_configuration` overrides the request's `features`** - passing a
+  named config plus `features: ['keyword']` still runs the config's own
+  features, making mode switches silently inert. Only attach the config for
+  the default mode; drop it when the caller chooses a specific mode.
+- **`/find` paragraph scores mix scales** - semantic ~0-1, BM25 unbounded
+  (5-30 typical). Calibrate (logistic squash for >1) instead of normalising
+  to the top hit, or every top result reads "100%".

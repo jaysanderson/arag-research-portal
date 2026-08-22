@@ -8,11 +8,20 @@ import {
   useState,
 } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { createPortal } from 'react-dom'
 import { Link, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
-import type { ResourceContent } from '@research-portal/core'
-import { ApiError, getResource, getResourceContent, resourceFileUrl } from '../api/client.ts'
+import type { ResourceContent, ResourceSummary, ScoredResource } from '@research-portal/core'
+import {
+  ApiError,
+  getRelationsGraph,
+  getResource,
+  getResourceContent,
+  resourceFileUrl,
+  searchTenantFull,
+} from '../api/client.ts'
 import { AnswerStream } from '../components/AnswerStream.tsx'
 import { ResourceThumb } from '../components/ResourceThumb.tsx'
+import { SaveEvidenceButton } from '../components/SaveEvidence.tsx'
 import { ErrorCard, Skeleton, TypeBadge } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
@@ -32,6 +41,13 @@ function passageNeedle(passage: string | null): string | null {
   if (!passage) return null
   const normalised = normalise(passage)
   return normalised.length > 0 ? normalised.slice(0, 40) : null
+}
+
+/** Significant words from a `?q=` search query - short/noise tokens are dropped. */
+function queryTerms(query: string | null): string[] {
+  if (!query) return []
+  const words = normalise(query).split(/\s+/).filter((w) => w.length >= 3)
+  return Array.from(new Set(words))
 }
 
 function formatTimestamp(seconds: number): string {
@@ -81,13 +97,17 @@ function BodySkeleton() {
 }
 
 /**
- * Extracted-text paragraphs with optional passage highlighting. Shared by the
- * web, PDF, text and file bodies. `passage` drives a one-time scroll-into-view
- * of the matching paragraph on mount, so a citation link lands the reader on
- * the exact cited passage.
+ * Extracted-text paragraphs with optional passage highlighting and a transient
+ * "flash" highlight for a paragraph the reader just jumped to from the Matches
+ * rail. Shared by the web, PDF, text and file bodies. Each paragraph carries a
+ * stable id (`doc-para-{index}`) so the rail can scroll straight to it.
  */
 function ExtractedTextPanel(
-  { paragraphs, passage }: { paragraphs: string[]; passage: string | null },
+  { paragraphs, passage, flashIndex }: {
+    paragraphs: string[]
+    passage: string | null
+    flashIndex: number | null
+  },
 ) {
   const highlightRef = useRef<HTMLParagraphElement | null>(null)
   const needle = passageNeedle(passage)
@@ -109,12 +129,17 @@ function ExtractedTextPanel(
     <div className='rp-prose space-y-3 text-sm text-ink-2'>
       {paragraphs.map((paragraph, index) => {
         const isHighlighted = index === highlightIndex
+        const isFlashed = index === flashIndex
+        const emphasised = isHighlighted || isFlashed
         return (
           <p
             key={index}
+            id={`doc-para-${index}`}
             ref={isHighlighted ? highlightRef : undefined}
-            className={isHighlighted ? 'rounded-[4px] border-l-2 py-1.5 pl-3 pr-2 text-ink' : ''}
-            style={isHighlighted
+            className={`scroll-mt-24 transition-colors duration-700 ${
+              emphasised ? 'rounded-[4px] border-l-2 py-1.5 pl-3 pr-2 text-ink' : ''
+            }`}
+            style={emphasised
               ? {
                 borderColor: 'var(--rp-accent)',
                 backgroundColor: 'color-mix(in srgb, var(--rp-accent) 14%, var(--rp-surface))',
@@ -131,9 +156,10 @@ function ExtractedTextPanel(
 
 /** Extracted text wrapped in its own card, used by the web and file/text bodies. */
 function ExtractedTextCard(
-  { texts, passage, title = 'Extracted text' }: {
+  { texts, passage, flashIndex, title = 'Extracted text' }: {
     texts: { fieldId: string; text: string }[]
     passage: string | null
+    flashIndex: number | null
     title?: string
   },
 ) {
@@ -142,7 +168,7 @@ function ExtractedTextCard(
     <div className='rp-card p-5'>
       <PanelHeading>{title}</PanelHeading>
       <div className='mt-3'>
-        <ExtractedTextPanel paragraphs={paragraphs} passage={passage} />
+        <ExtractedTextPanel paragraphs={paragraphs} passage={passage} flashIndex={flashIndex} />
       </div>
     </div>
   )
@@ -254,33 +280,16 @@ function TranscriptPanel(
 }
 
 function WebBody(
-  { content, resourceSummary, passage }: {
+  { content, resourceSummary, passage, flashIndex }: {
     content: ResourceContent
     resourceSummary: string
     passage: string | null
+    flashIndex: number | null
   },
 ) {
   const pageSummary = content.summary ?? resourceSummary
   return (
     <div className='space-y-5'>
-      {content.originUrl
-        ? (
-          <a
-            href={content.originUrl}
-            target='_blank'
-            rel='noopener noreferrer'
-            className='rp-card rp-lift rp-focus flex items-center justify-between gap-4 p-4'
-          >
-            <div className='min-w-0'>
-              <PanelHeading>Source</PanelHeading>
-              <p className='mt-1 text-sm font-medium text-ink'>Visit the source page</p>
-              <p className='mt-0.5 truncate text-xs text-ink-3'>{content.originUrl}</p>
-            </div>
-            <span aria-hidden='true' className='shrink-0 text-ink-3'>&rarr;</span>
-          </a>
-        )
-        : null}
-
       {pageSummary
         ? (
           <div className='rp-card p-5'>
@@ -290,16 +299,18 @@ function WebBody(
         )
         : null}
 
-      <ExtractedTextCard texts={content.texts} passage={passage} />
+      <ExtractedTextCard texts={content.texts} passage={passage} flashIndex={flashIndex} />
     </div>
   )
 }
 
 function PdfBody(
-  { content, fileUrl, passage }: {
+  { content, fileUrl, passage, flashIndex, forceOpen }: {
     content: ResourceContent
     fileUrl: string | undefined
     passage: string | null
+    flashIndex: number | null
+    forceOpen: boolean
   },
 ) {
   const paragraphs = useJoinedParagraphs(content.texts)
@@ -327,12 +338,16 @@ function PdfBody(
 
       {paragraphs.length > 0
         ? (
-          <details className='rp-card p-5' open={passage != null}>
+          <details className='rp-card p-5' open={forceOpen}>
             <summary className='rp-eyebrow cursor-pointer text-ink-3'>
               Extracted text
             </summary>
             <div className='mt-3'>
-              <ExtractedTextPanel paragraphs={paragraphs} passage={passage} />
+              <ExtractedTextPanel
+                paragraphs={paragraphs}
+                passage={passage}
+                flashIndex={flashIndex}
+              />
             </div>
           </details>
         )
@@ -392,9 +407,10 @@ function ImageBody({ fileUrl, title }: { fileUrl: string | undefined; title: str
 }
 
 function TextFileBody(
-  { content, passage, fileUrl }: {
+  { content, passage, flashIndex, fileUrl }: {
     content: ResourceContent
     passage: string | null
+    flashIndex: number | null
     fileUrl: string | undefined
   },
 ) {
@@ -412,18 +428,20 @@ function TextFileBody(
           </a>
         )
         : null}
-      <ExtractedTextCard texts={content.texts} passage={passage} />
+      <ExtractedTextCard texts={content.texts} passage={passage} flashIndex={flashIndex} />
     </div>
   )
 }
 
 /** Dispatches to the type-aware body for the resource's content kind. */
 function ResourceBody(
-  { slug, content, resourceSummary, passage }: {
+  { slug, content, resourceSummary, passage, flashIndex, hasTextMatches }: {
     slug: string
     content: ResourceContent
     resourceSummary: string
     passage: string | null
+    flashIndex: number | null
+    hasTextMatches: boolean
   },
 ) {
   const primaryFile = content.files[0]
@@ -431,9 +449,24 @@ function ResourceBody(
 
   switch (content.kind) {
     case 'web':
-      return <WebBody content={content} resourceSummary={resourceSummary} passage={passage} />
+      return (
+        <WebBody
+          content={content}
+          resourceSummary={resourceSummary}
+          passage={passage}
+          flashIndex={flashIndex}
+        />
+      )
     case 'pdf':
-      return <PdfBody content={content} fileUrl={fileUrl} passage={passage} />
+      return (
+        <PdfBody
+          content={content}
+          fileUrl={fileUrl}
+          passage={passage}
+          flashIndex={flashIndex}
+          forceOpen={passage != null || hasTextMatches}
+        />
+      )
     case 'video':
       return <MediaBody content={content} fileUrl={fileUrl} passage={passage} kind='video' />
     case 'audio':
@@ -441,12 +474,277 @@ function ResourceBody(
     case 'image':
       return <ImageBody fileUrl={fileUrl} title={content.title} />
     case 'text':
-      return <TextFileBody content={content} passage={passage} fileUrl={undefined} />
+      return (
+        <TextFileBody
+          content={content}
+          passage={passage}
+          flashIndex={flashIndex}
+          fileUrl={undefined}
+        />
+      )
     case 'file':
-      return <TextFileBody content={content} passage={passage} fileUrl={fileUrl} />
+      return (
+        <TextFileBody
+          content={content}
+          passage={passage}
+          flashIndex={flashIndex}
+          fileUrl={fileUrl}
+        />
+      )
     default:
       return null
   }
+}
+
+/** Metadata the reader actually has to show - kind, topics, publish date, origin link. */
+function AboutPanel(
+  { resource, content, topicLabel }: {
+    resource: ResourceSummary
+    content: ResourceContent | undefined
+    topicLabel: (id: string) => string | undefined
+  },
+) {
+  const originUrl = content?.originUrl
+
+  return (
+    <div className='rp-card p-4'>
+      <PanelHeading>About this document</PanelHeading>
+
+      <div className='mt-3 flex flex-wrap items-center gap-2'>
+        <TypeBadge type={resource.type} />
+        {resource.published
+          ? (
+            <span className='text-xs font-medium tabular-nums text-ink-3'>
+              Published {formatDate(resource.published)}
+            </span>
+          )
+          : null}
+      </div>
+
+      {resource.topicIds.length > 0
+        ? (
+          <div className='mt-3 flex flex-wrap gap-1'>
+            {resource.topicIds.map((topicId) => {
+              const label = topicLabel(topicId)
+              if (!label) return null
+              return (
+                <span
+                  key={topicId}
+                  className='rounded-[4px] bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-2'
+                >
+                  {label}
+                </span>
+              )
+            })}
+          </div>
+        )
+        : null}
+
+      {originUrl
+        ? (
+          <a
+            href={originUrl}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='rp-focus mt-3 flex items-center gap-1.5 rounded-[4px] text-sm font-medium underline decoration-dotted underline-offset-2'
+            style={{ color: 'var(--rp-accent)' }}
+          >
+            View original <span aria-hidden='true'>&rarr;</span>
+          </a>
+        )
+        : null}
+    </div>
+  )
+}
+
+/**
+ * Related work for the right rail. First choice: the entity relations graph -
+ * an edge whose source or target name appears in this document's title links
+ * to that entity's dossier. If the graph has nothing to say, fall back to a
+ * semantic search on the title and link to the top matching documents
+ * instead. The section renders nothing at all when neither yields a result -
+ * an honest omission beats a fake "related" list.
+ */
+function useRelatedWork(slug: string, title: string, excludeId: string) {
+  const relationsQuery = useQuery({
+    queryKey: ['relations-graph', slug],
+    queryFn: () => getRelationsGraph(slug),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const graphMatches = useMemo(() => {
+    if (!relationsQuery.data) return []
+    const haystack = title.toLowerCase()
+    const names = new Set<string>()
+    for (const edge of relationsQuery.data.edges) {
+      const source = edge.source.trim()
+      const target = edge.target.trim()
+      if (source.length > 0 && haystack.includes(source.toLowerCase())) names.add(target)
+      else if (target.length > 0 && haystack.includes(target.toLowerCase())) names.add(source)
+    }
+    return Array.from(names).filter((n) => n.length > 0).slice(0, 4)
+  }, [relationsQuery.data, title])
+
+  const fallbackEnabled = relationsQuery.isSuccess && graphMatches.length === 0 &&
+    title.trim().length > 0
+
+  const searchQuery = useQuery({
+    queryKey: ['related-search', slug, title],
+    queryFn: () => searchTenantFull(slug, title, { mode: 'semantic' }),
+    enabled: fallbackEnabled,
+  })
+
+  const fallbackResults = useMemo(() => {
+    if (!searchQuery.data) return []
+    return searchQuery.data.resources.filter((r) => r.id !== excludeId).slice(0, 4)
+  }, [searchQuery.data, excludeId])
+
+  const loading = relationsQuery.isLoading || (fallbackEnabled && searchQuery.isLoading)
+  const kind: 'graph' | 'search' | null = graphMatches.length > 0
+    ? 'graph'
+    : fallbackResults.length > 0
+    ? 'search'
+    : null
+
+  return { loading, kind, graphMatches, fallbackResults }
+}
+
+function RelatedPanel(
+  { slug, title, excludeId }: { slug: string; title: string; excludeId: string },
+) {
+  const { loading, kind, graphMatches, fallbackResults } = useRelatedWork(slug, title, excludeId)
+
+  if (loading) {
+    return (
+      <div className='rp-card p-4'>
+        <PanelHeading>Related</PanelHeading>
+        <div className='mt-3 space-y-2' aria-hidden='true'>
+          <div className='rp-shimmer bg-surface-3 h-3.5 w-full rounded-[4px]' />
+          <div className='rp-shimmer bg-surface-3 h-3.5 w-5/6 rounded-[4px]' />
+          <div className='rp-shimmer bg-surface-3 h-3.5 w-2/3 rounded-[4px]' />
+        </div>
+      </div>
+    )
+  }
+
+  if (!kind) return null
+
+  return (
+    <div className='rp-card p-4'>
+      <PanelHeading>Related</PanelHeading>
+      <ul className='mt-3 space-y-2'>
+        {kind === 'graph'
+          ? graphMatches.map((name) => (
+            <li key={name}>
+              <Link
+                to={`/t/${slug}/entity/${encodeURIComponent(name)}`}
+                className='rp-focus block truncate rounded-[4px] text-sm font-medium text-[var(--rp-ink-2)] underline decoration-dotted underline-offset-2 transition-colors duration-150 hover:text-[var(--rp-ink)]'
+              >
+                {name}
+              </Link>
+            </li>
+          ))
+          : fallbackResults.map((r: ScoredResource) => (
+            <li key={r.id}>
+              <Link
+                to={`/t/${slug}/library/${r.id}`}
+                className='rp-focus block truncate rounded-[4px] text-sm font-medium text-[var(--rp-ink-2)] transition-colors duration-150 hover:text-[var(--rp-ink)]'
+              >
+                {r.title}
+              </Link>
+            </li>
+          ))}
+      </ul>
+    </div>
+  )
+}
+
+/** The "Matches in this document" jump list, driven by a `?q=` search query. */
+function MatchesPanel(
+  { indices, paragraphs, onJump }: {
+    indices: number[]
+    paragraphs: string[]
+    onJump: (index: number) => void
+  },
+) {
+  if (indices.length === 0) return null
+
+  return (
+    <div className='rp-card p-4'>
+      <PanelHeading>Matches in this document ({indices.length})</PanelHeading>
+      <ul className='mt-3 space-y-1'>
+        {indices.map((index) => (
+          <li key={index}>
+            <button
+              type='button'
+              onClick={() => onJump(index)}
+              className='rp-focus block w-full rounded-[4px] px-2 py-1.5 text-left text-xs leading-relaxed text-ink-2 transition-colors duration-150 hover:bg-[var(--rp-surface-2)]'
+            >
+              <span className='rp-clamp-2'>{paragraphs[index]}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/**
+ * Floating "Save selection" action that appears near a text selection made
+ * inside the extracted content, so a passage can be promoted to Evidence
+ * without leaving the reader. Dismissed on scroll, Escape, or a click outside
+ * both the selection and the popover itself.
+ */
+function SelectionSaveBar(
+  { slug, resourceId, resourceTitle, selection, onDismiss }: {
+    slug: string
+    resourceId: string
+    resourceTitle: string
+    selection: { text: string; top: number; left: number }
+    onDismiss: () => void
+  },
+) {
+  const popoverRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const onScroll = () => onDismiss()
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onDismiss()
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) onDismiss()
+    }
+    globalThis.addEventListener('scroll', onScroll, { capture: true, passive: true })
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onPointerDown, { capture: true })
+    return () => {
+      globalThis.removeEventListener('scroll', onScroll, { capture: true })
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onPointerDown, { capture: true })
+    }
+  }, [onDismiss])
+
+  const top = Math.max(8, selection.top - 46)
+  const left = Math.min(Math.max(8, selection.left), globalThis.innerWidth - 180)
+
+  return createPortal(
+    <div
+      ref={popoverRef}
+      className='rp-shadow-lg fixed z-[80] rounded-[8px] border border-line bg-surface p-1'
+      style={{ top, left }}
+    >
+      <SaveEvidenceButton
+        slug={slug}
+        label='Save selection'
+        evidence={{
+          passage: selection.text.slice(0, 2000),
+          resourceId,
+          resourceTitle,
+        }}
+      />
+    </div>,
+    document.body,
+  )
 }
 
 export function ResourceDetailPage() {
@@ -454,9 +752,24 @@ export function ResourceDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
   const passage = searchParams.get('passage')
+  const qParam = searchParams.get('q')
 
   const [askDraft, setAskDraft] = useState('')
   const [askQuery, setAskQuery] = useState('')
+
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  const [selection, setSelection] = useState<{ text: string; top: number; left: number } | null>(
+    null,
+  )
+
+  const [flashIndex, setFlashIndex] = useState<number | null>(null)
+  const flashTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (flashTimeout.current) globalThis.clearTimeout(flashTimeout.current)
+    }
+  }, [])
 
   const {
     data: resource,
@@ -482,6 +795,41 @@ export function ResourceDetailPage() {
 
   const notFound = error instanceof ApiError && error.status === 404
 
+  const paragraphs = useJoinedParagraphs(content?.texts ?? [])
+  const matchTerms = useMemo(() => queryTerms(qParam), [qParam])
+  const matchIndices = useMemo(() => {
+    if (matchTerms.length === 0) return []
+    return paragraphs
+      .map((paragraph, index) => ({ normalised: normalise(paragraph), index }))
+      .filter(({ normalised }) => matchTerms.some((term) => normalised.includes(term)))
+      .map(({ index }) => index)
+  }, [paragraphs, matchTerms])
+
+  function jumpToParagraph(index: number) {
+    document.getElementById(`doc-para-${index}`)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    })
+    if (flashTimeout.current) globalThis.clearTimeout(flashTimeout.current)
+    setFlashIndex(index)
+    flashTimeout.current = globalThis.setTimeout(() => setFlashIndex(null), 1500)
+  }
+
+  function handleContentMouseUp() {
+    const sel = globalThis.getSelection()
+    if (!sel || sel.isCollapsed || sel.toString().trim().length === 0) {
+      setSelection(null)
+      return
+    }
+    const anchor = sel.anchorNode
+    if (!anchor || !contentRef.current?.contains(anchor)) {
+      setSelection(null)
+      return
+    }
+    const rect = sel.getRangeAt(0).getBoundingClientRect()
+    setSelection({ text: sel.toString(), top: rect.top, left: rect.left })
+  }
+
   function handleAskSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const trimmed = askDraft.trim()
@@ -492,7 +840,7 @@ export function ResourceDetailPage() {
   const topicLabel = (topicId: string) => config.topics.find((topic) => topic.id === topicId)?.label
 
   return (
-    <main className='mx-auto max-w-3xl px-6 py-8'>
+    <main className='mx-auto max-w-5xl px-6 py-8'>
       <Link
         to={`/t/${config.slug}/library`}
         className='text-sm font-medium text-[var(--rp-ink-3)] transition-colors duration-150 hover:text-[var(--rp-ink)]'
@@ -531,134 +879,137 @@ export function ResourceDetailPage() {
 
         {!isLoading && !isError && resource
           ? (
-            <>
-              <article className='rp-card p-5'>
-                <div className='flex items-start justify-between gap-5'>
-                  <div className='min-w-0 flex-1'>
-                    <div className='flex flex-wrap items-center justify-between gap-3'>
-                      <TypeBadge type={resource.type} />
-                      {resource.published
+            <div className='grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_280px]'>
+              <div className='min-w-0'>
+                <article className='rp-card p-5'>
+                  <div className='flex items-start justify-between gap-5'>
+                    <div className='min-w-0 flex-1'>
+                      <h1 className='rp-display text-2xl text-ink'>
+                        {resource.title}
+                      </h1>
+                      <p className='mt-2 text-sm leading-relaxed text-ink-2'>
+                        {resource.summary}
+                      </p>
+
+                      {resource.keyFacts.length > 0
                         ? (
-                          <span className='text-xs font-medium tabular-nums text-ink-3'>
-                            Published {formatDate(resource.published)}
-                          </span>
+                          <div className='mt-5 border-t border-line pt-4'>
+                            <PanelHeading>Key facts</PanelHeading>
+                            <ol className='mt-2 space-y-1.5'>
+                              {resource.keyFacts.map((fact, index) => (
+                                <li key={index} className='flex gap-2 text-sm text-ink-2'>
+                                  <span className='font-medium tabular-nums text-ink-3'>
+                                    {index + 1}.
+                                  </span>
+                                  <span>{fact}</span>
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
                         )
                         : null}
                     </div>
 
-                    <h1 className='rp-display mt-3 text-2xl text-ink'>
-                      {resource.title}
-                    </h1>
-                    <p className='mt-2 text-sm leading-relaxed text-ink-2'>
-                      {resource.summary}
-                    </p>
-
-                    {resource.topicIds.length > 0
-                      ? (
-                        <div className='mt-3.5 flex flex-wrap gap-1'>
-                          {resource.topicIds.map((topicId) => {
-                            const label = topicLabel(topicId)
-                            if (!label) return null
-                            return (
-                              <span
-                                key={topicId}
-                                className='rounded-[4px] bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-2'
-                              >
-                                {label}
-                              </span>
-                            )
-                          })}
-                        </div>
-                      )
-                      : null}
-
-                    {resource.keyFacts.length > 0
-                      ? (
-                        <div className='mt-5 border-t border-line pt-4'>
-                          <PanelHeading>Key facts</PanelHeading>
-                          <ol className='mt-2 space-y-1.5'>
-                            {resource.keyFacts.map((fact, index) => (
-                              <li key={index} className='flex gap-2 text-sm text-ink-2'>
-                                <span className='font-medium tabular-nums text-ink-3'>
-                                  {index + 1}.
-                                </span>
-                                <span>{fact}</span>
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                      )
-                      : null}
+                    <div className='hidden h-24 w-36 shrink-0 overflow-hidden rounded-[8px] border border-line sm:block'>
+                      <ResourceThumb slug={config.slug} id={resource.id} type={resource.type} />
+                    </div>
                   </div>
+                </article>
 
-                  <div className='hidden h-24 w-36 shrink-0 overflow-hidden rounded-[8px] border border-line sm:block'>
-                    <ResourceThumb slug={config.slug} id={resource.id} type={resource.type} />
-                  </div>
-                </div>
-              </article>
+                {contentLoading ? <BodySkeleton /> : null}
 
-              {contentLoading ? <BodySkeleton /> : null}
-
-              {!contentLoading && content
-                ? (
-                  <div className='mt-6'>
-                    <ResourceBody
-                      slug={config.slug}
-                      content={content}
-                      resourceSummary={resource.summary}
-                      passage={passage}
-                    />
-                  </div>
-                )
-                : null}
-
-              {!contentLoading && !content
-                ? (
-                  <div className='mt-6 rounded-[10px] border border-dashed border-line bg-surface-2 p-5'>
-                    <p className='text-sm text-ink-2'>
-                      Full content is unavailable for this resource.
-                    </p>
-                  </div>
-                )
-                : null}
-
-              <section className='rp-card mt-6 p-5'>
-                <PanelHeading>Ask this document</PanelHeading>
-                <form onSubmit={handleAskSubmit} className='mt-3'>
-                  <label htmlFor='ask-document' className='sr-only'>
-                    Ask a question about {resource.title}
-                  </label>
-                  <div className='flex items-center gap-2 rounded-[8px] border border-line bg-surface p-1.5 pl-3'>
-                    <input
-                      id='ask-document'
-                      type='text'
-                      value={askDraft}
-                      onChange={(event) => setAskDraft(event.target.value)}
-                      placeholder='Ask a question about this document'
-                      className='min-w-0 flex-1 border-0 bg-transparent py-1.5 text-sm text-ink placeholder:text-[var(--rp-ink-3)] focus:outline-none'
-                    />
-                    <button type='submit' className='rp-btn rp-btn-primary shrink-0 font-semibold'>
-                      Ask
-                    </button>
-                  </div>
-                </form>
-
-                {askQuery.trim().length > 0
+                {!contentLoading && content
                   ? (
-                    <div className='mt-4'>
-                      <AnswerStream
+                    <div
+                      className='relative mt-6'
+                      ref={contentRef}
+                      onMouseUp={handleContentMouseUp}
+                    >
+                      <ResourceBody
                         slug={config.slug}
-                        request={{ query: askQuery, resourceId: resource.id }}
-                        onRetry={() => setAskQuery(askQuery)}
+                        content={content}
+                        resourceSummary={resource.summary}
+                        passage={passage}
+                        flashIndex={flashIndex}
+                        hasTextMatches={matchIndices.length > 0}
                       />
                     </div>
                   )
                   : null}
-              </section>
-            </>
+
+                {!contentLoading && !content
+                  ? (
+                    <div className='mt-6 rounded-[10px] border border-dashed border-line bg-surface-2 p-5'>
+                      <p className='text-sm text-ink-2'>
+                        Full content is unavailable for this resource.
+                      </p>
+                    </div>
+                  )
+                  : null}
+
+                <section className='rp-card mt-6 p-5'>
+                  <PanelHeading>Ask this document</PanelHeading>
+                  <form onSubmit={handleAskSubmit} className='mt-3'>
+                    <label htmlFor='ask-document' className='sr-only'>
+                      Ask a question about {resource.title}
+                    </label>
+                    <div className='flex items-center gap-2 rounded-[8px] border border-line bg-surface p-1.5 pl-3'>
+                      <input
+                        id='ask-document'
+                        type='text'
+                        value={askDraft}
+                        onChange={(event) => setAskDraft(event.target.value)}
+                        placeholder='Ask a question about this document'
+                        className='min-w-0 flex-1 border-0 bg-transparent py-1.5 text-sm text-ink placeholder:text-[var(--rp-ink-3)] focus:outline-none'
+                      />
+                      <button
+                        type='submit'
+                        className='rp-btn rp-btn-primary shrink-0 font-semibold'
+                      >
+                        Ask
+                      </button>
+                    </div>
+                  </form>
+
+                  {askQuery.trim().length > 0
+                    ? (
+                      <div className='mt-4'>
+                        <AnswerStream
+                          slug={config.slug}
+                          request={{ query: askQuery, resourceId: resource.id }}
+                          onRetry={() => setAskQuery(askQuery)}
+                        />
+                      </div>
+                    )
+                    : null}
+                </section>
+              </div>
+
+              <aside className='space-y-5 lg:sticky lg:top-20 lg:self-start'>
+                <AboutPanel resource={resource} content={content} topicLabel={topicLabel} />
+                <MatchesPanel
+                  indices={matchIndices}
+                  paragraphs={paragraphs}
+                  onJump={jumpToParagraph}
+                />
+                <RelatedPanel slug={config.slug} title={resource.title} excludeId={resource.id} />
+              </aside>
+            </div>
           )
           : null}
       </div>
+
+      {selection && resource
+        ? (
+          <SelectionSaveBar
+            slug={config.slug}
+            resourceId={resource.id}
+            resourceTitle={resource.title}
+            selection={selection}
+            onDismiss={() => setSelection(null)}
+          />
+        )
+        : null}
     </main>
   )
 }

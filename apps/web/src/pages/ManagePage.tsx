@@ -7,6 +7,7 @@ import { AddContent } from './admin/AddContent.tsx'
 import { AnalysePanel } from './admin/AnalysePanel.tsx'
 import { AppearancePanel } from './admin/AppearancePanel.tsx'
 import { BehaviourPanel } from './admin/BehaviourPanel.tsx'
+import { CorpusHealthPanel } from './admin/CorpusHealthPanel.tsx'
 import { InsightsPanel } from './admin/InsightsPanel.tsx'
 import { KgPanel } from './admin/KgPanel.tsx'
 import { RecentList } from './admin/RecentList.tsx'
@@ -265,6 +266,7 @@ export function ManagePage() {
                       )}
                   </div>
                   {reachable && <SourcesPanel slug={slug} passcode={passcode} />}
+                  {reachable && <CorpusHealthPanel slug={slug} passcode={passcode} />}
                 </div>
               )}
 

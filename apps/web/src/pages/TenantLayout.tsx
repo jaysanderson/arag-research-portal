@@ -29,6 +29,7 @@ const NAV_ITEMS: { path: string; label: string; end: boolean }[] = [
   { path: '/search', label: 'Search', end: false },
   { path: '/library', label: 'Library', end: false },
   { path: '/assistant', label: 'Assistant', end: false },
+  { path: '/investigations', label: 'Investigations', end: false },
   { path: '/agentic', label: 'Agentic', end: false },
   { path: '/generate', label: 'Generate', end: false },
   { path: '/graph', label: 'Graph', end: false },

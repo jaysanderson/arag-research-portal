@@ -14,6 +14,7 @@ import {
   summarizeResources,
 } from '../api/client.ts'
 import { ResourceThumb } from '../components/ResourceThumb.tsx'
+import { SaveEvidenceButton } from '../components/SaveEvidence.tsx'
 import { TypeaheadDropdown, type TypeaheadItem, useTypeahead } from '../components/Typeahead.tsx'
 import { EmptyState, ErrorCard, Skeleton, TypeBadge } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
@@ -24,11 +25,25 @@ const MODES: { value: RetrievalMode; label: string }[] = [
   { value: 'keyword', label: 'Keyword' },
 ]
 
+/** Relevance below this is flagged as a weak match rather than hidden - honesty over false confidence. */
+const WEAK_MATCH_THRESHOLD = 0.35
+/** Threshold for the "Strong" match-strength filter. */
+const STRONG_MATCH_THRESHOLD = 0.6
+
+type MatchStrength = 'all' | 'strong'
+
+const STRENGTH_OPTIONS: { value: MatchStrength; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'strong', label: 'Strong (60%+)' },
+]
+
 function RelevanceMeter({ relevance }: { relevance: number }) {
   const percent = Math.round(relevance * 100)
+  const weak = relevance < WEAK_MATCH_THRESHOLD
 
   return (
     <div className='flex shrink-0 items-center gap-2'>
+      {weak ? <span className='text-[11px] text-ink-3'>weak match</span> : null}
       <div
         className='h-1 w-20 overflow-hidden rounded-[2px] bg-surface-3'
         role='progressbar'
@@ -51,7 +66,9 @@ function RelevanceMeter({ relevance }: { relevance: number }) {
  * One result. The matched passage is the point of the card - it is the citation
  * in context, which is why this view needs no synthesised answer above it.
  */
-function ResultCard({ resource, slug }: { resource: ScoredResource; slug: string }) {
+function ResultCard(
+  { resource, slug, query }: { resource: ScoredResource; slug: string; query: string },
+) {
   const keyFacts = resource.keyFacts.slice(0, 3)
 
   return (
@@ -100,6 +117,20 @@ function ResultCard({ resource, slug }: { resource: ScoredResource; slug: string
               </div>
             )
             : null}
+
+          <div className='mt-3 flex justify-end'>
+            <SaveEvidenceButton
+              slug={slug}
+              compact
+              evidence={{
+                passage: resource.matchedPassage || resource.title,
+                resourceId: resource.id,
+                resourceTitle: resource.title,
+                score: resource.relevance,
+                question: query,
+              }}
+            />
+          </div>
         </div>
       </div>
     </article>
@@ -366,6 +397,7 @@ export function SearchPage() {
     const raw = searchParams.get('topics')
     return raw ? raw.split(',').filter((id) => id.length > 0) : []
   }, [searchParams])
+  const strength: MatchStrength = searchParams.get('strength') === 'strong' ? 'strong' : 'all'
 
   const [draft, setDraft] = useState(q)
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -395,6 +427,12 @@ export function SearchPage() {
     else set.add(id)
     updateParams({ topics: Array.from(set).join(',') || null })
   }
+
+  function setStrength(next: MatchStrength) {
+    updateParams({ strength: next === 'all' ? null : next })
+  }
+
+  const topicLabel = (id: string) => config.topics.find((topic) => topic.id === id)?.label ?? id
 
   // Entities sharpen the query in place; a resource title is a search of its own.
   const onPick = useCallback((item: TypeaheadItem) => {
@@ -426,6 +464,33 @@ export function SearchPage() {
     queryFn: () => searchTenantFull(config.slug, q, { mode, topicIds: selectedTopics }),
     enabled: q.trim().length > 0,
   })
+
+  // Match strength is not a server filter - the search API only accepts topicIds - so
+  // this narrows the already-fetched, calibrated results client-side.
+  const filteredResults = useMemo(() => {
+    if (!results) return []
+    if (strength !== 'strong') return results.resources
+    return results.resources.filter((r) => r.relevance >= STRONG_MATCH_THRESHOLD)
+  }, [results, strength])
+
+  const activeFilters = useMemo(() => {
+    const chips: { key: string; label: string; onRemove: () => void }[] = selectedTopics.map(
+      (id) => ({
+        key: `topic-${id}`,
+        label: topicLabel(id),
+        onRemove: () => toggleTopic(id),
+      }),
+    )
+    if (strength === 'strong') {
+      chips.push({
+        key: 'strength',
+        label: 'Strong matches only',
+        onRemove: () => setStrength('all'),
+      })
+    }
+    return chips
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTopics, strength, config.topics])
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -474,8 +539,8 @@ export function SearchPage() {
   const summaryModal = useResourceSummary(config.slug)
 
   function summariseResults() {
-    if (!results || results.resources.length === 0) return
-    const top = results.resources.slice(0, 10)
+    if (filteredResults.length === 0) return
+    const top = filteredResults.slice(0, 10)
     summaryModal.run(top.map((r) => r.id), top.map((r) => r.title))
   }
 
@@ -575,91 +640,137 @@ export function SearchPage() {
           })}
         </div>
 
-        {config.topics.length > 0
-          ? (
-            <button
-              type='button'
-              onClick={() => setFiltersOpen((open) => !open)}
-              className='rp-chip h-9 sm:h-7 lg:hidden'
-              aria-expanded={filtersOpen}
-            >
-              Filters{selectedTopics.length > 0 ? ` (${selectedTopics.length})` : ''}
-            </button>
-          )
-          : null}
+        <button
+          type='button'
+          onClick={() => setFiltersOpen((open) => !open)}
+          className='rp-chip h-9 sm:h-7 lg:hidden'
+          aria-expanded={filtersOpen}
+        >
+          Filters{activeFilters.length > 0 ? ` (${activeFilters.length})` : ''}
+        </button>
 
         {hasQuery
           ? (
-            isWatchingCurrent ? <span className='rp-badge rp-badge-quiet'>Watching</span> : (
-              <button
-                type='button'
-                onClick={() => addWatchMutation.mutate()}
-                disabled={addWatchMutation.isPending}
-                className='rp-chip h-9 sm:h-7'
-              >
-                {addWatchMutation.isPending ? 'Saving…' : 'Watch this search'}
-              </button>
-            )
+            isWatchingCurrent
+              ? (
+                <span
+                  className='rp-badge rp-badge-quiet'
+                  title='This search is re-checked daily - a dot appears in the saved strip when new results arrive.'
+                >
+                  Watching
+                </span>
+              )
+              : (
+                <button
+                  type='button'
+                  onClick={() => addWatchMutation.mutate()}
+                  disabled={addWatchMutation.isPending}
+                  title='Get notified here when new results appear for this search'
+                  className='rp-chip h-9 sm:h-7'
+                >
+                  {addWatchMutation.isPending ? 'Saving…' : 'Watch this search'}
+                </button>
+              )
           )
           : null}
 
         {hasQuery && !isLoading && !isError && results
           ? (
             <p className='ml-auto text-sm font-medium tabular-nums text-ink-3'>
-              {results.resources.length} {results.resources.length === 1 ? 'resource' : 'resources'}
+              {filteredResults.length} {filteredResults.length === 1 ? 'result' : 'results'}
+              {activeFilters.length > 0
+                ? ` · filters: ${activeFilters.map((f) => f.label).join(', ')}`
+                : ''}
             </p>
           )
           : null}
       </div>
 
       <div className='mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[230px_1fr]'>
-        {config.topics.length > 0
-          ? (
-            <aside className={`${filtersOpen ? 'block' : 'hidden'} lg:block`}>
-              <div className='rp-card p-4 lg:sticky lg:top-20'>
-                <div className='flex items-center justify-between gap-2'>
-                  <p className='rp-eyebrow text-ink-3'>Topics</p>
-                  {selectedTopics.length > 0
-                    ? (
-                      <button
-                        type='button'
-                        onClick={() => updateParams({ topics: null })}
-                        className='text-xs font-medium text-[var(--rp-ink-3)] transition-colors duration-150 hover:text-[var(--rp-ink)]'
-                      >
-                        Clear
-                      </button>
-                    )
-                    : null}
+        <aside className={`${filtersOpen ? 'block' : 'hidden'} lg:block`}>
+          <div className='rp-card p-4 lg:sticky lg:top-20'>
+            {config.topics.length > 0
+              ? (
+                <div>
+                  <div className='flex items-center justify-between gap-2'>
+                    <p className='rp-eyebrow text-ink-3'>Topics</p>
+                    {selectedTopics.length > 0
+                      ? (
+                        <button
+                          type='button'
+                          onClick={() => updateParams({ topics: null })}
+                          className='text-xs font-medium text-[var(--rp-ink-3)] transition-colors duration-150 hover:text-[var(--rp-ink)]'
+                        >
+                          Clear
+                        </button>
+                      )
+                      : null}
+                  </div>
+                  <div className='mt-2.5 space-y-0.5'>
+                    {config.topics.map((topic) => {
+                      const count = topicCounts[topic.id] ?? 0
+                      const checked = selectedTopics.includes(topic.id)
+                      const muted = count === 0 && !checked
+                      return (
+                        <label
+                          key={topic.id}
+                          className={`flex cursor-pointer items-center gap-2.5 rounded-[6px] px-1 py-1 text-sm ${
+                            muted ? 'text-ink-3' : 'text-ink-2'
+                          }`}
+                        >
+                          <input
+                            type='checkbox'
+                            checked={checked}
+                            onChange={() => toggleTopic(topic.id)}
+                            className='h-4 w-4 shrink-0 rounded-[3px] border-line'
+                            style={{ accentColor: 'var(--rp-accent)' }}
+                          />
+                          <span className='min-w-0 flex-1'>{topic.label}</span>
+                          <span className='text-xs tabular-nums text-ink-3'>{count}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
                 </div>
-                <div className='mt-2.5 space-y-0.5'>
-                  {config.topics.map((topic) => {
-                    const count = topicCounts[topic.id] ?? 0
-                    const checked = selectedTopics.includes(topic.id)
-                    const muted = count === 0 && !checked
-                    return (
-                      <label
-                        key={topic.id}
-                        className={`flex cursor-pointer items-center gap-2.5 rounded-[6px] px-1 py-1 text-sm ${
-                          muted ? 'text-ink-3' : 'text-ink-2'
-                        }`}
-                      >
-                        <input
-                          type='checkbox'
-                          checked={checked}
-                          onChange={() => toggleTopic(topic.id)}
-                          className='h-4 w-4 shrink-0 rounded-[3px] border-line'
-                          style={{ accentColor: 'var(--rp-accent)' }}
-                        />
-                        <span className='min-w-0 flex-1'>{topic.label}</span>
-                        <span className='text-xs tabular-nums text-ink-3'>{count}</span>
-                      </label>
-                    )
-                  })}
-                </div>
+              )
+              : null}
+
+            <div className={config.topics.length > 0 ? 'mt-5 border-t border-line pt-4' : ''}>
+              <p className='rp-eyebrow text-ink-3'>Match strength</p>
+              <div
+                className='mt-2.5 inline-flex overflow-hidden rounded-[6px] border border-line bg-surface'
+                role='radiogroup'
+                aria-label='Match strength'
+              >
+                {STRENGTH_OPTIONS.map((option, index) => {
+                  const active = strength === option.value
+                  return (
+                    <button
+                      key={option.value}
+                      type='button'
+                      role='radio'
+                      aria-checked={active}
+                      onClick={() => setStrength(option.value)}
+                      className={`rp-focus px-3 py-1.5 text-xs font-medium transition-colors duration-150 ${
+                        index > 0 ? 'border-l border-line' : ''
+                      } ${
+                        active
+                          ? 'text-white'
+                          : 'text-[var(--rp-ink-2)] hover:bg-[var(--rp-surface-2)] hover:text-[var(--rp-ink)]'
+                      }`}
+                      style={active ? { backgroundColor: 'var(--rp-primary)' } : undefined}
+                    >
+                      {option.label}
+                    </button>
+                  )
+                })}
               </div>
-            </aside>
-          )
-          : null}
+              <p className='mt-1.5 text-xs text-ink-3'>
+                Strong matches score 60% or higher on the calibrated relevance scale.
+              </p>
+            </div>
+          </div>
+        </aside>
 
         <div className='min-w-0'>
           <WatchStrip
@@ -667,6 +778,13 @@ export function SearchPage() {
             onRun={runWatch}
             onDelete={(id) => deleteWatchMutation.mutate(id)}
           />
+          {hasQuery
+            ? (
+              <p className='-mt-2 mb-4 text-xs text-ink-3'>
+                Watched searches are re-checked daily - a dot appears here when results change.
+              </p>
+            )
+            : null}
 
           {!hasQuery
             ? (
@@ -721,12 +839,45 @@ export function SearchPage() {
           {hasQuery && !isLoading && !isError && results
             ? (
               <>
+                {activeFilters.length > 0
+                  ? (
+                    <div className='mb-3 flex flex-wrap items-center gap-1.5'>
+                      {activeFilters.map((filter) => (
+                        <button
+                          key={filter.key}
+                          type='button'
+                          onClick={filter.onRemove}
+                          className='rp-chip h-7 gap-1'
+                        >
+                          {filter.label}
+                          <span aria-hidden='true' className='text-ink-3'>&times;</span>
+                        </button>
+                      ))}
+                    </div>
+                  )
+                  : null}
+
                 {results.resources.length === 0
                   ? (
                     <EmptyState
                       title='No resources matched that search'
                       description='Try broader terms, a different retrieval mode, or fewer topic filters.'
                     />
+                  )
+                  : filteredResults.length === 0
+                  ? (
+                    <EmptyState
+                      title='No results match these filters'
+                      description='The search found matches, but none clear the current filters.'
+                    >
+                      <button
+                        type='button'
+                        onClick={() => updateParams({ topics: null, strength: null })}
+                        className='rp-btn rp-btn-outline'
+                      >
+                        Clear filters
+                      </button>
+                    </EmptyState>
                   )
                   : (
                     <>
@@ -740,8 +891,13 @@ export function SearchPage() {
                         </button>
                       </div>
                       <div className='mt-2 space-y-3'>
-                        {results.resources.map((resource) => (
-                          <ResultCard key={resource.id} resource={resource} slug={config.slug} />
+                        {filteredResults.map((resource) => (
+                          <ResultCard
+                            key={resource.id}
+                            resource={resource}
+                            slug={config.slug}
+                            query={trimmedQuery}
+                          />
                         ))}
                       </div>
                     </>

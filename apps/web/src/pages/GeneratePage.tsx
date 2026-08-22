@@ -4,6 +4,7 @@ import { useOutletContext } from 'react-router-dom'
 import type { GenerateKind, ResourceSummary } from '@research-portal/core'
 import { generateArtifact } from '../api/client.ts'
 import { EmptyState } from '../components/ui.tsx'
+import { SaveArtefactButton } from '../components/SaveEvidence.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
 // ---------------------------------------------------------------------------
@@ -749,13 +750,30 @@ function exportToPdf(kind: GenerateKind, object: unknown, sourceTitles: string[]
 }
 
 function ExportRow(
-  { kind, object, sourceTitles }: { kind: GenerateKind; object: unknown; sourceTitles: string[] },
+  { kind, object, sourceTitles, slug }: {
+    kind: GenerateKind
+    object: unknown
+    sourceTitles: string[]
+    slug: string
+  },
 ) {
   const [popupBlocked, setPopupBlocked] = useState(false)
   const disabled = object === undefined || object === null
 
   return (
     <div className='mt-4 flex flex-wrap items-center gap-3'>
+      {!disabled
+        ? (
+          <SaveArtefactButton
+            slug={slug}
+            artefact={{
+              kind,
+              title: artifactToHtml(kind, object, sourceTitles).title,
+              data: { object, sourceTitles },
+            }}
+          />
+        )
+        : null}
       <button
         type='button'
         disabled={disabled}
@@ -916,6 +934,7 @@ export function GeneratePage() {
             kind={mutation.data.kind}
             object={mutation.data.object}
             sourceTitles={mutation.data.sources.map((s) => s.title)}
+            slug={config.slug}
           />
           <SourcesRow sources={mutation.data.sources} />
         </div>

@@ -21,6 +21,11 @@ import {
   streamAsk,
 } from '../api/client.ts'
 import { citationHref, ContextJourney } from '../components/AnswerStream.tsx'
+import {
+  type EvidenceSource,
+  EvidenceTable,
+  type EvidenceVerdictInfo,
+} from '../components/EvidenceTable.tsx'
 import { type QualityScores, TrustSignals } from '../components/QualityGauge.tsx'
 import { LiveStatus } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
@@ -58,6 +63,10 @@ type ChatMessage = {
   deepBadge?: boolean
   /** True when this answer already used full-document (deep) grounding. */
   wasDeep?: boolean
+  /** True when the corpus could not answer and guidance was shown instead of a real answer. */
+  refused?: boolean
+  /** Per-source AI relevance verdicts, once judged - persisted so the Evidence table doesn't re-judge on reload. */
+  verdicts?: Record<string, EvidenceVerdictInfo>
 }
 
 type ChatSession = {
@@ -65,6 +74,8 @@ type ChatSession = {
   createdAt: number
   updatedAt: number
   messages: ChatMessage[]
+  /** User-set name, overriding the auto-title derived from the first question. */
+  title?: string
 }
 
 const SESSION_CAP = 20
@@ -129,6 +140,10 @@ function migrateMessage(raw: unknown): ChatMessage {
     healDismissed: typeof message?.healDismissed === 'boolean' ? message.healDismissed : undefined,
     deepBadge: typeof message?.deepBadge === 'boolean' ? message.deepBadge : undefined,
     wasDeep: typeof message?.wasDeep === 'boolean' ? message.wasDeep : undefined,
+    refused: typeof message?.refused === 'boolean' ? message.refused : undefined,
+    verdicts: message?.verdicts && typeof message.verdicts === 'object'
+      ? message.verdicts as Record<string, EvidenceVerdictInfo>
+      : undefined,
   }
 }
 
@@ -140,6 +155,9 @@ function migrateSession(raw: unknown): ChatSession | null {
     createdAt: typeof session.createdAt === 'number' ? session.createdAt : Date.now(),
     updatedAt: typeof session.updatedAt === 'number' ? session.updatedAt : Date.now(),
     messages: Array.isArray(session.messages) ? session.messages.map(migrateMessage) : [],
+    title: typeof session.title === 'string' && session.title.trim().length > 0
+      ? session.title
+      : undefined,
   }
 }
 
@@ -191,6 +209,7 @@ function relativeAge(timestamp: number): string {
 }
 
 function sessionTitle(session: ChatSession): string {
+  if (session.title && session.title.trim().length > 0) return session.title
   const first = session.messages.find((message) => message.author === 'USER')
   if (!first || first.text.trim().length === 0) return 'New conversation'
   return first.text.length > 60 ? `${first.text.slice(0, 60)}…` : first.text
@@ -313,13 +332,29 @@ function SessionList({
   onSelect,
   onNew,
   onDelete,
+  onRename,
 }: {
   sessions: ChatSession[]
   activeSessionId: string | null
   onSelect: (id: string) => void
   onNew: () => void
   onDelete: (id: string) => void
+  onRename: (id: string, title: string) => void
 }) {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draftTitle, setDraftTitle] = useState('')
+
+  function startEdit(session: ChatSession) {
+    setEditingId(session.id)
+    setDraftTitle(sessionTitle(session))
+  }
+
+  function commitEdit() {
+    const trimmed = draftTitle.trim()
+    if (editingId && trimmed.length > 0) onRename(editingId, trimmed)
+    setEditingId(null)
+  }
+
   return (
     <div className='flex h-full flex-col'>
       <button
@@ -335,13 +370,41 @@ function SessionList({
           ? <p className='px-1 py-2 text-xs text-ink-3'>No sessions yet.</p>
           : sessions.map((session) => {
             const isActive = session.id === activeSessionId
+            const isEditing = editingId === session.id
+            if (isEditing) {
+              return (
+                <form
+                  key={session.id}
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    commitEdit()
+                  }}
+                  className='px-1 py-1'
+                >
+                  <input
+                    type='text'
+                    value={draftTitle}
+                    onChange={(event) => setDraftTitle(event.target.value)}
+                    onBlur={commitEdit}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') setEditingId(null)
+                    }}
+                    aria-label='Session name'
+                    autoFocus
+                    className='rp-input h-9 text-sm'
+                  />
+                </form>
+              )
+            }
             return (
               <div key={session.id} className='group relative'>
                 <button
                   type='button'
                   onClick={() => onSelect(session.id)}
                   aria-current={isActive ? 'true' : undefined}
-                  className={`w-full rounded-[var(--rp-radius)] px-3 py-2.5 pr-8 text-left transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                  className={`w-full rounded-[var(--rp-radius)] px-3 py-2.5 ${
+                    isActive ? 'pr-14' : 'pr-8'
+                  } text-left transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
                     isActive ? 'bg-surface shadow-sm' : 'hover:bg-[var(--rp-surface-2)]'
                   }`}
                   style={{ outlineColor: 'var(--rp-accent)' }}
@@ -356,6 +419,22 @@ function SessionList({
                     {relativeAge(session.updatedAt)}
                   </p>
                 </button>
+                {isActive
+                  ? (
+                    <button
+                      type='button'
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        startEdit(session)
+                      }}
+                      aria-label={`Rename "${sessionTitle(session)}"`}
+                      title='Rename session'
+                      className='rp-focus absolute right-8 top-1.5 flex h-6 w-6 items-center justify-center rounded-[6px] text-ink-3 opacity-0 transition-opacity duration-150 hover:bg-[var(--rp-surface-2)] hover:text-ink group-hover:opacity-100 focus-visible:opacity-100'
+                    >
+                      ✎
+                    </button>
+                  )
+                  : null}
                 <button
                   type='button'
                   onClick={(event) => {
@@ -548,18 +627,24 @@ function AssistantCard({
   message,
   slug,
   question,
+  subqueries,
   activeStage,
   onRetry,
   onFeedback,
   onReanswerDeeply,
+  onAskSubquery,
+  onVerdicts,
 }: {
   message: ChatMessage
   slug: string
   question: string
+  subqueries: string[]
   activeStage: string | null
   onRetry: () => void
   onFeedback: (good: boolean, text?: string) => Promise<boolean>
   onReanswerDeeply: () => void
+  onAskSubquery: (subquery: string) => void
+  onVerdicts: (verdicts: Record<string, EvidenceVerdictInfo>) => void
 }) {
   if (message.error && !message.text.trim()) {
     return (
@@ -584,6 +669,77 @@ function AssistantCard({
   const isThinlyGrounded = !message.pending && !message.healDismissed && !message.wasDeep &&
     !message.deepBadge && groundedness !== null && groundedness !== undefined &&
     (groundedness <= 1 || (groundedness <= 2 && citationCount <= 1))
+  const isSparselyGrounded = !message.pending && groundedness !== null &&
+    groundedness !== undefined &&
+    groundedness <= 2
+
+  const evidenceSources: EvidenceSource[] = message.sources.map((source) => ({
+    id: source.id,
+    title: source.title,
+    passage: source.matchedPassage,
+    score: source.relevance,
+  }))
+
+  // A refusal gets its own structured "no evidence" state instead of the
+  // normal answer body - the guidance sentence the platform generated, what
+  // WAS retrieved (unjudged, so the user sees raw scores rather than another
+  // AI opinion), and next actions rather than a dead end.
+  if (!message.pending && message.refused) {
+    return (
+      <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-5 shadow-sm'>
+        {message.interpretedQuery
+          ? (
+            <p className='mb-2 text-xs text-ink-3'>
+              Interpreted as &ldquo;{message.interpretedQuery}&rdquo;
+            </p>
+          )
+          : null}
+
+        <div className='mb-2'>
+          <span className='rp-badge rp-badge-quiet'>No direct evidence found</span>
+        </div>
+
+        {message.text.length > 0
+          ? renderMarkdown(message.text, message.citations, message.sources, slug)
+          : null}
+
+        {evidenceSources.length > 0
+          ? (
+            <div className='mt-4 border-t border-line pt-3'>
+              <EvidenceTable
+                slug={slug}
+                question={question}
+                sources={evidenceSources}
+                judge={false}
+                title='Closest passages found'
+              />
+            </div>
+          )
+          : null}
+
+        <div className='mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-3'>
+          <WatchControl question={question} slug={slug} />
+        </div>
+
+        {subqueries.length > 0
+          ? (
+            <div className='mt-3 flex flex-wrap gap-1.5'>
+              {subqueries.map((subquery, index) => (
+                <button
+                  key={index}
+                  type='button'
+                  onClick={() => onAskSubquery(subquery)}
+                  className='rp-chip text-[11px]'
+                >
+                  {subquery}
+                </button>
+              ))}
+            </div>
+          )
+          : null}
+      </div>
+    )
+  }
 
   return (
     <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-5 shadow-sm'>
@@ -711,6 +867,29 @@ function AssistantCard({
           <p className='mt-3 text-xs text-ink-3'>
             {message.usage.inputTokens} in / {message.usage.outputTokens} out tokens
           </p>
+        )
+        : null}
+
+      {isSparselyGrounded && evidenceSources.length > 0
+        ? (
+          <p className='mt-3 text-xs text-[var(--rp-warn-ink)]'>
+            Parts of this answer go beyond the retrieved passages - check the evidence below before
+            relying on it.
+          </p>
+        )
+        : null}
+
+      {!message.pending && evidenceSources.length > 0
+        ? (
+          <div className='mt-3'>
+            <EvidenceTable
+              slug={slug}
+              question={question}
+              sources={evidenceSources}
+              initialVerdicts={message.verdicts}
+              onVerdicts={onVerdicts}
+            />
+          </div>
         )
         : null}
 
@@ -949,6 +1128,7 @@ export function AssistantPage() {
               createdAt: existing?.createdAt ?? updatedAt,
               updatedAt,
               messages: remote.messages.map(migrateMessage),
+              title: remote.title.trim().length > 0 ? remote.title : undefined,
             })
           }
           const merged = [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt)
@@ -1044,6 +1224,17 @@ export function AssistantPage() {
     setShowSidebar(false)
   }
 
+  /** Sets a custom session name, overriding the auto-title, and syncs it to the server. */
+  function renameSession(id: string, title: string) {
+    setSessions((prev) => {
+      const next = prev.map((session) => session.id === id ? { ...session, title } : session)
+      saveSessions(config.slug, next, deletedIdsRef.current)
+      const renamed = next.find((session) => session.id === id)
+      if (renamed) scheduleServerSync(renamed)
+      return next
+    })
+  }
+
   async function runAsk(
     query: string,
     baseMessages: ChatMessage[],
@@ -1135,7 +1326,7 @@ export function AssistantPage() {
               }))
               break
             case 'done':
-              update((message) => ({ ...message, pending: false }))
+              update((message) => ({ ...message, pending: false, refused: event.refused }))
               break
             case 'error':
               update((message) => ({
@@ -1284,13 +1475,39 @@ export function AssistantPage() {
     }
   }
 
+  /**
+   * Persists per-source AI verdicts onto a message once the Evidence table's
+   * one-off judge call resolves, so reopening the session doesn't re-judge.
+   */
+  function saveVerdicts(messageId: string, verdicts: Record<string, EvidenceVerdictInfo>) {
+    const sessionId = activeSessionId
+    if (!sessionId) return
+    setMessages((prev) => {
+      const next = prev.map((item) => item.id === messageId ? { ...item, verdicts } : item)
+      persist(next, sessionId)
+      return next
+    })
+  }
+
   function stop() {
     abortRef.current?.abort()
   }
 
+  /** The active session's display title - a custom rename if set, else the auto-title. */
+  function currentSessionTitle(): string {
+    const active = sessions.find((session) => session.id === activeSessionId)
+    return sessionTitle({
+      id: '',
+      createdAt: 0,
+      updatedAt: 0,
+      messages,
+      title: active?.title,
+    })
+  }
+
   /** Downloads the current research trail as a Word-compatible .doc. */
   function exportSession() {
-    const title = sessionTitle({ id: '', createdAt: 0, updatedAt: 0, messages })
+    const title = currentSessionTitle()
     const html = sessionToWordHtml(config.branding.productName, title, messages)
     const blob = new Blob(['﻿', html], { type: 'application/msword' })
     const url = URL.createObjectURL(blob)
@@ -1348,6 +1565,7 @@ export function AssistantPage() {
           onSelect={selectSession}
           onNew={startNewSession}
           onDelete={deleteSession}
+          onRename={renameSession}
         />
       </aside>
 
@@ -1376,6 +1594,7 @@ export function AssistantPage() {
                 onSelect={selectSession}
                 onNew={startNewSession}
                 onDelete={deleteSession}
+                onRename={renameSession}
               />
             </div>
           </div>
@@ -1387,7 +1606,7 @@ export function AssistantPage() {
           ? (
             <div className='mb-2 flex shrink-0 items-center justify-between gap-2'>
               <p className='min-w-0 truncate text-sm font-medium text-ink-2'>
-                {sessionTitle({ id: '', createdAt: 0, updatedAt: 0, messages })}
+                {currentSessionTitle()}
               </p>
               <button
                 type='button'
@@ -1448,6 +1667,9 @@ export function AssistantPage() {
                       question={messages[index - 1]?.author === 'USER'
                         ? messages[index - 1]?.text ?? ''
                         : ''}
+                      subqueries={messages[index - 1]?.author === 'USER'
+                        ? messages[index - 1]?.subqueries ?? []
+                        : []}
                       activeStage={index === messages.length - 1 ? activeStageLabel : null}
                       onRetry={() => retry(message.id)}
                       onFeedback={(good, text) => sendFeedback(message.id, good, text)}
@@ -1458,6 +1680,8 @@ export function AssistantPage() {
                             : '',
                           message.id,
                         )}
+                      onAskSubquery={(subquery) => void send(subquery)}
+                      onVerdicts={(verdicts) => saveVerdicts(message.id, verdicts)}
                     />
                   )
               )

@@ -222,6 +222,7 @@ export function TaxonomyPage() {
   const { config } = useOutletContext<TenantOutletContext>()
   const slug = config.slug
   const queryClient = useQueryClient()
+  const isAdmin = Boolean(sessionStorage.getItem('rp-admin-passcode'))
 
   const {
     data: labelsets,
@@ -281,7 +282,7 @@ export function TaxonomyPage() {
               organisation={config.branding.organisation}
             />
           ))}
-          <AddLabelsetCard slug={slug} onAdded={refreshAll} />
+          {isAdmin ? <AddLabelsetCard slug={slug} onAdded={refreshAll} /> : null}
         </div>
       )}
     </main>
