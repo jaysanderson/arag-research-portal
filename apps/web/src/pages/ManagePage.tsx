@@ -167,7 +167,7 @@ export function ManagePage() {
           <div className='mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[200px_minmax(0,1fr)]'>
             <nav
               aria-label='Manage sections'
-              className='rp-no-scrollbar -mx-1 flex gap-1 overflow-x-auto px-1 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0'
+              className='rp-no-scrollbar -mx-1 flex gap-1 overflow-x-auto whitespace-nowrap px-1 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0'
             >
               {TABS.map((t) => (
                 <button

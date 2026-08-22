@@ -176,7 +176,7 @@ function IconButton({
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
-      className='rp-focus-inverse flex h-9 w-9 shrink-0 items-center justify-center rounded-[6px] text-white/70 ring-1 ring-inset ring-white/15 transition-colors duration-150 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent'
+      className='rp-focus-inverse flex h-11 w-11 shrink-0 items-center justify-center rounded-[6px] text-white/70 ring-1 ring-inset ring-white/15 transition-colors duration-150 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent sm:h-9 sm:w-9'
     >
       {children}
     </button>
@@ -477,7 +477,7 @@ export function AnswerJourney({
 
   return createPortal(
     <div
-      className='rp-anim-fade fixed inset-0 z-[70] flex items-center justify-center bg-neutral-950/85 p-3 backdrop-blur-sm sm:p-6'
+      className='rp-anim-fade fixed inset-0 z-[70] flex items-center justify-center bg-neutral-950/85 backdrop-blur-sm sm:p-6'
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose()
       }}
@@ -488,7 +488,7 @@ export function AnswerJourney({
         aria-modal='true'
         aria-label='Journey through the context'
         tabIndex={-1}
-        className='rp-shadow-xl flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[10px] bg-neutral-900 text-white ring-1 ring-white/10 focus:outline-none sm:max-h-[88vh]'
+        className='rp-shadow-xl fixed inset-2 flex flex-col overflow-hidden rounded-[10px] bg-neutral-900 text-white ring-1 ring-white/10 focus:outline-none sm:static sm:max-h-[88vh] sm:w-full sm:max-w-3xl'
       >
         {/* Top bar */}
         <div className='flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-5'>
@@ -500,7 +500,7 @@ export function AnswerJourney({
                   type='button'
                   onClick={() => setPlaying((prev) => !prev)}
                   aria-pressed={playing}
-                  className='rp-focus-inverse inline-flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 text-xs font-medium text-white/70 ring-1 ring-inset ring-white/15 transition-colors duration-150 hover:bg-white/10 hover:text-white'
+                  className='rp-focus-inverse inline-flex min-h-11 items-center gap-1.5 rounded-[6px] px-3 py-1.5 text-xs font-medium text-white/70 ring-1 ring-inset ring-white/15 transition-colors duration-150 hover:bg-white/10 hover:text-white sm:min-h-0'
                 >
                   {playing
                     ? (
@@ -681,7 +681,7 @@ export function AnswerJourney({
             ? (
               <div key={`stop-${index}`} className='rp-anim-fade'>
                 {/* Hero band */}
-                <div className='relative h-44 w-full overflow-hidden bg-neutral-800 sm:h-52'>
+                <div className='relative h-36 w-full overflow-hidden bg-neutral-800 sm:h-52'>
                   <ResourceThumb
                     slug={slug}
                     id={current.resourceId}
@@ -853,7 +853,7 @@ export function AnswerJourney({
                         aria-current={active ? 'true' : undefined}
                         aria-label={`Source ${stopIndex + 1}: ${stop.title}`}
                         onClick={() => goTo(stopIndex)}
-                        className='rp-focus-inverse group flex h-6 shrink-0 items-center rounded-full px-0.5'
+                        className='rp-focus-inverse group flex shrink-0 items-center rounded-full p-2'
                       >
                         <span
                           className={`h-1.5 rounded-full transition-all duration-300 ${

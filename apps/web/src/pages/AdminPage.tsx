@@ -91,8 +91,8 @@ export function AdminPage() {
   return (
     <main className='min-h-screen bg-app'>
       <div className='mx-auto max-w-3xl px-6 py-12'>
-        <div className='flex items-center justify-between'>
-          <div>
+        <div className='flex flex-wrap items-start justify-between gap-3'>
+          <div className='min-w-0'>
             <p className='rp-eyebrow text-ink-3'>Research portal</p>
             <h1 className='mt-1 text-2xl font-semibold tracking-tight text-ink'>Knowledge boxes</h1>
             <p className='mt-1 text-sm text-ink-3'>
@@ -100,7 +100,10 @@ export function AdminPage() {
               behaviour, open a portal's own management workspace.
             </p>
           </div>
-          <Link to='/' className='text-sm font-medium text-ink-3 hover:text-[var(--rp-ink)]'>
+          <Link
+            to='/'
+            className='shrink-0 text-sm font-medium text-ink-3 hover:text-[var(--rp-ink)]'
+          >
             &larr; Back to portals
           </Link>
         </div>

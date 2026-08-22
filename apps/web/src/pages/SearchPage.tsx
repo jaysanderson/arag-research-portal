@@ -297,7 +297,7 @@ export function SearchPage() {
             <button
               type='button'
               onClick={() => setFiltersOpen((open) => !open)}
-              className='rp-chip lg:hidden'
+              className='rp-chip h-9 sm:h-7 lg:hidden'
               aria-expanded={filtersOpen}
             >
               Filters{selectedTopics.length > 0 ? ` (${selectedTopics.length})` : ''}
@@ -383,7 +383,7 @@ export function SearchPage() {
                           key={question.id}
                           type='button'
                           onClick={() => askQuestion(question.text)}
-                          className='rp-chip'
+                          className='rp-chip h-9 sm:h-7'
                         >
                           {question.text}
                         </button>

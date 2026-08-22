@@ -128,7 +128,7 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
       {open && (
         <div
           role='menu'
-          className='rp-glass rp-shadow-lg rp-anim-fade absolute left-0 top-full z-50 mt-2 w-[18.5rem] rounded-[10px] border border-line p-1.5'
+          className='rp-glass rp-shadow-lg rp-anim-fade absolute left-0 top-full z-50 mt-2 w-[calc(100vw-2rem)] max-w-72 rounded-[10px] border border-line p-1.5 sm:w-[18.5rem] sm:max-w-none'
         >
           <p className='rp-eyebrow px-2.5 pb-1.5 pt-2 text-ink-3'>
             Knowledge boxes

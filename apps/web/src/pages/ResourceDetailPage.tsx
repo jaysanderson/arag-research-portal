@@ -310,7 +310,7 @@ function PdfBody(
           <div>
             <iframe
               src={fileUrl}
-              className='h-[75vh] w-full rounded-[8px] border border-line bg-surface'
+              className='h-[60vh] w-full rounded-[8px] border border-line bg-surface sm:h-[75vh]'
               title='PDF preview'
             />
             <a

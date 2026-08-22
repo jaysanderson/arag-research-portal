@@ -309,7 +309,7 @@ export function AddContent({
 
       {open && (
         <div className='mt-3 rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface-2 p-4'>
-          <div className='inline-flex rounded-[var(--rp-radius)] border border-line bg-surface p-1'>
+          <div className='rp-no-scrollbar flex gap-0 overflow-x-auto whitespace-nowrap rounded-[var(--rp-radius)] border border-line bg-surface p-1'>
             {TABS.map((t) => (
               <button
                 key={t.id}
@@ -318,7 +318,7 @@ export function AddContent({
                   setTab(t.id)
                   setMessage(null)
                 }}
-                className={`rounded-[calc(var(--rp-radius)-2px)] px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
+                className={`shrink-0 rounded-[calc(var(--rp-radius)-2px)] px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
                   tab === t.id
                     ? 'bg-[var(--rp-primary)] text-white'
                     : 'text-ink-2 hover:bg-[var(--rp-surface-2)]'

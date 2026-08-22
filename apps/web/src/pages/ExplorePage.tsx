@@ -102,7 +102,7 @@ function Hero({
       <div className='mx-auto max-w-3xl text-center'>
         <p className='rp-eyebrow rp-anim-rise text-white/70'>{config.branding.organisation}</p>
 
-        <h1 className='rp-display rp-anim-rise rp-delay-1 mt-3 text-4xl text-white sm:text-5xl md:text-[3.25rem]'>
+        <h1 className='rp-display rp-anim-rise rp-delay-1 mt-3 text-4xl text-white sm:text-5xl lg:text-6xl'>
           What would you like to explore?
         </h1>
 
@@ -227,7 +227,7 @@ function ResourceCard({ slug, resource }: { slug: string; resource: ResourceSumm
   return (
     <Link
       to={`/t/${slug}/library/${resource.id}`}
-      className='rp-card rp-lift rp-focus group flex w-60 shrink-0 flex-col overflow-hidden sm:w-72'
+      className='rp-card rp-lift rp-focus group flex w-64 shrink-0 flex-col overflow-hidden sm:w-72'
     >
       <div className='relative aspect-[16/10] w-full overflow-hidden bg-surface-2'>
         <ResourceThumb
@@ -268,7 +268,7 @@ function TopicRowSkeleton() {
         {Array.from({ length: 4 }).map((_, index) => (
           <div
             key={index}
-            className='rp-card w-60 shrink-0 overflow-hidden sm:w-72'
+            className='rp-card w-64 shrink-0 overflow-hidden sm:w-72'
           >
             <div className='rp-shimmer bg-surface-3 aspect-[16/10] w-full' aria-hidden='true' />
             <div className='space-y-2 border-t border-line p-3.5'>

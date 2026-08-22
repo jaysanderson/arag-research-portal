@@ -140,7 +140,7 @@ export function ContextJourney({ slug, sources, query = '' }: ContextJourneyProp
         type='button'
         onClick={() => setIsOpen(true)}
         aria-haspopup='dialog'
-        className='rp-chip group font-semibold'
+        className='rp-chip group h-9 font-semibold sm:h-7'
       >
         <svg
           viewBox='0 0 24 24'

@@ -238,7 +238,7 @@ export function LibraryPage() {
             <button
               type='button'
               onClick={() => setFiltersOpen((open) => !open)}
-              className='rp-chip lg:hidden'
+              className='rp-chip h-9 sm:h-7 lg:hidden'
               aria-expanded={filtersOpen}
             >
               Filters{selectedTopics.length > 0 ? ` (${selectedTopics.length})` : ''}

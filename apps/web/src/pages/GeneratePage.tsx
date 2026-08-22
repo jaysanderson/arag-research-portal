@@ -821,13 +821,13 @@ export function GeneratePage() {
         Schema-enforced research artifacts, grounded in the knowledge box.
       </p>
 
-      <div className='mt-6 inline-flex flex-wrap gap-1 rounded-[var(--rp-radius)] border border-line bg-surface p-1'>
+      <div className='rp-no-scrollbar mt-6 flex items-center gap-1 overflow-x-auto whitespace-nowrap rounded-[var(--rp-radius)] border border-line bg-surface p-1'>
         {KINDS.map((k) => (
           <button
             key={k.id}
             type='button'
             onClick={() => selectKind(k.id)}
-            className={`rounded-[calc(var(--rp-radius)-2px)] px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
+            className={`shrink-0 rounded-[calc(var(--rp-radius)-2px)] px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
               kind === k.id
                 ? 'bg-[var(--rp-primary)] text-white'
                 : 'text-ink-2 hover:bg-[var(--rp-surface-2)]'

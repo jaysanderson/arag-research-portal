@@ -162,18 +162,20 @@ export function PortalRow({
           <StatusBadge status={row.knowledgeBox.status} />
           {row.disabled && <span className='rp-badge rp-badge-quiet'>Hidden</span>}
         </span>
-        <span className='shrink-0 text-sm text-ink-3'>
-          {row.resourceCount === null
-            ? 'unreachable'
-            : `${row.resourceCount} ${row.resourceCount === 1 ? 'document' : 'documents'}`}
-        </span>
-        <span
-          aria-hidden='true'
-          className={`shrink-0 text-ink-3 transition-transform duration-150 ${
-            expanded ? 'rotate-180' : ''
-          }`}
-        >
-          &#9662;
+        <span className='flex shrink-0 items-center gap-2'>
+          <span className='text-sm text-ink-3'>
+            {row.resourceCount === null
+              ? 'unreachable'
+              : `${row.resourceCount} ${row.resourceCount === 1 ? 'document' : 'documents'}`}
+          </span>
+          <span
+            aria-hidden='true'
+            className={`text-ink-3 transition-transform duration-150 ${
+              expanded ? 'rotate-180' : ''
+            }`}
+          >
+            &#9662;
+          </span>
         </span>
       </button>
 

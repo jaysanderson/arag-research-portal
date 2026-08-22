@@ -623,13 +623,13 @@ export function AssistantPage() {
   return (
     <main
       aria-label='Research assistant'
-      className='mx-auto flex h-[calc(100vh-65px)] max-w-6xl gap-6 px-4 py-6 sm:px-6'
+      className='mx-auto flex h-[calc(100vh-65px)] max-w-6xl flex-col gap-3 px-4 py-4 sm:px-6 sm:py-6 lg:flex-row lg:gap-6'
     >
-      <div className='flex items-center justify-between lg:hidden'>
+      <div className='flex shrink-0 items-center justify-between lg:hidden'>
         <button
           type='button'
           onClick={() => setShowSidebar(true)}
-          className='rp-chip'
+          className='rp-chip h-9 sm:h-7'
         >
           Sessions
         </button>
@@ -693,7 +693,7 @@ export function AssistantPage() {
                           key={question.id}
                           type='button'
                           onClick={() => send(question.text)}
-                          className='rp-chip'
+                          className='rp-chip h-9 sm:h-7'
                         >
                           {question.text}
                         </button>

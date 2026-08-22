@@ -498,7 +498,7 @@ export function AgenticPage() {
                 type='button'
                 disabled={isRunning}
                 onClick={() => void run(question.text)}
-                className='rp-chip disabled:opacity-50'
+                className='rp-chip h-9 disabled:opacity-50 sm:h-7'
               >
                 {question.text}
               </button>
