@@ -94,6 +94,7 @@ const renameTenantSchema = z.object({
     heroFrom: hexColour,
     heroTo: hexColour,
   }).optional(),
+  searchPlaceholder: z.string().min(3).max(120).optional(),
 })
 const kgImplementSchema = z.object({
   applyExisting: z.boolean(),
@@ -812,6 +813,9 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     const parsed = renameTenantSchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    if (parsed.data.searchPlaceholder) {
+      tenants.patch(config.slug, { searchPlaceholder: parsed.data.searchPlaceholder })
+    }
     tenants.patchBranding(config.slug, {
       ...(parsed.data.colours ? { colours: parsed.data.colours } : {}),
       productName: parsed.data.name,
