@@ -23,6 +23,8 @@ export interface AskOptions {
   /** Scope the answer to a single resource (per-document chat). */
   resourceId?: string
   topicIds?: string[]
+  /** Override the surface's system prompt (portal management setting). */
+  systemPrompt?: string
 }
 
 export interface CatalogOptions {

@@ -4,11 +4,11 @@ import { Skeleton } from '../../components/ui.tsx'
 
 function StatTile({ label, value }: { label: string; value: string | null }) {
   return (
-    <div className='rounded-xl bg-neutral-50 px-4 py-3'>
-      <dt className='text-xs font-medium uppercase tracking-wide text-neutral-500'>{label}</dt>
+    <div className='rounded-[var(--rp-radius)] bg-surface-2 px-4 py-3'>
+      <dt className='rp-eyebrow text-ink-3'>{label}</dt>
       {value === null
         ? <Skeleton className='mt-1.5 h-5 w-10' />
-        : <dd className='mt-1 text-lg font-semibold text-neutral-900'>{value}</dd>}
+        : <dd className='mt-1 text-lg font-semibold text-ink'>{value}</dd>}
     </div>
   )
 }
@@ -36,7 +36,7 @@ export function StatTiles({
   if (isError) return null
 
   return (
-    <dl className='mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4'>
+    <dl className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
       <StatTile label='Documents' value={String(resourceCount)} />
       <StatTile label='Paragraphs' value={data ? String(data.paragraphs) : null} />
       <StatTile label='Sentences' value={data ? String(data.sentences) : null} />

@@ -59,6 +59,7 @@ const newTenantSchema = z.object({
   organisation: z.string().max(120).optional(),
   tagline: z.string().max(160).optional(),
 })
+const promptsSchema = z.object({ ask: z.string().max(4000).optional() })
 const labelsetBodySchema = z.object({
   title: z.string().min(1).max(60),
   multiple: z.boolean(),
@@ -259,6 +260,14 @@ export function buildApp(opts: BuildAppOptions): Hono {
     }
     headers.set('content-disposition', 'inline')
     return new Response(upstream.body, { status: upstream.status, headers })
+  })
+
+  app.get('/api/t/:slug/typeahead', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const q = (c.req.query('q') ?? '').trim()
+    if (!opts.management || q.length < 2) return c.json({ entities: [], titles: [] })
+    return c.json(await opts.management.typeahead(config, q))
   })
 
   app.get('/api/t/:slug/entities', async (c) => {
@@ -613,6 +622,38 @@ export function buildApp(opts: BuildAppOptions): Hono {
     return c.json({ ok: true, url: `/api/t/${config.slug}/branding/${kind}` })
   })
 
+  app.get('/api/admin/t/:slug/prompts', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    return c.json(tenants.promptsFor(config.slug))
+  })
+
+  app.put('/api/admin/t/:slug/prompts', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const parsed = promptsSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    tenants.patch(config.slug, { prompts: { ask: parsed.data.ask?.trim() || undefined } })
+    return c.json({ ok: true })
+  })
+
+  app.get('/api/admin/t/:slug/search-configs', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailableSc = requireManagement(c)
+    if (unavailableSc) return unavailableSc
+    return c.json(await management!.listSearchConfigs(config))
+  })
+
+  app.post('/api/admin/t/:slug/search-configs/ensure', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailableSe = requireManagement(c)
+    if (unavailableSe) return unavailableSe
+    const created = await management!.ensureSearchConfigs(config)
+    return c.json({ ok: true, created })
+  })
+
   app.get('/api/admin/t/:slug/crawl', async (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
@@ -767,7 +808,13 @@ export function buildApp(opts: BuildAppOptions): Hono {
     return streamSSE(c, async (stream) => {
       try {
         const { query, ...askOpts } = parsed.data
-        for await (const event of provider.ask(config, query, askOpts)) {
+        const promptOverride = tenants.promptsFor(config.slug).ask
+        for await (
+          const event of provider.ask(config, query, {
+            ...askOpts,
+            ...(promptOverride ? { systemPrompt: promptOverride } : {}),
+          })
+        ) {
           await stream.writeSSE({ data: JSON.stringify(event) })
         }
       } catch (err) {

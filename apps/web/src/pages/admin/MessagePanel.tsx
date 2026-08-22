@@ -1,17 +1,26 @@
 import type { Message } from './shared.ts'
 
-/** Emerald "ok" / rose "error" inline panel, shared by every admin action. */
+/** ok / error inline panel, shared by every admin action. */
 export function MessagePanel(
   { message, className = '' }: { message: Message; className?: string },
 ) {
+  const tone = message.tone === 'ok'
+    ? {
+      background: 'var(--rp-ok-bg)',
+      color: 'var(--rp-ok-ink)',
+      borderColor: 'var(--rp-ok-line)',
+    }
+    : {
+      background: 'var(--rp-bad-bg)',
+      color: 'var(--rp-bad-ink)',
+      borderColor: 'var(--rp-bad-line)',
+    }
+
   return (
     <div
       role={message.tone === 'error' ? 'alert' : 'status'}
-      className={`rounded-xl border px-4 py-3 text-sm ${
-        message.tone === 'ok'
-          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-          : 'border-rose-200 bg-rose-50 text-rose-800'
-      } ${className}`}
+      className={`rounded-[calc(var(--rp-radius)+4px)] border px-4 py-3 text-sm ${className}`}
+      style={tone}
     >
       {message.text}
     </div>

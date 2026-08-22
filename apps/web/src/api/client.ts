@@ -603,3 +603,44 @@ export async function uploadBranding(
     body: file,
   })
 }
+
+export function getTypeahead(
+  slug: string,
+  q: string,
+): Promise<{ entities: string[]; titles: string[] }> {
+  return request(`/api/t/${encodeURIComponent(slug)}/typeahead?q=${encodeURIComponent(q)}`)
+}
+
+export function getPrompts(slug: string, passcode: string): Promise<{ ask?: string }> {
+  return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/prompts`, passcode)
+}
+
+export function savePrompts(
+  slug: string,
+  passcode: string,
+  prompts: { ask?: string },
+): Promise<{ ok: boolean }> {
+  return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/prompts`, passcode, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(prompts),
+  })
+}
+
+export function getSearchConfigs(
+  slug: string,
+  passcode: string,
+): Promise<Record<string, unknown>> {
+  return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/search-configs`, passcode)
+}
+
+export function ensureSearchConfigs(
+  slug: string,
+  passcode: string,
+): Promise<{ ok: boolean; created: string[] }> {
+  return adminRequest(
+    `/api/admin/t/${encodeURIComponent(slug)}/search-configs/ensure`,
+    passcode,
+    { method: 'POST' },
+  )
+}

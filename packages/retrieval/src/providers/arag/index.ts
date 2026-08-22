@@ -641,6 +641,79 @@ export class AragProvider implements RetrievalProvider {
     })
   }
 
+  /** Type-ahead: entity and title suggestions from the box's suggest index. */
+  async typeahead(
+    tenant: TenantConfig,
+    query: string,
+  ): Promise<{ entities: string[]; titles: string[] }> {
+    try {
+      const raw = await this.client(tenant).getJson<{
+        entities?: { entities?: { value?: string }[] }
+        paragraphs?: {
+          results?: { rid?: string; field?: string; text?: string }[]
+        }
+      }>(
+        `/suggest?query=${encodeURIComponent(query)}&features=entities&features=paragraph`,
+      )
+      const entities = (raw.entities?.entities ?? [])
+        .map((e) => e.value ?? '')
+        .filter(Boolean)
+        .slice(0, 6)
+      const seen = new Set<string>()
+      const titles: string[] = []
+      for (const r of raw.paragraphs?.results ?? []) {
+        if (r.field !== 'title' || !r.text || !r.rid || seen.has(r.rid)) continue
+        seen.add(r.rid)
+        titles.push(r.text)
+        if (titles.length >= 5) break
+      }
+      return { entities, titles }
+    } catch {
+      return { entities: [], titles: [] }
+    }
+  }
+
+  /** Named search configurations on the box - the wiring for every surface. */
+  async listSearchConfigs(tenant: TenantConfig): Promise<Record<string, unknown>> {
+    try {
+      return await this.client(tenant).getJson<Record<string, unknown>>('/search_configurations')
+    } catch {
+      return {}
+    }
+  }
+
+  /**
+   * Ensure the portal's named search configurations exist on the box - one per
+   * surface, so retrieval behaviour is configured centrally rather than ad hoc.
+   */
+  async ensureSearchConfigs(tenant: TenantConfig): Promise<string[]> {
+    const client = this.client(tenant)
+    const desired: Record<string, unknown> = {
+      'portal-search': {
+        kind: 'find',
+        config: { features: ['keyword', 'semantic'], top_k: 20 },
+      },
+      'portal-ask': {
+        kind: 'ask',
+        config: { features: ['keyword', 'semantic'], citations: true },
+      },
+      'portal-typeahead': {
+        kind: 'find',
+        config: { features: ['keyword'], top_k: 8 },
+      },
+    }
+    const created: string[] = []
+    for (const [name, body] of Object.entries(desired)) {
+      try {
+        await client.postJson(`/search_configurations/${name}`, body)
+        created.push(name)
+      } catch {
+        // Exists already or the deployment rejects the shape - not fatal.
+      }
+    }
+    return created
+  }
+
   /** Entity groups the graph agent has extracted (native knowledge graph). */
   async entityGroups(
     tenant: TenantConfig,
@@ -807,12 +880,12 @@ export class AragProvider implements RetrievalProvider {
       // Nuclia's default RAG prompt answers "Not enough data to answer this."
       // as a guardrail even when relevant sources were retrieved - override it.
       prompt: {
-        system:
+        system: opts.systemPrompt?.trim() ||
           `You are a research analyst for ${tenant.branding.organisation}. Always answer the ` +
-          'question using the provided context. Synthesise across sources even when the context ' +
-          'is partial - surface what IS known and be specific. Never reply that there is not ' +
-          'enough data, and never refuse, when any relevant context is present. Write clear, ' +
-          'well-structured prose with Markdown, in Australian English.',
+            'question using the provided context. Synthesise across sources even when the context ' +
+            'is partial - surface what IS known and be specific. Never reply that there is not ' +
+            'enough data, and never refuse, when any relevant context is present. Write clear, ' +
+            'well-structured prose with Markdown, in Australian English.',
       },
     }
     if (opts.context && opts.context.length > 0) body.context = opts.context

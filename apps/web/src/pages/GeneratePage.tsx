@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react'
+import { type CSSProperties, type FormEvent, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useOutletContext } from 'react-router-dom'
 import type { GenerateKind, ResourceSummary } from '@research-portal/core'
@@ -195,17 +195,17 @@ function isAssessment(value: unknown): value is AssessmentObject {
 
 function ComparisonTable({ data }: { data: ComparisonObject }) {
   return (
-    <div className='overflow-x-auto rounded-2xl border border-neutral-200 bg-white shadow-sm'>
+    <div className='overflow-x-auto rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface shadow-sm'>
       <table className='w-full min-w-[640px] border-collapse text-sm'>
         <thead>
           <tr>
-            <th className='sticky left-0 bg-neutral-50 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500'>
+            <th className='sticky left-0 bg-surface-2 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-3'>
               Dimension
             </th>
             {data.items.map((item) => (
               <th
                 key={item.name}
-                className='border-l border-neutral-100 bg-neutral-50 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500'
+                className='border-l border-line bg-surface-2 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-3'
               >
                 {item.name}
               </th>
@@ -214,10 +214,10 @@ function ComparisonTable({ data }: { data: ComparisonObject }) {
         </thead>
         <tbody>
           {data.dimensions.map((dim) => (
-            <tr key={dim} className='border-t border-neutral-100'>
+            <tr key={dim} className='border-t border-line'>
               <th
                 scope='row'
-                className='sticky left-0 bg-white px-4 py-3 text-left text-sm font-medium text-neutral-900'
+                className='sticky left-0 bg-surface px-4 py-3 text-left text-sm font-medium text-ink'
               >
                 {dim}
               </th>
@@ -226,7 +226,7 @@ function ComparisonTable({ data }: { data: ComparisonObject }) {
                 return (
                   <td
                     key={item.name}
-                    className='border-l border-neutral-100 px-4 py-3 align-top text-sm text-neutral-600'
+                    className='border-l border-line px-4 py-3 align-top text-sm text-ink-2'
                   >
                     {rating?.assessment ?? 'Not covered'}
                   </td>
@@ -242,19 +242,19 @@ function ComparisonTable({ data }: { data: ComparisonObject }) {
 
 function BriefingDoc({ data }: { data: BriefingObject }) {
   return (
-    <div className='rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm sm:p-8'>
-      <h2 className='text-xl font-semibold tracking-tight text-neutral-900'>{data.title}</h2>
-      <p className='mt-3 text-sm leading-relaxed text-neutral-600'>{data.executive_summary}</p>
+    <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-6 shadow-sm sm:p-8'>
+      <h2 className='text-xl font-semibold tracking-tight text-ink'>{data.title}</h2>
+      <p className='mt-3 text-sm leading-relaxed text-ink-2'>{data.executive_summary}</p>
 
       {data.key_takeaways.length > 0 && (
-        <div className='mt-5 rounded-xl bg-neutral-50 p-4'>
-          <p className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>
+        <div className='mt-5 rounded-[var(--rp-radius)] bg-surface-2 p-4'>
+          <p className='text-xs font-semibold uppercase tracking-wide text-ink-3'>
             Key takeaways
           </p>
           <ul className='mt-2 space-y-1.5'>
             {data.key_takeaways.map((t, i) => (
-              <li key={i} className='flex gap-2 text-sm text-neutral-800'>
-                <span aria-hidden='true' className='text-neutral-400'>&bull;</span>
+              <li key={i} className='flex gap-2 text-sm text-ink'>
+                <span aria-hidden='true' className='text-ink-3'>&bull;</span>
                 <span>{t}</span>
               </li>
             ))}
@@ -265,8 +265,8 @@ function BriefingDoc({ data }: { data: BriefingObject }) {
       <div className='mt-6 space-y-5'>
         {data.sections.map((s, i) => (
           <div key={i}>
-            <h3 className='text-sm font-semibold text-neutral-900'>{s.heading}</h3>
-            <p className='mt-1.5 text-sm leading-relaxed text-neutral-600'>{s.content}</p>
+            <h3 className='text-sm font-semibold text-ink'>{s.heading}</h3>
+            <p className='mt-1.5 text-sm leading-relaxed text-ink-2'>{s.content}</p>
           </div>
         ))}
       </div>
@@ -276,21 +276,21 @@ function BriefingDoc({ data }: { data: BriefingObject }) {
 
 function TimelineView({ data }: { data: TimelineObject }) {
   return (
-    <div className='rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm sm:p-8'>
-      <h2 className='text-xl font-semibold tracking-tight text-neutral-900'>{data.title}</h2>
-      <ol className='mt-6 space-y-6 border-l-2 border-neutral-200 pl-6'>
+    <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-6 shadow-sm sm:p-8'>
+      <h2 className='text-xl font-semibold tracking-tight text-ink'>{data.title}</h2>
+      <ol className='mt-6 space-y-6 border-l-2 border-line pl-6'>
         {data.events.map((ev, i) => (
           <li key={i} className='relative'>
             <span
-              className='absolute -left-[27px] top-1 h-3 w-3 rounded-full border-2 border-white'
+              className='absolute -left-[27px] top-1 h-3 w-3 rounded-full border-2 border-surface'
               style={{ backgroundColor: 'var(--rp-accent)' }}
               aria-hidden='true'
             />
-            <span className='inline-flex items-center rounded-full bg-neutral-100 px-2.5 py-0.5 text-xs font-medium text-neutral-700'>
+            <span className='rp-chip'>
               {ev.date}
             </span>
-            <h3 className='mt-1.5 text-sm font-semibold text-neutral-900'>{ev.title}</h3>
-            <p className='mt-1 text-sm leading-relaxed text-neutral-600'>{ev.description}</p>
+            <h3 className='mt-1.5 text-sm font-semibold text-ink'>{ev.title}</h3>
+            <p className='mt-1 text-sm leading-relaxed text-ink-2'>{ev.description}</p>
           </li>
         ))}
       </ol>
@@ -301,35 +301,41 @@ function TimelineView({ data }: { data: TimelineObject }) {
 function ProsConsView({ data }: { data: ProsConsObject }) {
   return (
     <div>
-      <h2 className='text-lg font-semibold tracking-tight text-neutral-900'>{data.subject}</h2>
+      <h2 className='text-lg font-semibold tracking-tight text-ink'>{data.subject}</h2>
       <div className='mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2'>
-        <div className='rounded-2xl border border-emerald-200 bg-emerald-50 p-5'>
-          <p className='text-xs font-semibold uppercase tracking-wide text-emerald-700'>Pros</p>
+        <div className='rounded-[calc(var(--rp-radius)+4px)] border border-[var(--rp-ok-line)] bg-[var(--rp-ok-bg)] p-5'>
+          <p className='text-xs font-semibold uppercase tracking-wide text-[var(--rp-ok-ink)]'>
+            Pros
+          </p>
           <ul className='mt-3 space-y-3'>
             {data.pros.map((p, i) => (
               <li key={i}>
-                <p className='text-sm font-medium text-emerald-900'>{p.point}</p>
-                <p className='mt-0.5 text-sm text-emerald-800/80'>{p.rationale}</p>
+                <p className='text-sm font-medium text-[var(--rp-ok-ink)]'>{p.point}</p>
+                <p className='mt-0.5 text-sm text-[var(--rp-ok-ink)] opacity-80'>{p.rationale}</p>
               </li>
             ))}
           </ul>
           {data.pros.length === 0 && (
-            <p className='mt-3 text-sm text-emerald-800/70'>
+            <p className='mt-3 text-sm text-[var(--rp-ok-ink)] opacity-70'>
               None found.
             </p>
           )}
         </div>
-        <div className='rounded-2xl border border-rose-200 bg-rose-50 p-5'>
-          <p className='text-xs font-semibold uppercase tracking-wide text-rose-700'>Cons</p>
+        <div className='rounded-[calc(var(--rp-radius)+4px)] border border-[var(--rp-bad-line)] bg-[var(--rp-bad-bg)] p-5'>
+          <p className='text-xs font-semibold uppercase tracking-wide text-[var(--rp-bad-ink)]'>
+            Cons
+          </p>
           <ul className='mt-3 space-y-3'>
             {data.cons.map((c, i) => (
               <li key={i}>
-                <p className='text-sm font-medium text-rose-900'>{c.point}</p>
-                <p className='mt-0.5 text-sm text-rose-800/80'>{c.rationale}</p>
+                <p className='text-sm font-medium text-[var(--rp-bad-ink)]'>{c.point}</p>
+                <p className='mt-0.5 text-sm text-[var(--rp-bad-ink)] opacity-80'>{c.rationale}</p>
               </li>
             ))}
           </ul>
-          {data.cons.length === 0 && <p className='mt-3 text-sm text-rose-800/70'>None found.</p>}
+          {data.cons.length === 0 && (
+            <p className='mt-3 text-sm text-[var(--rp-bad-ink)] opacity-70'>None found.</p>
+          )}
         </div>
       </div>
     </div>
@@ -339,23 +345,23 @@ function ProsConsView({ data }: { data: ProsConsObject }) {
 function FaqView({ data }: { data: FaqObject }) {
   return (
     <div>
-      <h2 className='text-lg font-semibold tracking-tight text-neutral-900'>{data.title}</h2>
+      <h2 className='text-lg font-semibold tracking-tight text-ink'>{data.title}</h2>
       <div className='mt-4 space-y-2'>
         {data.entries.map((e, i) => (
           <details
             key={i}
-            className='group rounded-xl border border-neutral-200 bg-white open:shadow-sm'
+            className='group rounded-[var(--rp-radius)] border border-line bg-surface open:shadow-sm'
           >
-            <summary className='flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-neutral-900 [&::-webkit-details-marker]:hidden'>
+            <summary className='flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-ink [&::-webkit-details-marker]:hidden'>
               {e.question}
               <span
-                className='shrink-0 text-neutral-400 transition-transform duration-150 group-open:rotate-180'
+                className='shrink-0 text-ink-3 transition-transform duration-150 group-open:rotate-180'
                 aria-hidden='true'
               >
                 &#9662;
               </span>
             </summary>
-            <div className='border-t border-neutral-100 px-4 py-3 text-sm leading-relaxed text-neutral-600'>
+            <div className='border-t border-line px-4 py-3 text-sm leading-relaxed text-ink-2'>
               {e.answer}
             </div>
           </details>
@@ -378,9 +384,9 @@ function AssessmentQuiz({ data }: { data: AssessmentObject }) {
   return (
     <div>
       <div className='flex items-center justify-between gap-3'>
-        <h2 className='text-lg font-semibold tracking-tight text-neutral-900'>Assessment</h2>
+        <h2 className='text-lg font-semibold tracking-tight text-ink'>Assessment</h2>
         {submitted && (
-          <p className='text-sm font-semibold text-neutral-900'>
+          <p className='text-sm font-semibold text-ink'>
             Score: {score} / {data.questions.length}
           </p>
         )}
@@ -388,26 +394,33 @@ function AssessmentQuiz({ data }: { data: AssessmentObject }) {
 
       <div className='mt-4 space-y-6'>
         {data.questions.map((q, qi) => (
-          <div key={qi} className='rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm'>
+          <div
+            key={qi}
+            className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-5 shadow-sm'
+          >
             {q.topic && (
-              <p className='text-xs font-semibold uppercase tracking-wide text-neutral-400'>
+              <p className='text-xs font-semibold uppercase tracking-wide text-ink-3'>
                 {q.topic}
               </p>
             )}
-            <p className='mt-1 text-sm font-medium text-neutral-900'>{q.question}</p>
+            <p className='mt-1 text-sm font-medium text-ink'>{q.question}</p>
             <div className='mt-3 space-y-2'>
               {q.options.map((opt, oi) => {
                 const isChosen = selected[qi] === oi
                 const isCorrect = oi === q.correct_index
-                let cls = 'border-neutral-200 hover:border-neutral-300'
+                let cls = 'border-line hover:border-[var(--rp-ink-3)]'
+                let optStyle: CSSProperties | undefined
                 if (submitted) {
                   if (isCorrect) {
-                    cls = 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                    cls = 'text-[var(--rp-ok-ink)]'
+                    optStyle = { borderColor: 'var(--rp-ok-line)', background: 'var(--rp-ok-bg)' }
                   } else if (isChosen) {
-                    cls = 'border-rose-300 bg-rose-50 text-rose-900'
+                    cls = 'text-[var(--rp-bad-ink)]'
+                    optStyle = { borderColor: 'var(--rp-bad-line)', background: 'var(--rp-bad-bg)' }
                   }
                 } else if (isChosen) {
-                  cls = 'border-neutral-900'
+                  cls = ''
+                  optStyle = { borderColor: 'var(--rp-ink)' }
                 }
                 return (
                   <button
@@ -415,7 +428,8 @@ function AssessmentQuiz({ data }: { data: AssessmentObject }) {
                     type='button'
                     disabled={submitted}
                     onClick={() => setSelected((prev) => ({ ...prev, [qi]: oi }))}
-                    className={`block w-full rounded-xl border px-4 py-2.5 text-left text-sm transition-colors duration-150 disabled:cursor-default ${cls}`}
+                    style={optStyle}
+                    className={`block w-full rounded-[var(--rp-radius)] border px-4 py-2.5 text-left text-sm transition-colors duration-150 disabled:cursor-default ${cls}`}
                   >
                     {opt}
                   </button>
@@ -423,7 +437,7 @@ function AssessmentQuiz({ data }: { data: AssessmentObject }) {
               })}
             </div>
             {submitted && q.explanation && (
-              <p className='mt-3 text-sm leading-relaxed text-neutral-600'>{q.explanation}</p>
+              <p className='mt-3 text-sm leading-relaxed text-ink-2'>{q.explanation}</p>
             )}
           </div>
         ))}
@@ -433,8 +447,7 @@ function AssessmentQuiz({ data }: { data: AssessmentObject }) {
         <button
           type='button'
           onClick={() => setSubmitted(true)}
-          className='mt-6 inline-flex items-center rounded-full px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150'
-          style={{ backgroundColor: 'var(--rp-primary)' }}
+          className='rp-btn rp-btn-primary mt-6'
         >
           Submit answers
         </button>
@@ -445,11 +458,14 @@ function AssessmentQuiz({ data }: { data: AssessmentObject }) {
 
 function RawFallback({ value }: { value: unknown }) {
   return (
-    <div className='rounded-2xl border border-amber-200 bg-amber-50 p-4'>
-      <p className='text-sm font-medium text-amber-800'>
+    <div
+      className='rounded-[calc(var(--rp-radius)+4px)] border p-4'
+      style={{ borderColor: 'var(--rp-warn-line)', background: 'var(--rp-warn-bg)' }}
+    >
+      <p className='text-sm font-medium' style={{ color: 'var(--rp-warn-ink)' }}>
         This result did not match the expected shape - showing the raw data instead.
       </p>
-      <pre className='mt-3 max-h-96 overflow-auto rounded-xl bg-white p-4 text-xs text-neutral-700'>
+      <pre className='mt-3 max-h-96 overflow-auto rounded-[var(--rp-radius)] bg-surface p-4 text-xs text-ink-2'>
         {JSON.stringify(value, null, 2)}
       </pre>
     </div>
@@ -458,8 +474,8 @@ function RawFallback({ value }: { value: unknown }) {
 
 function SourcesRow({ sources }: { sources: ResourceSummary[] }) {
   return (
-    <div className='mt-6 border-t border-neutral-100 pt-5'>
-      <p className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>
+    <div className='mt-6 border-t border-line pt-5'>
+      <p className='text-xs font-semibold uppercase tracking-wide text-ink-3'>
         Grounded in {sources.length} {sources.length === 1 ? 'source' : 'sources'}
       </p>
       {sources.length > 0 && (
@@ -468,7 +484,7 @@ function SourcesRow({ sources }: { sources: ResourceSummary[] }) {
             <span
               key={s.id}
               title={s.title}
-              className='max-w-[16rem] truncate rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs text-neutral-600'
+              className='rp-chip max-w-[16rem] truncate'
             >
               {s.title}
             </span>
@@ -735,7 +751,7 @@ function ExportRow(
         type='button'
         disabled={disabled}
         onClick={() => exportToWord(kind, object, sourceTitles)}
-        className='inline-flex items-center rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-700 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-60'
+        className='rp-btn rp-btn-outline disabled:cursor-not-allowed'
       >
         Export to Word
       </button>
@@ -743,12 +759,16 @@ function ExportRow(
         type='button'
         disabled={disabled}
         onClick={() => setPopupBlocked(!exportToPdf(kind, object, sourceTitles))}
-        className='inline-flex items-center rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-700 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-60'
+        className='rp-btn rp-btn-outline disabled:cursor-not-allowed'
       >
         Export to PDF
       </button>
       {popupBlocked
-        ? <p className='text-sm text-rose-600'>Allow pop-ups to export as PDF.</p>
+        ? (
+          <p className='text-sm' style={{ color: 'var(--rp-bad-ink)' }}>
+            Allow pop-ups to export as PDF.
+          </p>
+        )
         : null}
     </div>
   )
@@ -796,19 +816,21 @@ export function GeneratePage() {
 
   return (
     <main className='mx-auto max-w-4xl px-6 py-10'>
-      <h1 className='text-2xl font-semibold tracking-tight text-neutral-900'>Generate</h1>
-      <p className='mt-1 text-sm text-neutral-500'>
+      <h1 className='text-2xl font-semibold tracking-tight text-ink'>Generate</h1>
+      <p className='mt-1 text-sm text-ink-3'>
         Schema-enforced research artifacts, grounded in the knowledge box.
       </p>
 
-      <div className='mt-6 inline-flex flex-wrap gap-1 rounded-full border border-neutral-200 bg-white p-1'>
+      <div className='mt-6 inline-flex flex-wrap gap-1 rounded-[var(--rp-radius)] border border-line bg-surface p-1'>
         {KINDS.map((k) => (
           <button
             key={k.id}
             type='button'
             onClick={() => selectKind(k.id)}
-            className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
-              kind === k.id ? 'bg-neutral-900 text-white' : 'text-neutral-600 hover:bg-neutral-100'
+            className={`rounded-[calc(var(--rp-radius)-2px)] px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
+              kind === k.id
+                ? 'bg-[var(--rp-primary)] text-white'
+                : 'text-ink-2 hover:bg-[var(--rp-surface-2)]'
             }`}
           >
             {k.label}
@@ -819,7 +841,7 @@ export function GeneratePage() {
       <form onSubmit={onSubmit} className='mt-5'>
         <label
           htmlFor='generate-query'
-          className='mb-1.5 block text-sm font-medium text-neutral-900'
+          className='mb-1.5 block text-sm font-medium text-ink'
         >
           What should the {activeMeta?.label.toLowerCase()} cover?
         </label>
@@ -829,22 +851,24 @@ export function GeneratePage() {
           value={drafts[kind]}
           onChange={(e) => setDrafts((prev) => ({ ...prev, [kind]: e.target.value }))}
           placeholder={activeMeta?.placeholder}
-          className='w-full rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900'
+          className='rp-input'
         />
         <button
           type='submit'
           disabled={mutation.isPending || drafts[kind].trim().length === 0}
-          className='mt-3 inline-flex items-center rounded-full px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150 disabled:opacity-60'
-          style={{ backgroundColor: 'var(--rp-primary)' }}
+          className='rp-btn rp-btn-primary mt-3'
         >
           {mutation.isPending ? 'Generating - this can take up to half a minute…' : 'Generate'}
         </button>
       </form>
 
       {mutation.isError && (
-        <div role='alert' className='mt-8 rounded-2xl border border-rose-200 bg-rose-50 p-6'>
-          <p className='text-sm font-medium text-rose-900'>Generation failed</p>
-          <p className='mt-1 text-sm text-rose-700'>
+        <div
+          role='alert'
+          className='mt-8 rounded-[calc(var(--rp-radius)+4px)] border border-[var(--rp-bad-line)] bg-[var(--rp-bad-bg)] p-6'
+        >
+          <p className='text-sm font-medium text-[var(--rp-bad-ink)]'>Generation failed</p>
+          <p className='mt-1 text-sm text-[var(--rp-bad-ink)]'>
             {mutation.error instanceof Error
               ? mutation.error.message
               : 'Something went wrong - try a narrower request.'}
@@ -862,11 +886,11 @@ export function GeneratePage() {
       )}
 
       {mutation.isPending && (
-        <div className='mt-8 animate-pulse rounded-2xl border border-neutral-200 bg-white p-8'>
-          <div className='h-4 w-1/3 rounded bg-neutral-200' />
-          <div className='mt-4 h-3 w-full rounded bg-neutral-100' />
-          <div className='mt-2 h-3 w-5/6 rounded bg-neutral-100' />
-          <div className='mt-2 h-3 w-2/3 rounded bg-neutral-100' />
+        <div className='mt-8 animate-pulse rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-8'>
+          <div className='h-4 w-1/3 rounded bg-surface-3' />
+          <div className='mt-4 h-3 w-full rounded bg-surface-2' />
+          <div className='mt-2 h-3 w-5/6 rounded bg-surface-2' />
+          <div className='mt-2 h-3 w-2/3 rounded bg-surface-2' />
         </div>
       )}
 

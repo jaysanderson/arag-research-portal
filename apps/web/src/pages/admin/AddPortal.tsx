@@ -2,7 +2,7 @@ import { type FormEvent, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { addPortal } from '../../api/client.ts'
 import { MessagePanel } from './MessagePanel.tsx'
-import { errorMessage, inputClass, type Message } from './shared.ts'
+import { errorMessage, type Message } from './shared.ts'
 
 /**
  * Add a brand-new knowledge box portal: names the portal, then its row
@@ -50,7 +50,7 @@ export function AddPortal({ passcode }: { passcode: string }) {
   }
 
   return (
-    <section className='overflow-hidden rounded-2xl border border-dashed border-neutral-300 bg-white shadow-sm'>
+    <section className='rp-card overflow-hidden' style={{ borderStyle: 'dashed' }}>
       <button
         type='button'
         onClick={() => setOpen((prev) => !prev)}
@@ -58,33 +58,26 @@ export function AddPortal({ passcode }: { passcode: string }) {
         className='flex w-full items-center justify-between gap-3 px-6 py-4 text-left'
       >
         <span className='flex items-center gap-2'>
-          <span aria-hidden='true' className='text-neutral-400'>{open ? '▾' : '▸'}</span>
-          <span className='text-sm font-semibold text-neutral-900'>Add a knowledge box</span>
+          <span aria-hidden='true' className='text-ink-3'>{open ? '▾' : '▸'}</span>
+          <span className='text-sm font-semibold text-ink'>Add a knowledge box</span>
         </span>
-        {!open && (
-          <span className='hidden text-xs text-neutral-500 sm:inline'>
-            Creates a new portal
-          </span>
-        )}
+        {!open && <span className='hidden text-xs text-ink-3 sm:inline'>Creates a new portal</span>}
       </button>
 
       {open && (
-        <div className='border-t border-neutral-100 px-6 py-5'>
-          <p className='text-sm text-neutral-500'>
+        <div className='border-t border-line px-6 py-5'>
+          <p className='text-sm text-ink-3'>
             Creates a new portal. You then either deploy a fresh knowledge box on the platform or
             connect an existing one from its card.
           </p>
           <form onSubmit={onSubmit} className='mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3'>
             <div>
-              <label
-                htmlFor='portal-name'
-                className='mb-1.5 block text-sm font-medium text-neutral-900'
-              >
+              <label htmlFor='portal-name' className='mb-1.5 block text-sm font-medium text-ink'>
                 Name
               </label>
               <input
                 id='portal-name'
-                className={inputClass}
+                className='rp-input'
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder='e.g. AgriFutures Research Hub'
@@ -94,41 +87,31 @@ export function AddPortal({ passcode }: { passcode: string }) {
               />
             </div>
             <div>
-              <label
-                htmlFor='portal-org'
-                className='mb-1.5 block text-sm font-medium text-neutral-900'
-              >
-                Organisation <span className='font-normal text-neutral-400'>(optional)</span>
+              <label htmlFor='portal-org' className='mb-1.5 block text-sm font-medium text-ink'>
+                Organisation <span className='font-normal text-ink-3'>(optional)</span>
               </label>
               <input
                 id='portal-org'
-                className={inputClass}
+                className='rp-input'
                 value={organisation}
                 onChange={(e) => setOrganisation(e.target.value)}
                 autoComplete='off'
               />
             </div>
             <div>
-              <label
-                htmlFor='portal-tagline'
-                className='mb-1.5 block text-sm font-medium text-neutral-900'
-              >
-                Tagline <span className='font-normal text-neutral-400'>(optional)</span>
+              <label htmlFor='portal-tagline' className='mb-1.5 block text-sm font-medium text-ink'>
+                Tagline <span className='font-normal text-ink-3'>(optional)</span>
               </label>
               <input
                 id='portal-tagline'
-                className={inputClass}
+                className='rp-input'
                 value={tagline}
                 onChange={(e) => setTagline(e.target.value)}
                 autoComplete='off'
               />
             </div>
             <div className='sm:col-span-3'>
-              <button
-                type='submit'
-                disabled={busy}
-                className='inline-flex items-center rounded-full bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-neutral-800 disabled:opacity-60'
-              >
+              <button type='submit' disabled={busy} className='rp-btn rp-btn-primary'>
                 {busy ? 'Adding…' : 'Add portal'}
               </button>
             </div>

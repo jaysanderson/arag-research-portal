@@ -192,7 +192,7 @@ function renderMarkdown(
         const trimmed = block.trim()
         if (trimmed.startsWith('### ')) {
           return (
-            <h3 key={index} className='text-sm font-semibold text-neutral-900'>
+            <h3 key={index} className='text-sm font-semibold text-ink'>
               {renderInline(trimmed.slice(4), citations, sources, slug)}
             </h3>
           )
@@ -203,7 +203,7 @@ function renderMarkdown(
           return (
             <ul key={index} className='list-disc space-y-1 pl-5'>
               {lines.map((line, lineIndex) => (
-                <li key={lineIndex} className='text-sm leading-relaxed text-neutral-700'>
+                <li key={lineIndex} className='text-sm leading-relaxed text-ink-2'>
                   {renderInline(line.slice(2), citations, sources, slug)}
                 </li>
               ))}
@@ -211,7 +211,7 @@ function renderMarkdown(
           )
         }
         return (
-          <p key={index} className='text-sm leading-relaxed text-neutral-700'>
+          <p key={index} className='text-sm leading-relaxed text-ink-2'>
             {renderInline(trimmed, citations, sources, slug)}
           </p>
         )
@@ -247,15 +247,14 @@ function SessionList({
       <button
         type='button'
         onClick={onNew}
-        className='inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold text-white transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-        style={{ backgroundColor: 'var(--rp-primary)', outlineColor: 'var(--rp-accent)' }}
+        className='rp-btn rp-btn-primary w-full'
       >
         + New session
       </button>
 
       <nav aria-label='Chat sessions' className='mt-4 flex-1 space-y-1.5 overflow-y-auto'>
         {sessions.length === 0
-          ? <p className='px-1 py-2 text-xs text-neutral-500'>No sessions yet.</p>
+          ? <p className='px-1 py-2 text-xs text-ink-3'>No sessions yet.</p>
           : sessions.map((session) => {
             const isActive = session.id === activeSessionId
             return (
@@ -264,15 +263,15 @@ function SessionList({
                 type='button'
                 onClick={() => onSelect(session.id)}
                 aria-current={isActive ? 'true' : undefined}
-                className={`w-full rounded-xl px-3 py-2.5 text-left transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
-                  isActive ? 'bg-white shadow-sm' : 'hover:bg-white/60'
+                className={`w-full rounded-[var(--rp-radius)] px-3 py-2.5 text-left transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                  isActive ? 'bg-surface shadow-sm' : 'hover:bg-[var(--rp-surface-2)]'
                 }`}
                 style={{ outlineColor: 'var(--rp-accent)' }}
               >
-                <p className='rp-clamp-2 text-sm font-medium text-neutral-900'>
+                <p className='rp-clamp-2 text-sm font-medium text-ink'>
                   {sessionTitle(session)}
                 </p>
-                <p className='mt-0.5 text-xs text-neutral-500'>
+                <p className='mt-0.5 text-xs text-ink-3'>
                   {session.messages.length} {session.messages.length === 1 ? 'message' : 'messages'}
                   {' · '}
                   {relativeAge(session.updatedAt)}
@@ -293,7 +292,7 @@ function UserBubble({ message }: { message: ChatMessage }) {
   return (
     <div className='flex justify-end'>
       <div
-        className='max-w-[85%] rounded-2xl rounded-tr-sm px-4 py-3 text-sm leading-relaxed text-neutral-900 sm:max-w-[70%]'
+        className='max-w-[85%] rounded-[calc(var(--rp-radius)+4px)] rounded-tr-sm px-4 py-3 text-sm leading-relaxed text-ink sm:max-w-[70%]'
         style={{ backgroundColor: 'color-mix(in srgb, var(--rp-accent) 14%, white)' }}
       >
         {message.text}
@@ -317,14 +316,13 @@ function AssistantCard({
 }) {
   if (message.error) {
     return (
-      <div className='rounded-2xl border border-rose-200 bg-rose-50 p-5'>
-        <p className='text-sm font-medium text-rose-800'>Something went wrong</p>
-        <p className='mt-1 text-sm text-rose-700'>{message.error}</p>
-        <button
-          type='button'
-          onClick={onRetry}
-          className='mt-3 inline-flex items-center rounded-full bg-rose-700 px-4 py-1.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-rose-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-700'
-        >
+      <div
+        className='rounded-[calc(var(--rp-radius)+4px)] border p-5'
+        style={{ borderColor: 'var(--rp-bad-line)', background: 'var(--rp-bad-bg)' }}
+      >
+        <p className='text-sm font-medium text-[var(--rp-bad-ink)]'>Something went wrong</p>
+        <p className='mt-1 text-sm text-[var(--rp-bad-ink)]'>{message.error}</p>
+        <button type='button' onClick={onRetry} className='rp-btn rp-btn-danger mt-3'>
           Retry
         </button>
       </div>
@@ -332,10 +330,10 @@ function AssistantCard({
   }
 
   return (
-    <div className='rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm'>
+    <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-5 shadow-sm'>
       {message.pending && activeStage
         ? (
-          <p className='mb-2 flex items-center gap-2 text-xs font-medium text-neutral-500'>
+          <p className='mb-2 flex items-center gap-2 text-xs font-medium text-ink-3'>
             <span
               className='h-1.5 w-1.5 animate-pulse rounded-full'
               style={{ backgroundColor: 'var(--rp-accent)' }}
@@ -349,7 +347,7 @@ function AssistantCard({
       {message.text.length > 0
         ? renderMarkdown(message.text, message.citations, message.sources, slug)
         : message.pending
-        ? <p className='text-sm text-neutral-400'>Thinking…</p>
+        ? <p className='text-sm text-ink-3'>Thinking…</p>
         : null}
 
       {message.pending && message.text.length > 0
@@ -364,8 +362,8 @@ function AssistantCard({
 
       {message.citations.length > 0
         ? (
-          <div className='mt-4 border-t border-neutral-100 pt-3'>
-            <p className='text-xs font-medium text-neutral-500'>
+          <div className='mt-4 border-t border-line pt-3'>
+            <p className='text-xs font-medium text-ink-3'>
               Sources: {message.citations.length}
             </p>
             <div className='mt-2 flex flex-wrap gap-1.5'>
@@ -378,8 +376,7 @@ function AssistantCard({
                     key={citation.index}
                     to={citationHref(slug, citation.resourceId, matchedPassage)}
                     title={citation.title}
-                    className='inline-flex items-center gap-1 rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-xs font-medium text-neutral-600 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-                    style={{ outlineColor: 'var(--rp-accent)' }}
+                    className='rp-chip'
                   >
                     <span
                       className='inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold text-white'
@@ -398,7 +395,7 @@ function AssistantCard({
 
       {message.usage
         ? (
-          <p className='mt-3 text-xs text-neutral-400'>
+          <p className='mt-3 text-xs text-ink-3'>
             {message.usage.inputTokens} in / {message.usage.outputTokens} out tokens
           </p>
         )
@@ -406,7 +403,7 @@ function AssistantCard({
 
       {!message.pending && message.sources.length > 0
         ? (
-          <div className='mt-4 border-t border-neutral-100 pt-3'>
+          <div className='mt-4 border-t border-line pt-3'>
             <ContextJourney slug={slug} sources={message.sources} query={question} />
           </div>
         )
@@ -632,8 +629,7 @@ export function AssistantPage() {
         <button
           type='button'
           onClick={() => setShowSidebar(true)}
-          className='inline-flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-          style={{ outlineColor: 'var(--rp-accent)' }}
+          className='rp-chip'
         >
           Sessions
         </button>
@@ -641,7 +637,7 @@ export function AssistantPage() {
 
       <aside
         aria-label='Chat sessions'
-        className='hidden w-64 shrink-0 rounded-2xl border border-neutral-200 bg-neutral-50 p-3 lg:flex'
+        className='hidden w-64 shrink-0 rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface-2 p-3 lg:flex'
       >
         <SessionList
           sessions={sessions}
@@ -660,7 +656,7 @@ export function AssistantPage() {
               onClick={() => setShowSidebar(false)}
               className='flex-1 bg-black/30'
             />
-            <div className='h-full w-72 max-w-[80vw] bg-neutral-50 p-3 shadow-xl'>
+            <div className='h-full w-72 max-w-[80vw] bg-surface-2 p-3 shadow-xl'>
               <SessionList
                 sessions={sessions}
                 activeSessionId={activeSessionId}
@@ -680,11 +676,11 @@ export function AssistantPage() {
           {isEmpty
             ? (
               <div className='space-y-4'>
-                <div className='rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'>
-                  <h1 className='text-lg font-semibold tracking-tight text-neutral-900'>
+                <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-6 shadow-sm'>
+                  <h1 className='text-lg font-semibold tracking-tight text-ink'>
                     Ask {config.branding.productName}
                   </h1>
-                  <p className='mt-1 text-sm text-neutral-500'>
+                  <p className='mt-1 text-sm text-ink-3'>
                     Ask a question in plain language and get a grounded, cited answer drawn from the
                     corpus.
                   </p>
@@ -697,8 +693,7 @@ export function AssistantPage() {
                           key={question.id}
                           type='button'
                           onClick={() => send(question.text)}
-                          className='rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm text-neutral-700 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-                          style={{ outlineColor: 'var(--rp-accent)' }}
+                          className='rp-chip'
                         >
                           {question.text}
                         </button>
@@ -730,7 +725,7 @@ export function AssistantPage() {
         </section>
 
         <form onSubmit={handleSubmit} className='mt-2 shrink-0'>
-          <div className='flex items-end gap-2 rounded-2xl border border-neutral-200 bg-white p-2 shadow-sm'>
+          <div className='flex items-end gap-2 rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-2 shadow-sm'>
             <label htmlFor='assistant-composer' className='sr-only'>
               Ask a question
             </label>
@@ -742,15 +737,14 @@ export function AssistantPage() {
               disabled={isStreaming}
               rows={1}
               placeholder={config.searchPlaceholder}
-              className='max-h-40 min-w-0 flex-1 resize-none rounded-xl border-0 bg-transparent px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none disabled:opacity-60'
+              className='max-h-40 min-w-0 flex-1 resize-none rounded-[var(--rp-radius)] border-0 bg-transparent px-3 py-2 text-sm text-ink placeholder:text-ink-3 focus:outline-none disabled:opacity-60'
             />
             {isStreaming
               ? (
                 <button
                   type='button'
                   onClick={stop}
-                  className='shrink-0 rounded-full border border-neutral-300 bg-white px-4 py-2.5 text-sm font-semibold text-neutral-700 transition-colors duration-150 hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-                  style={{ outlineColor: 'var(--rp-accent)' }}
+                  className='rp-btn rp-btn-outline shrink-0'
                 >
                   Stop
                 </button>
@@ -759,14 +753,13 @@ export function AssistantPage() {
                 <button
                   type='submit'
                   disabled={draft.trim().length === 0}
-                  className='shrink-0 rounded-full px-5 py-2.5 text-sm font-semibold text-white transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40'
-                  style={{ backgroundColor: 'var(--rp-primary)', outlineColor: 'var(--rp-accent)' }}
+                  className='rp-btn rp-btn-primary shrink-0'
                 >
                   Send
                 </button>
               )}
           </div>
-          <p className='mt-1.5 px-1 text-xs text-neutral-400'>
+          <p className='mt-1.5 px-1 text-xs text-ink-3'>
             Enter to send &middot; Shift+Enter for a new line
           </p>
         </form>

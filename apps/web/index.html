@@ -12,6 +12,19 @@
     />
   </head>
   <body>
+    <script>
+    // Apply the stored theme before first paint to avoid a flash.
+    ;(function () {
+      try {
+        var t = localStorage.getItem('rp-theme')
+        if (t !== 'dark' && t !== 'light') {
+          t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        }
+        document.documentElement.dataset.theme = t
+      } catch (e) { /* default light */ }
+    })()
+    </script>
+
     <div id="root"></div>
     <link rel="stylesheet" href="/styles.css" />
     <script type="importmap">

@@ -6,12 +6,13 @@ import { ErrorCard, Skeleton } from '../components/ui.tsx'
 import { AddPortal } from './admin/AddPortal.tsx'
 import { MigratePanel } from './admin/MigratePanel.tsx'
 import { PortalRow } from './admin/PortalRow.tsx'
-import { inputClass } from './admin/shared.ts'
 
 /**
- * The management surface: passcode-gated overview of every portal, its
- * knowledge box connection, and the controls to connect, replace or revert.
+ * Global connections: passcode-gated overview of every portal and its
+ * knowledge box connection - connect, replace, revert, disable or remove.
  * The passcode lives in sessionStorage for the tab, never anywhere else.
+ * Everything else about a portal (content, appearance, behaviour, analysis)
+ * lives in that portal's own Manage workspace at /t/:slug/manage.
  *
  * Portals render as a compact accordion - one collapsed summary row each,
  * with only one expanded at a time - so the whole overview fits a single
@@ -51,26 +52,19 @@ export function AdminPage() {
 
   if (!passcode || unauthorised) {
     return (
-      <main className='flex min-h-screen flex-col items-center justify-center bg-[#f7f7f5] px-6'>
-        <div className='w-full max-w-sm rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm'>
-          <p className='text-xs font-semibold uppercase tracking-[0.2em] text-neutral-400'>
-            Research portal
-          </p>
-          <h1 className='mt-1 text-xl font-semibold tracking-tight text-neutral-900'>
-            Administration
-          </h1>
+      <main className='flex min-h-screen flex-col items-center justify-center bg-app px-6'>
+        <div className='rp-card w-full max-w-sm p-8'>
+          <p className='rp-eyebrow text-ink-3'>Research portal</p>
+          <h1 className='mt-1 text-xl font-semibold tracking-tight text-ink'>Knowledge boxes</h1>
           <form onSubmit={submitPasscode} className='mt-5 space-y-4'>
             <div>
-              <label
-                htmlFor='admin-passcode'
-                className='mb-1.5 block text-sm font-medium text-neutral-900'
-              >
+              <label htmlFor='admin-passcode' className='mb-1.5 block text-sm font-medium text-ink'>
                 Admin passcode
               </label>
               <input
                 id='admin-passcode'
                 type='password'
-                className={inputClass}
+                className='rp-input'
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 autoComplete='off'
@@ -78,21 +72,15 @@ export function AdminPage() {
               />
             </div>
             {unauthorised && (
-              <p role='alert' className='text-sm text-rose-700'>
+              <p role='alert' className='text-sm' style={{ color: 'var(--rp-bad-ink)' }}>
                 That passcode was not accepted.
               </p>
             )}
-            <button
-              type='submit'
-              className='w-full rounded-full bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-neutral-800'
-            >
+            <button type='submit' className='rp-btn rp-btn-primary w-full'>
               Enter
             </button>
           </form>
-          <Link
-            to='/'
-            className='mt-4 inline-block text-sm text-neutral-500 transition-colors duration-150 hover:text-neutral-900'
-          >
+          <Link to='/' className='mt-4 inline-block text-sm text-ink-3 hover:text-[var(--rp-ink)]'>
             &larr; Back to portals
           </Link>
         </div>
@@ -101,21 +89,18 @@ export function AdminPage() {
   }
 
   return (
-    <main className='min-h-screen bg-[#f7f7f5]'>
+    <main className='min-h-screen bg-app'>
       <div className='mx-auto max-w-3xl px-6 py-12'>
         <div className='flex items-center justify-between'>
           <div>
-            <p className='text-xs font-semibold uppercase tracking-[0.2em] text-neutral-400'>
-              Research portal
+            <p className='rp-eyebrow text-ink-3'>Research portal</p>
+            <h1 className='mt-1 text-2xl font-semibold tracking-tight text-ink'>Knowledge boxes</h1>
+            <p className='mt-1 text-sm text-ink-3'>
+              Connect, replace or revert each portal's knowledge box. For content, appearance and
+              behaviour, open a portal's own management workspace.
             </p>
-            <h1 className='mt-1 text-2xl font-semibold tracking-tight text-neutral-900'>
-              Administration
-            </h1>
           </div>
-          <Link
-            to='/'
-            className='text-sm font-medium text-neutral-500 transition-colors duration-150 hover:text-neutral-900'
-          >
+          <Link to='/' className='text-sm font-medium text-ink-3 hover:text-[var(--rp-ink)]'>
             &larr; Back to portals
           </Link>
         </div>

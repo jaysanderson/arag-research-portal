@@ -1,4 +1,12 @@
-import { type FormEvent, type RefObject, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type FormEvent,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import type { ResourceContent } from '@research-portal/core'
@@ -44,9 +52,14 @@ function useJoinedParagraphs(texts: { fieldId: string; text: string }[]): string
   }, [texts])
 }
 
+/** Small square section label used on every panel in this view. */
+function PanelHeading({ children }: { children: ReactNode }) {
+  return <h2 className='rp-eyebrow text-ink-3'>{children}</h2>
+}
+
 function DetailSkeleton() {
   return (
-    <div className='rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'>
+    <div className='rp-card p-5'>
       <div className='flex items-center justify-between'>
         <Skeleton className='h-5 w-16' />
         <Skeleton className='h-4 w-24' />
@@ -61,7 +74,7 @@ function DetailSkeleton() {
 
 function BodySkeleton() {
   return (
-    <div className='mt-8 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'>
+    <div className='rp-card mt-6 p-5'>
       <Skeleton className='h-72 w-full' />
     </div>
   )
@@ -89,24 +102,22 @@ function ExtractedTextPanel(
   }, [highlightIndex])
 
   if (paragraphs.length === 0) {
-    return (
-      <p className='text-sm text-neutral-400'>No extracted text is available for this document.</p>
-    )
+    return <p className='text-sm text-ink-3'>No extracted text is available for this document.</p>
   }
 
   return (
-    <div className='space-y-3 text-sm leading-relaxed text-neutral-700'>
+    <div className='rp-prose space-y-3 text-sm text-ink-2'>
       {paragraphs.map((paragraph, index) => {
         const isHighlighted = index === highlightIndex
         return (
           <p
             key={index}
             ref={isHighlighted ? highlightRef : undefined}
-            className={isHighlighted ? 'rounded-md border-l-4 py-1.5 pl-3 pr-2' : undefined}
+            className={isHighlighted ? 'rounded-[4px] border-l-2 py-1.5 pl-3 pr-2 text-ink' : ''}
             style={isHighlighted
               ? {
                 borderColor: 'var(--rp-accent)',
-                backgroundColor: 'color-mix(in srgb, var(--rp-accent) 12%, white)',
+                backgroundColor: 'color-mix(in srgb, var(--rp-accent) 14%, var(--rp-surface))',
               }
               : undefined}
           >
@@ -128,8 +139,8 @@ function ExtractedTextCard(
 ) {
   const paragraphs = useJoinedParagraphs(texts)
   return (
-    <div className='rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'>
-      <h2 className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>{title}</h2>
+    <div className='rp-card p-5'>
+      <PanelHeading>{title}</PanelHeading>
       <div className='mt-3'>
         <ExtractedTextPanel paragraphs={paragraphs} passage={passage} />
       </div>
@@ -186,8 +197,8 @@ function TranscriptPanel(
     )
 
   return (
-    <div className='mt-6 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'>
-      <h2 className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>Transcript</h2>
+    <div className='rp-card mt-5 p-5'>
+      <PanelHeading>Transcript</PanelHeading>
 
       <label htmlFor='transcript-search' className='sr-only'>
         Search the transcript
@@ -198,14 +209,14 @@ function TranscriptPanel(
         value={search}
         onChange={(event) => setSearch(event.target.value)}
         placeholder='Search the transcript'
-        className='mt-3 w-full rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none'
+        className='rp-input mt-3'
       />
 
-      <div className='mt-3 max-h-96 overflow-y-auto rounded-xl border border-neutral-100'>
+      <div className='mt-3 max-h-96 overflow-y-auto rounded-[6px] border border-line'>
         {rows.length === 0
-          ? <p className='p-4 text-sm text-neutral-400'>No matching transcript segments.</p>
+          ? <p className='p-4 text-sm text-ink-3'>No matching transcript segments.</p>
           : (
-            <ul className='divide-y divide-neutral-100'>
+            <ul className='divide-y divide-[var(--rp-line)]'>
               {rows.map(({ segment, index }) => {
                 const isHighlighted = index === highlightIndex
                 return (
@@ -217,17 +228,20 @@ function TranscriptPanel(
                         else rowRefs.current.delete(index)
                       }}
                       onClick={() => seekTo(segment.startSec)}
-                      className='flex w-full items-start gap-3 px-4 py-2.5 text-left text-sm transition-colors duration-150 hover:bg-neutral-50'
+                      className='flex w-full items-start gap-3 px-3.5 py-2 text-left text-sm transition-colors duration-150 hover:bg-[var(--rp-surface-2)]'
                       style={isHighlighted
-                        ? { backgroundColor: 'color-mix(in srgb, var(--rp-accent) 12%, white)' }
+                        ? {
+                          backgroundColor:
+                            'color-mix(in srgb, var(--rp-accent) 14%, var(--rp-surface))',
+                        }
                         : undefined}
                     >
-                      <span className='shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium tabular-nums text-neutral-500'>
+                      <span className='shrink-0 rounded-[4px] bg-surface-2 px-1.5 py-0.5 text-xs font-medium tabular-nums text-ink-3'>
                         {segment.startSec !== undefined
                           ? formatTimestamp(segment.startSec)
                           : '--:--'}
                       </span>
-                      <span className='text-neutral-700'>{segment.text}</span>
+                      <span className='text-ink-2'>{segment.text}</span>
                     </button>
                   </li>
                 )
@@ -248,34 +262,30 @@ function WebBody(
 ) {
   const pageSummary = content.summary ?? resourceSummary
   return (
-    <div className='space-y-6'>
+    <div className='space-y-5'>
       {content.originUrl
         ? (
           <a
             href={content.originUrl}
             target='_blank'
             rel='noopener noreferrer'
-            className='flex items-center justify-between gap-4 rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm transition-colors duration-150 hover:border-neutral-300'
+            className='rp-card rp-lift rp-focus flex items-center justify-between gap-4 p-4'
           >
             <div className='min-w-0'>
-              <p className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>
-                Source
-              </p>
-              <p className='mt-1 text-sm font-medium text-neutral-900'>Visit the source page</p>
-              <p className='mt-0.5 truncate text-xs text-neutral-400'>{content.originUrl}</p>
+              <PanelHeading>Source</PanelHeading>
+              <p className='mt-1 text-sm font-medium text-ink'>Visit the source page</p>
+              <p className='mt-0.5 truncate text-xs text-ink-3'>{content.originUrl}</p>
             </div>
-            <span aria-hidden='true' className='shrink-0 text-neutral-400'>&rarr;</span>
+            <span aria-hidden='true' className='shrink-0 text-ink-3'>&rarr;</span>
           </a>
         )
         : null}
 
       {pageSummary
         ? (
-          <div className='rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'>
-            <h2 className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>
-              Page summary
-            </h2>
-            <p className='mt-2 text-sm leading-relaxed text-neutral-700'>{pageSummary}</p>
+          <div className='rp-card p-5'>
+            <PanelHeading>Page summary</PanelHeading>
+            <p className='mt-2 text-sm leading-relaxed text-ink-2'>{pageSummary}</p>
           </div>
         )
         : null}
@@ -300,28 +310,25 @@ function PdfBody(
           <div>
             <iframe
               src={fileUrl}
-              className='h-[75vh] w-full rounded-xl border border-neutral-200'
+              className='h-[75vh] w-full rounded-[8px] border border-line bg-surface'
               title='PDF preview'
             />
             <a
               href={fileUrl}
               target='_blank'
               rel='noopener noreferrer'
-              className='mt-2 inline-block text-sm font-medium text-neutral-500 transition-colors duration-150 hover:text-neutral-900'
+              className='mt-2 inline-block text-sm font-medium text-[var(--rp-ink-3)] transition-colors duration-150 hover:text-[var(--rp-ink)]'
             >
               Open PDF in a new tab
             </a>
           </div>
         )
-        : <p className='text-sm text-neutral-400'>This PDF file is not available.</p>}
+        : <p className='text-sm text-ink-3'>This PDF file is not available.</p>}
 
       {paragraphs.length > 0
         ? (
-          <details
-            className='rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'
-            open={passage != null}
-          >
-            <summary className='cursor-pointer text-xs font-semibold uppercase tracking-wide text-neutral-500'>
+          <details className='rp-card p-5' open={passage != null}>
+            <summary className='rp-eyebrow cursor-pointer text-ink-3'>
               Extracted text
             </summary>
             <div className='mt-3'>
@@ -345,7 +352,7 @@ function MediaBody(
   const mediaRef = useRef<HTMLMediaElement | null>(null)
 
   return (
-    <div className='space-y-6'>
+    <div className='space-y-5'>
       {fileUrl
         ? kind === 'video'
           ? (
@@ -355,7 +362,7 @@ function MediaBody(
               }}
               controls
               preload='metadata'
-              className='w-full rounded-xl'
+              className='w-full rounded-[8px] border border-line'
               src={fileUrl}
             />
           )
@@ -369,7 +376,7 @@ function MediaBody(
               src={fileUrl}
             />
           )
-        : <p className='text-sm text-neutral-400'>This {kind} file is not available.</p>}
+        : <p className='text-sm text-ink-3'>This {kind} file is not available.</p>}
 
       {content.transcript.length > 0
         ? <TranscriptPanel transcript={content.transcript} mediaRef={mediaRef} passage={passage} />
@@ -380,8 +387,8 @@ function MediaBody(
 
 function ImageBody({ fileUrl, title }: { fileUrl: string | undefined; title: string }) {
   return fileUrl
-    ? <img src={fileUrl} className='max-h-[70vh] rounded-xl' alt={title} />
-    : <p className='text-sm text-neutral-400'>This image is not available.</p>
+    ? <img src={fileUrl} className='max-h-[70vh] rounded-[8px] border border-line' alt={title} />
+    : <p className='text-sm text-ink-3'>This image is not available.</p>
 }
 
 function TextFileBody(
@@ -399,7 +406,7 @@ function TextFileBody(
             href={fileUrl}
             target='_blank'
             rel='noopener noreferrer'
-            className='inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-700 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900'
+            className='rp-btn rp-btn-outline'
           >
             Download file
           </a>
@@ -485,28 +492,27 @@ export function ResourceDetailPage() {
   const topicLabel = (topicId: string) => config.topics.find((topic) => topic.id === topicId)?.label
 
   return (
-    <main className='mx-auto max-w-3xl px-6 py-10'>
+    <main className='mx-auto max-w-3xl px-6 py-8'>
       <Link
         to={`/t/${config.slug}/library`}
-        className='text-sm font-medium text-neutral-500 transition-colors duration-150 hover:text-neutral-900'
+        className='text-sm font-medium text-[var(--rp-ink-3)] transition-colors duration-150 hover:text-[var(--rp-ink)]'
       >
         &larr; Back to library
       </Link>
 
-      <div className='mt-6'>
+      <div className='mt-4'>
         {isLoading ? <DetailSkeleton /> : null}
 
         {isError && notFound
           ? (
-            <div className='rounded-2xl border border-dashed border-neutral-300 bg-white/60 p-8 text-center'>
-              <p className='text-sm font-medium text-neutral-900'>This document does not exist</p>
-              <p className='mt-1 text-sm text-neutral-500'>
+            <div className='rounded-[10px] border border-dashed border-line bg-surface-2 p-6'>
+              <p className='text-sm font-semibold text-ink'>This document does not exist</p>
+              <p className='mt-1 text-sm text-ink-2'>
                 It may have been removed, or the link is out of date.
               </p>
               <Link
                 to={`/t/${config.slug}/library`}
-                className='mt-4 inline-flex items-center rounded-full px-4 py-2 text-sm font-medium text-white transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-                style={{ backgroundColor: 'var(--rp-primary)', outlineColor: 'var(--rp-accent)' }}
+                className='rp-btn rp-btn-primary mt-4'
               >
                 Back to library
               </Link>
@@ -526,37 +532,37 @@ export function ResourceDetailPage() {
         {!isLoading && !isError && resource
           ? (
             <>
-              <article className='rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'>
-                <div className='flex items-start justify-between gap-6'>
+              <article className='rp-card p-5'>
+                <div className='flex items-start justify-between gap-5'>
                   <div className='min-w-0 flex-1'>
                     <div className='flex flex-wrap items-center justify-between gap-3'>
                       <TypeBadge type={resource.type} />
                       {resource.published
                         ? (
-                          <span className='text-xs font-medium text-neutral-400'>
+                          <span className='text-xs font-medium tabular-nums text-ink-3'>
                             Published {formatDate(resource.published)}
                           </span>
                         )
                         : null}
                     </div>
 
-                    <h1 className='mt-3 text-2xl font-semibold tracking-tight text-neutral-900'>
+                    <h1 className='rp-display mt-3 text-2xl text-ink'>
                       {resource.title}
                     </h1>
-                    <p className='mt-2 text-sm leading-relaxed text-neutral-600'>
+                    <p className='mt-2 text-sm leading-relaxed text-ink-2'>
                       {resource.summary}
                     </p>
 
                     {resource.topicIds.length > 0
                       ? (
-                        <div className='mt-4 flex flex-wrap gap-1.5'>
+                        <div className='mt-3.5 flex flex-wrap gap-1'>
                           {resource.topicIds.map((topicId) => {
                             const label = topicLabel(topicId)
                             if (!label) return null
                             return (
                               <span
                                 key={topicId}
-                                className='inline-flex items-center rounded-full bg-neutral-100 px-2.5 py-0.5 text-xs text-neutral-600'
+                                className='rounded-[4px] bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-2'
                               >
                                 {label}
                               </span>
@@ -568,14 +574,14 @@ export function ResourceDetailPage() {
 
                     {resource.keyFacts.length > 0
                       ? (
-                        <div className='mt-6'>
-                          <p className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>
-                            Key facts
-                          </p>
+                        <div className='mt-5 border-t border-line pt-4'>
+                          <PanelHeading>Key facts</PanelHeading>
                           <ol className='mt-2 space-y-1.5'>
                             {resource.keyFacts.map((fact, index) => (
-                              <li key={index} className='flex gap-2 text-sm text-neutral-700'>
-                                <span className='font-medium text-neutral-400'>{index + 1}.</span>
+                              <li key={index} className='flex gap-2 text-sm text-ink-2'>
+                                <span className='font-medium tabular-nums text-ink-3'>
+                                  {index + 1}.
+                                </span>
                                 <span>{fact}</span>
                               </li>
                             ))}
@@ -585,7 +591,7 @@ export function ResourceDetailPage() {
                       : null}
                   </div>
 
-                  <div className='hidden h-24 w-36 shrink-0 overflow-hidden rounded-xl sm:block'>
+                  <div className='hidden h-24 w-36 shrink-0 overflow-hidden rounded-[8px] border border-line sm:block'>
                     <ResourceThumb slug={config.slug} id={resource.id} type={resource.type} />
                   </div>
                 </div>
@@ -595,7 +601,7 @@ export function ResourceDetailPage() {
 
               {!contentLoading && content
                 ? (
-                  <div className='mt-8'>
+                  <div className='mt-6'>
                     <ResourceBody
                       slug={config.slug}
                       content={content}
@@ -608,39 +614,30 @@ export function ResourceDetailPage() {
 
               {!contentLoading && !content
                 ? (
-                  <div className='mt-8 rounded-2xl border border-dashed border-neutral-300 bg-white/60 p-6 text-center'>
-                    <p className='text-sm text-neutral-500'>
+                  <div className='mt-6 rounded-[10px] border border-dashed border-line bg-surface-2 p-5'>
+                    <p className='text-sm text-ink-2'>
                       Full content is unavailable for this resource.
                     </p>
                   </div>
                 )
                 : null}
 
-              <section className='mt-8 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'>
-                <h2 className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>
-                  Ask this document
-                </h2>
+              <section className='rp-card mt-6 p-5'>
+                <PanelHeading>Ask this document</PanelHeading>
                 <form onSubmit={handleAskSubmit} className='mt-3'>
                   <label htmlFor='ask-document' className='sr-only'>
                     Ask a question about {resource.title}
                   </label>
-                  <div className='flex items-center gap-2 rounded-full border border-neutral-200 bg-white p-2'>
+                  <div className='flex items-center gap-2 rounded-[8px] border border-line bg-surface p-1.5 pl-3'>
                     <input
                       id='ask-document'
                       type='text'
                       value={askDraft}
                       onChange={(event) => setAskDraft(event.target.value)}
                       placeholder='Ask a question about this document'
-                      className='min-w-0 flex-1 rounded-full border-0 bg-transparent px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none'
+                      className='min-w-0 flex-1 border-0 bg-transparent py-1.5 text-sm text-ink placeholder:text-[var(--rp-ink-3)] focus:outline-none'
                     />
-                    <button
-                      type='submit'
-                      className='shrink-0 rounded-full px-4 py-2 text-sm font-semibold text-white transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-                      style={{
-                        backgroundColor: 'var(--rp-primary)',
-                        outlineColor: 'var(--rp-accent)',
-                      }}
-                    >
+                    <button type='submit' className='rp-btn rp-btn-primary shrink-0 font-semibold'>
                       Ask
                     </button>
                   </div>

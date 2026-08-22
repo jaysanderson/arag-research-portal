@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { AdminTenantOverview, MigrationEvent } from '@research-portal/core'
 import { migrateKb } from '../../api/client.ts'
 import { MessagePanel } from './MessagePanel.tsx'
-import { errorMessage, inputClass, type Message } from './shared.ts'
+import { errorMessage, type Message } from './shared.ts'
 
 type ItemEvent = Extract<MigrationEvent, { type: 'item' }>
 type DoneEvent = Extract<MigrationEvent, { type: 'done' }>
@@ -15,17 +15,17 @@ const OUTCOME_LABEL: Record<ItemEvent['outcome'], string> = {
   error: 'Error',
 }
 
-const OUTCOME_STYLE: Record<ItemEvent['outcome'], string> = {
-  copied: 'bg-emerald-50 text-emerald-800',
-  'skipped-exists': 'bg-amber-50 text-amber-800',
-  'skipped-unsupported': 'bg-amber-50 text-amber-800',
-  error: 'bg-rose-50 text-rose-800',
+const OUTCOME_BADGE: Record<ItemEvent['outcome'], string> = {
+  copied: 'rp-badge-ok',
+  'skipped-exists': 'rp-badge-warn',
+  'skipped-unsupported': 'rp-badge-warn',
+  error: 'rp-badge-bad',
 }
 
 /**
  * Copies every resource from one portal's knowledge box into another's,
  * streaming live progress from the server as it goes. Sits at the bottom of
- * the admin page, its own card, independent of any single tenant.
+ * the connections page, its own card, independent of any single tenant.
  */
 export function MigratePanel(
   { rows, passcode }: { rows: AdminTenantOverview[]; passcode: string },
@@ -69,7 +69,7 @@ export function MigratePanel(
   }
 
   return (
-    <section className='overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm'>
+    <section className='rp-card overflow-hidden'>
       <button
         type='button'
         onClick={() => setOpen((prev) => !prev)}
@@ -77,33 +77,30 @@ export function MigratePanel(
         className='flex w-full items-center justify-between gap-3 px-6 py-4 text-left'
       >
         <span className='flex items-center gap-2'>
-          <span aria-hidden='true' className='text-neutral-400'>{open ? '▾' : '▸'}</span>
-          <span className='text-sm font-semibold text-neutral-900'>Migrate resources</span>
+          <span aria-hidden='true' className='text-ink-3'>{open ? '▾' : '▸'}</span>
+          <span className='text-sm font-semibold text-ink'>Migrate resources</span>
         </span>
         {!open && (
-          <span className='hidden text-xs text-neutral-500 sm:inline'>
+          <span className='hidden text-xs text-ink-3 sm:inline'>
             Copy resources between portals
           </span>
         )}
       </button>
 
       {open && (
-        <div className='border-t border-neutral-100 px-6 py-5'>
-          <p className='text-sm text-neutral-500'>
+        <div className='border-t border-line px-6 py-5'>
+          <p className='text-sm text-ink-3'>
             Copy every resource from one portal's knowledge box into another's.
           </p>
 
           <div className='mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2'>
             <div>
-              <label
-                htmlFor='migrate-from'
-                className='mb-1.5 block text-sm font-medium text-neutral-900'
-              >
+              <label htmlFor='migrate-from' className='mb-1.5 block text-sm font-medium text-ink'>
                 From portal
               </label>
               <select
                 id='migrate-from'
-                className={inputClass}
+                className='rp-input'
                 value={from}
                 disabled={running}
                 onChange={(e) => setFrom(e.target.value)}
@@ -117,15 +114,12 @@ export function MigratePanel(
               </select>
             </div>
             <div>
-              <label
-                htmlFor='migrate-to'
-                className='mb-1.5 block text-sm font-medium text-neutral-900'
-              >
+              <label htmlFor='migrate-to' className='mb-1.5 block text-sm font-medium text-ink'>
                 To portal
               </label>
               <select
                 id='migrate-to'
-                className={inputClass}
+                className='rp-input'
                 value={to}
                 disabled={running}
                 onChange={(e) => setTo(e.target.value)}
@@ -144,26 +138,19 @@ export function MigratePanel(
             type='button'
             disabled={!canRun}
             onClick={() => void onRun()}
-            className='mt-4 inline-flex items-center rounded-full bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-neutral-800 disabled:opacity-60'
+            className='rp-btn rp-btn-primary mt-4'
           >
             {running ? 'Migrating…' : 'Run migration'}
           </button>
 
           {total !== null && (
             <div className='mt-5'>
-              <p className='text-sm text-neutral-600'>
-                {items.length} of {total} processed
-              </p>
-              <ul className='mt-2 max-h-64 space-y-1 overflow-y-auto rounded-xl border border-neutral-200 bg-neutral-50 p-3'>
+              <p className='text-sm text-ink-2'>{items.length} of {total} processed</p>
+              <ul className='mt-2 max-h-64 space-y-1 overflow-y-auto rounded-[var(--rp-radius)] border border-line bg-surface-2 p-3'>
                 {items.map((item) => (
                   <li key={item.id} className='flex items-center justify-between gap-3 text-sm'>
-                    <span className='truncate text-neutral-800'>{item.title}</span>
-                    <span
-                      title={item.detail}
-                      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-                        OUTCOME_STYLE[item.outcome]
-                      }`}
-                    >
+                    <span className='truncate text-ink-2'>{item.title}</span>
+                    <span title={item.detail} className={`rp-badge ${OUTCOME_BADGE[item.outcome]}`}>
                       {OUTCOME_LABEL[item.outcome]}
                     </span>
                   </li>
@@ -173,7 +160,7 @@ export function MigratePanel(
           )}
 
           {summary && (
-            <p className='mt-3 text-sm text-neutral-700'>
+            <p className='mt-3 text-sm text-ink-2'>
               Copied {summary.copied}, skipped {summary.skipped}, {summary.errors} errors.
             </p>
           )}

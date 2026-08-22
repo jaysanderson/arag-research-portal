@@ -44,15 +44,18 @@ export function CreateKbBox({
 
   if (row.knowledgeBox.status === 'none') {
     return (
-      <div className='mt-4 rounded-xl border border-dashed border-neutral-300 bg-neutral-50 p-4'>
-        <p className='text-sm text-neutral-600'>
+      <div
+        className='mt-4 rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface-2 p-4'
+        style={{ borderStyle: 'dashed' }}
+      >
+        <p className='text-sm text-ink-2'>
           This portal has no knowledge box yet. Create one to start adding content.
         </p>
         <button
           type='button'
           disabled={busy}
           onClick={() => void onCreate()}
-          className='mt-3 inline-flex items-center rounded-full bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-neutral-800 disabled:opacity-60'
+          className='rp-btn rp-btn-primary mt-3'
         >
           {busy ? 'Creating…' : 'Create a knowledge box'}
         </button>
@@ -69,11 +72,11 @@ export function CreateKbBox({
             type='button'
             disabled={busy}
             onClick={() => void onCreate()}
-            className='inline-flex items-center rounded-full border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 transition-colors duration-150 hover:bg-neutral-100 disabled:opacity-60'
+            className='rp-btn rp-btn-outline'
           >
             {busy ? 'Creating…' : 'Create new box'}
           </button>
-          <p className='text-xs text-neutral-500'>
+          <p className='text-xs text-ink-3'>
             Creates a fresh box on the platform and connects this portal to it.
           </p>
         </div>

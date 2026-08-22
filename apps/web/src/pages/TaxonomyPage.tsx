@@ -18,19 +18,19 @@ function LabelsetCard({
   const sorted = [...labelset.labels].sort((a, b) => (counts[b] ?? 0) - (counts[a] ?? 0))
 
   return (
-    <div className='rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'>
+    <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-6 shadow-sm'>
       <div className='flex items-baseline justify-between gap-3'>
-        <h2 className='text-lg font-semibold tracking-tight text-neutral-900'>{labelset.title}</h2>
-        <span className='shrink-0 text-xs font-medium uppercase tracking-wide text-neutral-500'>
+        <h2 className='text-lg font-semibold tracking-tight text-ink'>{labelset.title}</h2>
+        <span className='shrink-0 text-xs font-medium uppercase tracking-wide text-ink-3'>
           {labelset.labels.length} {labelset.labels.length === 1 ? 'value' : 'values'}
         </span>
       </div>
-      <p className='mt-1 text-xs text-neutral-500'>
+      <p className='mt-1 text-xs text-ink-3'>
         {labelset.multiple ? 'Multiple values per resource' : 'Single value per resource'}
       </p>
 
       {sorted.length === 0
-        ? <p className='mt-4 text-sm text-neutral-400'>No values yet.</p>
+        ? <p className='mt-4 text-sm text-ink-3'>No values yet.</p>
         : (
           <div className='mt-4 flex flex-wrap gap-2'>
             {sorted.map((label) => {
@@ -38,14 +38,10 @@ function LabelsetCard({
               return (
                 <span
                   key={label}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset ${
-                    count > 0
-                      ? 'bg-neutral-100 text-neutral-800 ring-neutral-200'
-                      : 'bg-neutral-50 text-neutral-400 ring-neutral-100'
-                  }`}
+                  className={`rp-chip ${count > 0 ? 'text-ink' : 'text-ink-3'}`}
                 >
                   {label}
-                  <span className={count > 0 ? 'text-neutral-500' : 'text-neutral-300'}>
+                  <span className='text-ink-3'>
                     {count}
                   </span>
                 </span>
@@ -99,13 +95,13 @@ function AddLabelsetCard({
   }
 
   return (
-    <div className='rounded-2xl border border-dashed border-neutral-300 bg-white/60 p-6'>
-      <h2 className='text-sm font-semibold text-neutral-900'>Add a category</h2>
+    <div className='rounded-[calc(var(--rp-radius)+4px)] border border-dashed border-line bg-surface-2 p-6'>
+      <h2 className='text-sm font-semibold text-ink'>Add a category</h2>
       <form onSubmit={onSubmit} className='mt-4 space-y-3'>
         <div>
           <label
             htmlFor='taxonomy-name'
-            className='mb-1.5 block text-sm font-medium text-neutral-900'
+            className='mb-1.5 block text-sm font-medium text-ink'
           >
             Name
           </label>
@@ -121,13 +117,15 @@ function AddLabelsetCard({
         </div>
 
         <div>
-          <p className='mb-1.5 block text-sm font-medium text-neutral-900'>Values per resource</p>
-          <div className='inline-flex rounded-full border border-neutral-200 bg-white p-1'>
+          <p className='mb-1.5 block text-sm font-medium text-ink'>Values per resource</p>
+          <div className='inline-flex rounded-[var(--rp-radius)] border border-line bg-surface p-1'>
             <button
               type='button'
               onClick={() => setMultiple(false)}
-              className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
-                !multiple ? 'bg-neutral-900 text-white' : 'text-neutral-600 hover:bg-neutral-100'
+              className={`rounded-[calc(var(--rp-radius)-2px)] px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
+                !multiple
+                  ? 'bg-[var(--rp-primary)] text-white'
+                  : 'text-ink-2 hover:bg-[var(--rp-surface-2)]'
               }`}
             >
               Single
@@ -135,8 +133,10 @@ function AddLabelsetCard({
             <button
               type='button'
               onClick={() => setMultiple(true)}
-              className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
-                multiple ? 'bg-neutral-900 text-white' : 'text-neutral-600 hover:bg-neutral-100'
+              className={`rounded-[calc(var(--rp-radius)-2px)] px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
+                multiple
+                  ? 'bg-[var(--rp-primary)] text-white'
+                  : 'text-ink-2 hover:bg-[var(--rp-surface-2)]'
               }`}
             >
               Multiple
@@ -147,7 +147,7 @@ function AddLabelsetCard({
         <div>
           <label
             htmlFor='taxonomy-seed'
-            className='mb-1.5 block text-sm font-medium text-neutral-900'
+            className='mb-1.5 block text-sm font-medium text-ink'
           >
             Seed values
           </label>
@@ -164,7 +164,7 @@ function AddLabelsetCard({
         <div>
           <label
             htmlFor='taxonomy-passcode'
-            className='mb-1.5 block text-sm font-medium text-neutral-900'
+            className='mb-1.5 block text-sm font-medium text-ink'
           >
             Admin passcode
           </label>
@@ -182,7 +182,7 @@ function AddLabelsetCard({
         <button
           type='submit'
           disabled={busy}
-          className='inline-flex items-center rounded-full bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-neutral-800 disabled:opacity-60'
+          className='rp-btn rp-btn-primary'
         >
           {busy ? 'Adding…' : 'Add category'}
         </button>
@@ -195,13 +195,13 @@ function AddLabelsetCard({
 
 function LabelsetCardSkeleton() {
   return (
-    <div className='rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'>
+    <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-6 shadow-sm'>
       <Skeleton className='h-5 w-1/3' />
       <Skeleton className='mt-3 h-4 w-1/2' />
       <div className='mt-4 flex flex-wrap gap-2'>
-        <Skeleton className='h-6 w-20 rounded-full' />
-        <Skeleton className='h-6 w-24 rounded-full' />
-        <Skeleton className='h-6 w-16 rounded-full' />
+        <Skeleton className='h-6 w-20 rounded-[var(--rp-radius)]' />
+        <Skeleton className='h-6 w-24 rounded-[var(--rp-radius)]' />
+        <Skeleton className='h-6 w-16 rounded-[var(--rp-radius)]' />
       </div>
     </div>
   )
@@ -243,8 +243,8 @@ export function TaxonomyPage() {
 
   return (
     <main className='mx-auto max-w-6xl px-6 py-10'>
-      <h1 className='text-2xl font-semibold tracking-tight text-neutral-900'>Taxonomy</h1>
-      <p className='mt-1 text-sm text-neutral-500'>
+      <h1 className='text-2xl font-semibold tracking-tight text-ink'>Taxonomy</h1>
+      <p className='mt-1 text-sm text-ink-3'>
         Categories used to classify resources. Counts reflect indexed content.
       </p>
 

@@ -1,7 +1,6 @@
 /** Shared styling and small types used across the admin page's subcomponents. */
 
-export const inputClass =
-  'w-full rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900'
+export const inputClass = 'rp-input'
 
 export type Message = { tone: 'ok' | 'error'; text: string }
 

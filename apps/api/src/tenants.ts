@@ -157,6 +157,8 @@ export interface TenantPatch {
   suggestedQuestions?: TenantConfig['suggestedQuestions']
   searchPlaceholder?: string
   branding?: TenantConfig['branding']
+  /** Portal-managed system prompts per surface (app-side settings). */
+  prompts?: { ask?: string }
 }
 
 export class TenantStore {
@@ -191,7 +193,14 @@ export class TenantStore {
     const base = tenantsBySlug[slug] ?? this.custom[slug]
     if (!base) return undefined
     const override = this.overrides[slug]
-    return override ? { ...base, ...override } : base
+    if (!override) return base
+    const { prompts: _prompts, ...configPatch } = override
+    return { ...base, ...configPatch }
+  }
+
+  /** App-side settings that never reach the public config payload. */
+  promptsFor(slug: string): { ask?: string } {
+    return this.overrides[slug]?.prompts ?? {}
   }
 
   isCustom(slug: string): boolean {

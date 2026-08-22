@@ -6,10 +6,10 @@ import { getKnowledgeBoxStatus, getTenants } from '../api/client.ts'
 
 function StatusDot({ status }: { status?: KnowledgeBoxStatus['status'] }) {
   const colour = status === 'connected'
-    ? 'bg-emerald-500'
+    ? 'var(--rp-ok-ink)'
     : status === 'demo'
-    ? 'bg-amber-400'
-    : 'bg-neutral-300'
+    ? 'var(--rp-warn-ink)'
+    : 'var(--rp-line)'
   const label = status === 'connected'
     ? 'Connected'
     : status === 'demo'
@@ -17,7 +17,11 @@ function StatusDot({ status }: { status?: KnowledgeBoxStatus['status'] }) {
     : 'Not connected'
   return (
     <span className='relative flex h-2.5 w-2.5 shrink-0 items-center justify-center'>
-      <span className={`h-2 w-2 rounded-full ${colour}`} aria-hidden='true' />
+      <span
+        className='h-2 w-2 rounded-full'
+        style={{ backgroundColor: colour }}
+        aria-hidden='true'
+      />
       <span className='sr-only'>{label}</span>
     </span>
   )
@@ -32,7 +36,7 @@ function TenantMark({ src, alt }: { src: string; alt: string }) {
       src={src}
       alt={alt}
       onError={() => setFailed(true)}
-      className='h-7 w-auto max-w-[7rem] rounded-md object-contain'
+      className='h-7 w-auto max-w-[7rem] rounded-[4px] object-contain'
     />
   )
 }
@@ -99,14 +103,14 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
         onClick={() => setOpen((prev) => !prev)}
         aria-haspopup='menu'
         aria-expanded={open}
-        className='rp-focus flex max-w-[15rem] items-center gap-2.5 rounded-xl px-2 py-1 text-left transition-colors duration-150 hover:bg-neutral-900/[0.05] sm:max-w-none'
+        className='rp-focus flex max-w-[15rem] items-center gap-2.5 rounded-[6px] px-2 py-1 text-left transition-colors duration-150 hover:bg-[var(--rp-surface-2)] sm:max-w-none'
       >
         {logoUrl ? <TenantMark src={logoUrl} alt={config.branding.organisation} /> : null}
-        <span className='truncate text-lg font-semibold tracking-[-0.02em] text-neutral-900'>
+        <span className='truncate text-[1.0625rem] font-semibold tracking-[-0.02em] text-ink'>
           {config.branding.productName}
         </span>
         <svg
-          className={`h-4 w-4 shrink-0 text-neutral-400 transition-transform duration-200 ${
+          className={`h-4 w-4 shrink-0 text-ink-3 transition-transform duration-200 ${
             open ? 'rotate-180' : ''
           }`}
           viewBox='0 0 20 20'
@@ -124,9 +128,9 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
       {open && (
         <div
           role='menu'
-          className='rp-glass rp-shadow-lg rp-anim-fade absolute left-0 top-full z-50 mt-2 w-[18.5rem] rounded-2xl border border-neutral-900/[0.08] p-1.5'
+          className='rp-glass rp-shadow-lg rp-anim-fade absolute left-0 top-full z-50 mt-2 w-[18.5rem] rounded-[10px] border border-line p-1.5'
         >
-          <p className='rp-eyebrow px-3 pb-1.5 pt-2.5 text-neutral-400'>
+          <p className='rp-eyebrow px-2.5 pb-1.5 pt-2 text-ink-3'>
             Knowledge boxes
           </p>
           <div className='rp-no-scrollbar max-h-[60vh] overflow-y-auto'>
@@ -138,16 +142,16 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
                   type='button'
                   role='menuitem'
                   onClick={() => switchTo(t.slug)}
-                  className={`rp-focus flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-150 hover:bg-neutral-900/[0.05] ${
-                    current ? 'bg-neutral-900/[0.05]' : ''
+                  className={`rp-focus flex w-full items-center gap-3 rounded-[6px] px-2.5 py-2 text-left transition-colors duration-150 hover:bg-[var(--rp-surface-2)] ${
+                    current ? 'bg-surface-2' : ''
                   }`}
                 >
                   <StatusDot status={statuses?.[t.slug]?.status} />
                   <span className='min-w-0 flex-1'>
-                    <span className='block truncate text-sm font-medium text-neutral-900'>
+                    <span className='block truncate text-sm font-medium text-ink'>
                       {t.productName}
                     </span>
-                    <span className='block truncate text-xs text-neutral-500'>
+                    <span className='block truncate text-xs text-ink-3'>
                       {t.organisation}
                     </span>
                   </span>
@@ -170,18 +174,18 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
               )
             })}
           </div>
-          <div className='my-1.5 border-t border-neutral-900/[0.07]' />
+          <div className='my-1.5 border-t border-line' />
           <Link
             to='/admin'
             role='menuitem'
             onClick={() => setOpen(false)}
-            className='rp-focus flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-neutral-700 transition-colors duration-150 hover:bg-neutral-900/[0.05]'
+            className='rp-focus flex w-full items-center gap-2.5 rounded-[6px] px-2.5 py-2 text-sm font-medium text-ink-2 transition-colors duration-150 hover:bg-[var(--rp-surface-2)]'
           >
             <svg
               viewBox='0 0 20 20'
               fill='currentColor'
               aria-hidden='true'
-              className='h-4 w-4 shrink-0 text-neutral-400'
+              className='h-4 w-4 shrink-0 text-ink-3'
             >
               <path d='M10 4a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 0110 4z' />
             </svg>
@@ -191,13 +195,13 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
             to='/admin'
             role='menuitem'
             onClick={() => setOpen(false)}
-            className='rp-focus flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-neutral-700 transition-colors duration-150 hover:bg-neutral-900/[0.05]'
+            className='rp-focus flex w-full items-center gap-2.5 rounded-[6px] px-2.5 py-2 text-sm font-medium text-ink-2 transition-colors duration-150 hover:bg-[var(--rp-surface-2)]'
           >
             <svg
               viewBox='0 0 20 20'
               fill='currentColor'
               aria-hidden='true'
-              className='h-4 w-4 shrink-0 text-neutral-400'
+              className='h-4 w-4 shrink-0 text-ink-3'
             >
               <path
                 fillRule='evenodd'

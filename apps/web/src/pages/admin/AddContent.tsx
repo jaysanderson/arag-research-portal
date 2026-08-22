@@ -1,7 +1,7 @@
 import { type ChangeEvent, type DragEvent, type FormEvent, useState } from 'react'
 import { addAdminLink, addAdminText, discoverCrawl, uploadAdminFile } from '../../api/client.ts'
 import { MessagePanel } from './MessagePanel.tsx'
-import { errorMessage, inputClass, type Message } from './shared.ts'
+import { errorMessage, type Message } from './shared.ts'
 
 type Tab = 'upload' | 'link' | 'text' | 'crawl'
 
@@ -108,14 +108,14 @@ function CrawlTab({
         <div>
           <label
             htmlFor={`crawl-url-${slug}`}
-            className='mb-1.5 block text-sm font-medium text-neutral-900'
+            className='mb-1.5 block text-sm font-medium text-ink'
           >
             Site URL
           </label>
           <input
             id={`crawl-url-${slug}`}
             type='url'
-            className={inputClass}
+            className='rp-input'
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder='https://example.com'
@@ -126,50 +126,42 @@ function CrawlTab({
         <div>
           <label
             htmlFor={`crawl-limit-${slug}`}
-            className='mb-1.5 block text-sm font-medium text-neutral-900'
+            className='mb-1.5 block text-sm font-medium text-ink'
           >
             Link limit
           </label>
           <select
             id={`crawl-limit-${slug}`}
-            className={inputClass}
+            className='rp-input'
             value={limit}
             onChange={(e) => setLimit(Number(e.target.value) as (typeof CRAWL_LIMITS)[number])}
           >
-            {CRAWL_LIMITS.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
+            {CRAWL_LIMITS.map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
         </div>
-        <button
-          type='submit'
-          disabled={discovering}
-          className='inline-flex items-center rounded-full bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-neutral-800 disabled:opacity-60'
-        >
+        <button type='submit' disabled={discovering} className='rp-btn rp-btn-primary'>
           {discovering ? 'Discovering…' : 'Discover'}
         </button>
       </form>
 
       {links && links.length > 0 && (
-        <div className='rounded-xl border border-neutral-200 bg-white p-4'>
+        <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-4'>
           <div className='flex items-center justify-between gap-3'>
-            <p className='text-sm font-medium text-neutral-900'>
+            <p className='text-sm font-medium text-ink'>
               {links.length} {links.length === 1 ? 'link' : 'links'} found
             </p>
-            <div className='flex items-center gap-3 text-sm font-medium text-neutral-600'>
+            <div className='flex items-center gap-3 text-sm font-medium text-ink-2'>
               <button
                 type='button'
                 onClick={() => toggleAll(true)}
-                className='transition-colors duration-150 hover:text-neutral-900'
+                className='transition-colors duration-150 hover:text-[var(--rp-ink)]'
               >
                 Select all
               </button>
               <button
                 type='button'
                 onClick={() => toggleAll(false)}
-                className='transition-colors duration-150 hover:text-neutral-900'
+                className='transition-colors duration-150 hover:text-[var(--rp-ink)]'
               >
                 Select none
               </button>
@@ -179,7 +171,7 @@ function CrawlTab({
           <ul className='mt-3 max-h-64 space-y-1.5 overflow-y-auto'>
             {links.map((link) => (
               <li key={link}>
-                <label className='flex items-start gap-2 text-sm text-neutral-700'>
+                <label className='flex items-start gap-2 text-sm text-ink-2'>
                   <input
                     type='checkbox'
                     className='mt-0.5'
@@ -196,7 +188,7 @@ function CrawlTab({
             type='button'
             onClick={() => void onIngest()}
             disabled={ingesting || selectedLinks.length === 0}
-            className='mt-4 inline-flex items-center rounded-full bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-neutral-800 disabled:opacity-60'
+            className='rp-btn rp-btn-primary mt-4'
           >
             {ingesting
               ? `Ingesting ${progress?.done ?? 0} of ${progress?.total ?? selectedLinks.length}…`
@@ -304,20 +296,20 @@ export function AddContent({
   }
 
   return (
-    <div className='mt-5'>
+    <div>
       <button
         type='button'
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
-        className='inline-flex items-center gap-1.5 text-sm font-medium text-neutral-700 transition-colors duration-150 hover:text-neutral-900'
+        className='inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 transition-colors duration-150 hover:text-[var(--rp-ink)]'
       >
         <span aria-hidden='true'>{open ? '▾' : '▸'}</span>
         Add content
       </button>
 
       {open && (
-        <div className='mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4'>
-          <div className='inline-flex rounded-full border border-neutral-200 bg-white p-1'>
+        <div className='mt-3 rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface-2 p-4'>
+          <div className='inline-flex rounded-[var(--rp-radius)] border border-line bg-surface p-1'>
             {TABS.map((t) => (
               <button
                 key={t.id}
@@ -326,10 +318,10 @@ export function AddContent({
                   setTab(t.id)
                   setMessage(null)
                 }}
-                className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
+                className={`rounded-[calc(var(--rp-radius)-2px)] px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
                   tab === t.id
-                    ? 'bg-neutral-900 text-white'
-                    : 'text-neutral-600 hover:bg-neutral-100'
+                    ? 'bg-[var(--rp-primary)] text-white'
+                    : 'text-ink-2 hover:bg-[var(--rp-surface-2)]'
                 }`}
               >
                 {t.label}
@@ -346,18 +338,20 @@ export function AddContent({
                 }}
                 onDragLeave={() => setDragOver(false)}
                 onDrop={onDrop}
-                className={`rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors duration-150 ${
-                  dragOver ? 'border-neutral-400 bg-neutral-100' : 'border-neutral-300'
+                className={`rounded-[calc(var(--rp-radius)+4px)] border-2 px-4 py-8 text-center transition-colors duration-150 ${
+                  dragOver ? 'bg-surface-3' : ''
                 }`}
+                style={{
+                  borderStyle: 'dashed',
+                  borderColor: dragOver ? 'var(--rp-ink-3)' : 'var(--rp-line)',
+                }}
               >
-                <p className='text-sm text-neutral-600'>
-                  Drag a file here, or choose one to upload.
-                </p>
-                <label className='mt-3 inline-flex cursor-pointer items-center rounded-full bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-neutral-800'>
+                <p className='text-sm text-ink-2'>Drag a file here, or choose one to upload.</p>
+                <label className='rp-btn rp-btn-primary mt-3 cursor-pointer'>
                   {busy ? 'Uploading…' : 'Choose file'}
                   <input type='file' className='sr-only' disabled={busy} onChange={onChooseFile} />
                 </label>
-                <p className='mt-2 text-xs text-neutral-500'>Up to 100 MB.</p>
+                <p className='mt-2 text-xs text-ink-3'>Up to 100 MB.</p>
               </div>
             )}
 
@@ -366,14 +360,14 @@ export function AddContent({
                 <div>
                   <label
                     htmlFor={`link-url-${slug}`}
-                    className='mb-1.5 block text-sm font-medium text-neutral-900'
+                    className='mb-1.5 block text-sm font-medium text-ink'
                   >
                     URL
                   </label>
                   <input
                     id={`link-url-${slug}`}
                     type='url'
-                    className={inputClass}
+                    className='rp-input'
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
                     placeholder='https://example.com/report'
@@ -384,24 +378,20 @@ export function AddContent({
                 <div>
                   <label
                     htmlFor={`link-title-${slug}`}
-                    className='mb-1.5 block text-sm font-medium text-neutral-900'
+                    className='mb-1.5 block text-sm font-medium text-ink'
                   >
                     Title (optional)
                   </label>
                   <input
                     id={`link-title-${slug}`}
-                    className={inputClass}
+                    className='rp-input'
                     value={linkTitle}
                     onChange={(e) => setLinkTitle(e.target.value)}
                     placeholder='Leave blank to use the page title'
                     autoComplete='off'
                   />
                 </div>
-                <button
-                  type='submit'
-                  disabled={busy}
-                  className='inline-flex items-center rounded-full bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-neutral-800 disabled:opacity-60'
-                >
+                <button type='submit' disabled={busy} className='rp-btn rp-btn-primary'>
                   {busy ? 'Adding…' : 'Add link'}
                 </button>
               </form>
@@ -412,13 +402,13 @@ export function AddContent({
                 <div>
                   <label
                     htmlFor={`text-title-${slug}`}
-                    className='mb-1.5 block text-sm font-medium text-neutral-900'
+                    className='mb-1.5 block text-sm font-medium text-ink'
                   >
                     Title
                   </label>
                   <input
                     id={`text-title-${slug}`}
-                    className={inputClass}
+                    className='rp-input'
                     value={textTitle}
                     onChange={(e) => setTextTitle(e.target.value)}
                     autoComplete='off'
@@ -428,24 +418,20 @@ export function AddContent({
                 <div>
                   <label
                     htmlFor={`text-body-${slug}`}
-                    className='mb-1.5 block text-sm font-medium text-neutral-900'
+                    className='mb-1.5 block text-sm font-medium text-ink'
                   >
                     Text
                   </label>
                   <textarea
                     id={`text-body-${slug}`}
-                    className={inputClass}
+                    className='rp-input'
                     rows={6}
                     value={textBody}
                     onChange={(e) => setTextBody(e.target.value)}
                     required
                   />
                 </div>
-                <button
-                  type='submit'
-                  disabled={busy}
-                  className='inline-flex items-center rounded-full bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-neutral-800 disabled:opacity-60'
-                >
+                <button type='submit' disabled={busy} className='rp-btn rp-btn-primary'>
                   {busy ? 'Adding…' : 'Add text'}
                 </button>
               </form>

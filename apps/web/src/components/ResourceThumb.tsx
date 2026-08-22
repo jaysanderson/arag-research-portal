@@ -31,36 +31,35 @@ export function ResourceThumb({
   className?: string
 }) {
   const [failed, setFailed] = useState(false)
-  if (!failed) {
-    return (
-      <img
-        src={thumbnailUrl(slug, id)}
-        alt=''
-        loading='lazy'
-        aria-hidden='true'
-        onError={() => setFailed(true)}
-        className={`h-full w-full object-cover ${className}`}
-      />
-    )
-  }
   const glyph = TYPE_GLYPHS[type] ?? TYPE_GLYPHS.document
   return (
     <div
       aria-hidden='true'
-      className={`flex h-full w-full items-center justify-center ${className}`}
-      style={{ background: 'hsl(' + hueFromId(id) + ', 42%, 88%)' }}
+      className={`relative h-full w-full ${className}`}
+      style={{ background: 'hsl(' + hueFromId(id) + ', 32%, var(--rp-thumb-l, 88%))' }}
     >
-      <svg
-        viewBox='0 0 24 24'
-        fill='none'
-        stroke='rgba(30, 41, 59, 0.45)'
-        strokeWidth='1.5'
-        strokeLinecap='round'
-        strokeLinejoin='round'
-        className='h-1/3 w-1/3'
-      >
-        <path d={glyph} />
-      </svg>
+      <div className='absolute inset-0 flex items-center justify-center'>
+        <svg
+          viewBox='0 0 24 24'
+          fill='none'
+          stroke='rgba(100, 116, 139, 0.55)'
+          strokeWidth='1.5'
+          strokeLinecap='round'
+          strokeLinejoin='round'
+          className='h-1/3 w-1/3'
+        >
+          <path d={glyph} />
+        </svg>
+      </div>
+      {!failed && (
+        <img
+          src={thumbnailUrl(slug, id)}
+          alt=''
+          loading='lazy'
+          onError={() => setFailed(true)}
+          className='absolute inset-0 h-full w-full object-cover'
+        />
+      )}
     </div>
   )
 }

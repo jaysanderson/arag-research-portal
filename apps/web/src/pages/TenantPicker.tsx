@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { getTenants } from '../api/client.ts'
 import { EmptyState, ErrorCard, Skeleton } from '../components/ui.tsx'
+import { ThemeToggle } from '../components/ThemeToggle.tsx'
 
 export function TenantPicker() {
   const { data: tenants, isLoading, isError, error, refetch } = useQuery({
@@ -10,23 +11,27 @@ export function TenantPicker() {
   })
 
   return (
-    <main className='flex min-h-screen flex-col items-center bg-[#f7f7f5] px-6 py-20'>
-      <div className='w-full max-w-3xl'>
-        <header className='text-center'>
-          <p className='text-sm font-semibold uppercase tracking-[0.2em] text-neutral-500'>
-            Research Portal
-          </p>
-          <h1 className='mt-3 text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl'>
-            Choose a portal to continue
-          </h1>
-        </header>
+    <main className='min-h-screen bg-app px-6 py-10'>
+      <div className='mx-auto w-full max-w-4xl'>
+        <div className='flex items-start justify-between gap-4'>
+          <header className='min-w-0'>
+            <p className='rp-eyebrow text-ink-3'>Research Portal</p>
+            <h1 className='rp-display mt-2 text-3xl text-ink sm:text-4xl'>
+              Choose a portal
+            </h1>
+            <p className='mt-2 max-w-lg text-sm leading-relaxed text-ink-2'>
+              Each portal is a corpus of its own - its own knowledge box, taxonomy and branding.
+            </p>
+          </header>
+          <ThemeToggle />
+        </div>
 
-        <div className='mt-12 grid grid-cols-1 gap-5 sm:grid-cols-2'>
+        <div className='mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2'>
           {isLoading
             ? (
               <>
-                <Skeleton className='h-40 rounded-2xl' />
-                <Skeleton className='h-40 rounded-2xl' />
+                <Skeleton className='h-36' />
+                <Skeleton className='h-36' />
               </>
             )
             : null}
@@ -58,26 +63,24 @@ export function TenantPicker() {
               <Link
                 key={tenant.slug}
                 to={`/t/${tenant.slug}`}
-                className='group flex flex-col justify-between rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900'
+                className='rp-card rp-lift rp-focus group flex flex-col justify-between p-5'
               >
                 <div>
-                  <h2 className='text-lg font-semibold tracking-tight text-neutral-900'>
+                  <h2 className='text-base font-semibold tracking-[-0.01em] text-ink'>
                     {tenant.productName}
                   </h2>
-                  <p className='mt-1 text-sm font-medium text-neutral-500'>
-                    {tenant.organisation}
-                  </p>
+                  <p className='rp-eyebrow mt-1.5 text-ink-3'>{tenant.organisation}</p>
                 </div>
-                <p className='mt-6 text-sm leading-relaxed text-neutral-600'>{tenant.tagline}</p>
+                <p className='rp-clamp-3 mt-5 text-sm leading-relaxed text-ink-2'>
+                  {tenant.tagline}
+                </p>
               </Link>
             ))
             : null}
         </div>
-        <div className='mt-10 text-center'>
-          <Link
-            to='/admin'
-            className='text-sm text-neutral-400 transition-colors duration-150 hover:text-neutral-700'
-          >
+
+        <div className='mt-8 border-t border-line pt-4'>
+          <Link to='/admin' className='rp-btn rp-btn-ghost -ml-3.5'>
             Administration
           </Link>
         </div>

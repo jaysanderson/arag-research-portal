@@ -7,6 +7,7 @@ import { TenantLayout } from './pages/TenantLayout.tsx'
 import { ExplorePage } from './pages/ExplorePage.tsx'
 import { SearchPage } from './pages/SearchPage.tsx'
 import { AdminPage } from './pages/AdminPage.tsx'
+import { ManagePage } from './pages/ManagePage.tsx'
 import { LibraryPage } from './pages/LibraryPage.tsx'
 import { ResourceDetailPage } from './pages/ResourceDetailPage.tsx'
 import { AssistantPage } from './pages/AssistantPage.tsx'
@@ -46,6 +47,7 @@ createRoot(container).render(
             <Route path='generate' element={<GeneratePage />} />
             <Route path='graph' element={<GraphPage />} />
             <Route path='taxonomy' element={<TaxonomyPage />} />
+            <Route path='manage' element={<ManagePage />} />
           </Route>
         </Routes>
       </BrowserRouter>

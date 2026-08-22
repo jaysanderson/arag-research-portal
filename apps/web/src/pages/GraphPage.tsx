@@ -99,34 +99,34 @@ function NeighbourPanel({
     .sort((a, b) => b.weight - a.weight)
 
   return (
-    <div className='rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm'>
+    <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-5 shadow-sm'>
       <div className='flex items-start justify-between gap-2'>
         <div>
-          <p className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>Selected</p>
-          <h2 className='mt-0.5 text-base font-semibold tracking-tight text-neutral-900'>
+          <p className='text-xs font-semibold uppercase tracking-wide text-ink-3'>Selected</p>
+          <h2 className='mt-0.5 text-base font-semibold tracking-tight text-ink'>
             {node?.label ?? selectedId}
           </h2>
         </div>
         <button
           type='button'
           onClick={onClear}
-          className='shrink-0 rounded-full border border-neutral-200 px-2.5 py-1 text-xs font-medium text-neutral-500 transition-colors duration-150 hover:bg-neutral-100'
+          className='rp-btn rp-btn-ghost h-auto shrink-0 px-2.5 py-1 text-xs'
         >
           Clear
         </button>
       </div>
 
-      <p className='mt-3 text-xs font-semibold uppercase tracking-wide text-neutral-500'>
+      <p className='mt-3 text-xs font-semibold uppercase tracking-wide text-ink-3'>
         Connections ({connections.length})
       </p>
       {connections.length === 0
-        ? <p className='mt-2 text-sm text-neutral-500'>No co-occurring categories.</p>
+        ? <p className='mt-2 text-sm text-ink-3'>No co-occurring categories.</p>
         : (
           <ul className='mt-2 space-y-2'>
             {connections.map((c) => (
-              <li key={c.id} className='text-sm text-neutral-700'>
-                <span className='font-medium text-neutral-900'>{c.label}</span>
-                <span className='text-neutral-500'>
+              <li key={c.id} className='text-sm text-ink-2'>
+                <span className='font-medium text-ink'>{c.label}</span>
+                <span className='text-ink-3'>
                   {' '}
                   - appears together in {c.weight} {c.weight === 1 ? 'document' : 'documents'}
                 </span>
@@ -142,7 +142,7 @@ function Legend(
   { primaryTitle, secondaryTitle }: { primaryTitle: string; secondaryTitle: string },
 ) {
   return (
-    <div className='flex flex-wrap items-center gap-4 text-sm text-neutral-600'>
+    <div className='flex flex-wrap items-center gap-4 text-sm text-ink-2'>
       <span className='inline-flex items-center gap-2'>
         <span
           className='h-3 w-3 rounded-full'
@@ -227,14 +227,14 @@ export function GraphPage() {
 
   return (
     <main className='mx-auto max-w-6xl px-6 py-10'>
-      <h1 className='text-2xl font-semibold tracking-tight text-neutral-900'>Knowledge graph</h1>
-      <p className='mt-1 text-sm text-neutral-500'>
+      <h1 className='text-2xl font-semibold tracking-tight text-ink'>Knowledge graph</h1>
+      <p className='mt-1 text-sm text-ink-3'>
         How the taxonomy categories co-occur across the indexed content.
       </p>
 
       {isLoading && (
         <div className='mt-8'>
-          <Skeleton className='h-[420px] w-full rounded-2xl' />
+          <Skeleton className='h-[420px] w-full rounded-[calc(var(--rp-radius)+4px)]' />
         </div>
       )}
 
@@ -255,8 +255,7 @@ export function GraphPage() {
           >
             <Link
               to={`/t/${slug}/taxonomy`}
-              className='inline-flex items-center rounded-full px-4 py-2 text-sm font-medium text-white transition-colors duration-150'
-              style={{ backgroundColor: 'var(--rp-primary)' }}
+              className='rp-btn rp-btn-primary'
             >
               Go to taxonomy
             </Link>
@@ -266,7 +265,7 @@ export function GraphPage() {
 
       {!isLoading && !isError && graph && !isEmpty && (
         <div className='mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]'>
-          <div className='rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm'>
+          <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-4 shadow-sm'>
             <div className='overflow-x-auto'>
               <svg
                 viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
@@ -297,7 +296,7 @@ export function GraphPage() {
                         y1={from.y}
                         x2={to.x}
                         y2={to.y}
-                        stroke={touchesSelected ? 'var(--rp-accent)' : '#a3a3a3'}
+                        stroke={touchesSelected ? 'var(--rp-accent)' : 'var(--rp-line)'}
                         strokeWidth={Math.max(1, (e.weight / maxEdgeWeight) * 4)}
                         strokeOpacity={dimmed ? 0.08 : Math.max(0.2, e.weight / maxEdgeWeight)}
                       />
@@ -328,7 +327,7 @@ export function GraphPage() {
                           cy={pos.y}
                           r={r}
                           fill={n.group === 'primary' ? 'var(--rp-primary)' : 'var(--rp-accent)'}
-                          stroke='#ffffff'
+                          stroke='var(--rp-surface)'
                           strokeWidth={isSelected ? 3 : 1.5}
                         />
                         {showLabel && (
@@ -336,7 +335,7 @@ export function GraphPage() {
                             x={pos.x + r + 5}
                             y={pos.y + 4}
                             fontSize={11}
-                            fill='#404040'
+                            fill='var(--rp-ink-2)'
                             className='select-none'
                           >
                             {n.label}
@@ -348,7 +347,7 @@ export function GraphPage() {
                 </g>
               </svg>
             </div>
-            <div className='mt-4 border-t border-neutral-100 pt-4'>
+            <div className='mt-4 border-t border-line pt-4'>
               <Legend
                 primaryTitle={labelsetTitle(graph.primary)}
                 secondaryTitle={labelsetTitle(graph.secondary)}
@@ -365,9 +364,9 @@ export function GraphPage() {
               />
             )
             : (
-              <div className='rounded-2xl border border-dashed border-neutral-300 bg-white/60 p-5 text-center'>
-                <p className='text-sm font-medium text-neutral-900'>Click a node</p>
-                <p className='mt-1 text-sm text-neutral-500'>
+              <div className='rounded-[calc(var(--rp-radius)+4px)] border border-dashed border-line bg-surface-2 p-5 text-center'>
+                <p className='text-sm font-medium text-ink'>Click a node</p>
+                <p className='mt-1 text-sm text-ink-3'>
                   See its connections and how often they appear together.
                 </p>
               </div>

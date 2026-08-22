@@ -9,7 +9,7 @@ const MAX_BYTES = 5 * 1024 * 1024
 type Kind = 'logo' | 'hero'
 
 const CHECKERBOARD_STYLE = {
-  backgroundImage: 'repeating-conic-gradient(#e5e5e5 0% 25%, #fafafa 0% 50%)',
+  backgroundImage: 'repeating-conic-gradient(var(--rp-surface-3) 0% 25%, var(--rp-surface) 0% 50%)',
   backgroundSize: '16px 16px',
 }
 
@@ -65,19 +65,19 @@ function UploadCard({
   }
 
   return (
-    <div className='rounded-xl border border-neutral-200 bg-neutral-50 p-4'>
-      <h4 className='text-sm font-semibold text-neutral-900'>{title}</h4>
-      <p className='mt-1 text-xs text-neutral-500'>{guidance}</p>
+    <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface-2 p-4'>
+      <h4 className='text-sm font-semibold text-ink'>{title}</h4>
+      <p className='mt-1 text-xs text-ink-3'>{guidance}</p>
 
       <div
         style={CHECKERBOARD_STYLE}
-        className={`mt-3 overflow-hidden rounded-lg border border-neutral-200 ${
+        className={`mt-3 overflow-hidden rounded-[var(--rp-radius)] border border-line ${
           kind === 'logo' ? 'flex h-16 items-center justify-center p-2' : 'aspect-[16/6]'
         }`}
       >
         {missing
           ? (
-            <div className='flex h-full w-full items-center justify-center text-xs text-neutral-400'>
+            <div className='flex h-full w-full items-center justify-center text-xs text-ink-3'>
               None uploaded yet
             </div>
           )
@@ -94,7 +94,7 @@ function UploadCard({
           )}
       </div>
 
-      <label className='mt-3 inline-flex cursor-pointer items-center rounded-full bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-neutral-800'>
+      <label className='rp-btn rp-btn-primary mt-3 cursor-pointer'>
         {busy ? 'Uploading…' : 'Upload…'}
         <input
           type='file'

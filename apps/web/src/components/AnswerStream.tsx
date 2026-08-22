@@ -140,7 +140,7 @@ export function ContextJourney({ slug, sources, query = '' }: ContextJourneyProp
         type='button'
         onClick={() => setIsOpen(true)}
         aria-haspopup='dialog'
-        className='rp-focus group inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-neutral-600 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900'
+        className='rp-chip group font-semibold'
       >
         <svg
           viewBox='0 0 24 24'
@@ -157,7 +157,7 @@ export function ContextJourney({ slug, sources, query = '' }: ContextJourneyProp
           <path d='M15.2 8.8l-1.6 4.4-4.4 1.6 1.6-4.4z' />
         </svg>
         Journey through the context
-        <span className='rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] tabular-nums text-neutral-500'>
+        <span className='rounded-[4px] bg-surface-2 px-1.5 py-0.5 text-[10px] tabular-nums text-ink-3'>
           {Math.min(sources.length, 8)}
         </span>
       </button>
@@ -279,28 +279,28 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
   }
 
   return (
-    <div className='rp-shadow-md rounded-2xl border border-neutral-900/[0.07] bg-white p-6'>
+    <div className='rp-card p-5'>
       <div className='flex items-center gap-2'>
         <span
           className='h-2 w-2 shrink-0 rounded-full'
           style={{ backgroundColor: 'var(--rp-accent)' }}
           aria-hidden='true'
         />
-        <p className='rp-eyebrow text-neutral-500'>
+        <p className='rp-eyebrow text-ink-3'>
           AI answer
         </p>
       </div>
 
-      <div className='rp-prose mt-3 space-y-3 text-sm text-neutral-800'>
+      <div className='rp-prose mt-3 space-y-3 text-sm text-ink'>
         {text.length > 0
           ? renderAnswerText(text)
           : status === 'streaming'
-          ? <p className='text-neutral-400'>Thinking&hellip;</p>
+          ? <p className='text-ink-3'>Thinking&hellip;</p>
           : null}
         {status === 'streaming'
           ? (
             <span
-              className='inline-block h-4 w-1.5 animate-pulse bg-neutral-400 align-text-bottom'
+              className='inline-block h-4 w-1.5 animate-pulse bg-[var(--rp-ink-3)] align-text-bottom'
               aria-hidden='true'
             />
           )
@@ -319,11 +319,10 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
                   <div key={citation.index} className='inline-flex items-center gap-1'>
                     <Link
                       to={citationHref(slug, citation.resourceId, matchedPassage)}
-                      className='inline-flex items-center gap-1.5 rounded-full border border-neutral-200 bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-                      style={{ outlineColor: 'var(--rp-accent)' }}
+                      className='rp-focus inline-flex items-center gap-1.5 rounded-[6px] border border-line bg-[var(--rp-surface-2)] px-2 py-1 text-xs font-medium text-[var(--rp-ink-2)] transition-colors duration-150 hover:bg-[var(--rp-surface-3)] hover:text-[var(--rp-ink)]'
                     >
                       <span
-                        className='flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white'
+                        className='flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] text-[10px] font-semibold tabular-nums text-white'
                         style={{ backgroundColor: 'var(--rp-primary)' }}
                       >
                         {citation.index}
@@ -337,8 +336,7 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
                           onClick={() => scrollToResource(citation.resourceId)}
                           aria-label={`Scroll to ${citation.title} in the results below`}
                           title='Scroll to this result'
-                          className='flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs text-neutral-400 transition-colors duration-150 hover:bg-neutral-100 hover:text-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-                          style={{ outlineColor: 'var(--rp-accent)' }}
+                          className='rp-focus flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] text-xs text-[var(--rp-ink-3)] transition-colors duration-150 hover:bg-[var(--rp-surface-2)] hover:text-[var(--rp-ink)]'
                         >
                           &darr;
                         </button>
@@ -348,7 +346,7 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
                 )
               })}
             </div>
-            <p className='mt-2 text-xs text-neutral-500'>
+            <p className='mt-2 text-xs text-ink-3'>
               {citations.length} {citations.length === 1 ? 'source' : 'sources'} cited
             </p>
           </>
@@ -357,7 +355,7 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
 
       {errorMessage
         ? (
-          <p className='mt-3 text-xs text-neutral-400'>
+          <p className='mt-3 text-xs text-[var(--rp-bad-ink)]'>
             Answer unavailable right now - {errorMessage}
           </p>
         )
@@ -365,7 +363,7 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
 
       {usage
         ? (
-          <p className='mt-3 text-xs text-neutral-400'>
+          <p className='mt-3 text-xs text-ink-3'>
             {usage.inputTokens.toLocaleString()} in / {usage.outputTokens.toLocaleString()}{' '}
             out tokens{usage.totalSec !== undefined ? ` - ${usage.totalSec.toFixed(1)} s` : ''}
           </p>
@@ -374,7 +372,7 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
 
       {status === 'done' && citedSources.length > 0
         ? (
-          <div className='mt-5 border-t border-neutral-100 pt-4'>
+          <div className='mt-4 border-t border-line pt-3.5'>
             <ContextJourney slug={slug} sources={citedSources} query={request.query} />
           </div>
         )

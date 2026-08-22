@@ -100,7 +100,7 @@ function renderMarkdown(text: string): ReactNode {
         const trimmed = block.trim()
         if (trimmed.startsWith('### ')) {
           return (
-            <h3 key={index} className='text-sm font-semibold text-neutral-900'>
+            <h3 key={index} className='text-sm font-semibold text-ink'>
               {renderInline(trimmed.slice(4))}
             </h3>
           )
@@ -111,7 +111,7 @@ function renderMarkdown(text: string): ReactNode {
           return (
             <ul key={index} className='list-disc space-y-1 pl-5'>
               {lines.map((line, lineIndex) => (
-                <li key={lineIndex} className='text-sm leading-relaxed text-neutral-700'>
+                <li key={lineIndex} className='text-sm leading-relaxed text-ink-2'>
                   {renderInline(line.slice(2))}
                 </li>
               ))}
@@ -119,7 +119,7 @@ function renderMarkdown(text: string): ReactNode {
           )
         }
         return (
-          <p key={index} className='text-sm leading-relaxed text-neutral-700'>
+          <p key={index} className='text-sm leading-relaxed text-ink-2'>
             {renderInline(trimmed)}
           </p>
         )
@@ -136,7 +136,7 @@ function StageDot({ status }: { status: StageStatus }) {
   if (status === 'complete') {
     return (
       <span
-        className='flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-[10px] font-bold text-white'
+        className='flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--rp-ok-ink)] text-[10px] font-bold text-white'
         aria-hidden='true'
       >
         ✓
@@ -158,7 +158,7 @@ function StageDot({ status }: { status: StageStatus }) {
       className='flex h-5 w-5 shrink-0 items-center justify-center'
       aria-hidden='true'
     >
-      <span className='h-3 w-3 rounded-full border-2 border-neutral-300 bg-white' />
+      <span className='h-3 w-3 rounded-full border-2 border-line bg-surface' />
     </span>
   )
 }
@@ -178,8 +178,8 @@ function PipelineRail({
   } | null
 }) {
   return (
-    <div className='rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm'>
-      <h2 className='text-sm font-semibold text-neutral-900'>Pipeline</h2>
+    <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-5 shadow-sm'>
+      <h2 className='text-sm font-semibold text-ink'>Pipeline</h2>
       <ol className='mt-4 space-y-0'>
         {STAGES.map((stage, index) => {
           const status = statuses[stage.key]
@@ -192,7 +192,7 @@ function PipelineRail({
                   ? (
                     <span
                       className={`mt-0.5 w-px flex-1 ${
-                        status === 'complete' ? 'bg-emerald-300' : 'bg-neutral-200'
+                        status === 'complete' ? 'bg-[var(--rp-ok-line)]' : 'bg-surface-3'
                       }`}
                       aria-hidden='true'
                     />
@@ -202,7 +202,7 @@ function PipelineRail({
               <div className='pb-5'>
                 <p
                   className={`text-sm font-medium ${
-                    status === 'pending' ? 'text-neutral-400' : 'text-neutral-900'
+                    status === 'pending' ? 'text-ink-3' : 'text-ink'
                   }`}
                 >
                   {stage.label}
@@ -214,13 +214,13 @@ function PipelineRail({
                       {sources.slice(0, 6).map((resource) => (
                         <div
                           key={resource.id}
-                          className='rounded-lg border border-neutral-100 bg-neutral-50 px-2.5 py-2'
+                          className='rounded-lg border border-line bg-surface-2 px-2.5 py-2'
                         >
-                          <p className='rp-clamp-2 text-xs font-medium text-neutral-700'>
+                          <p className='rp-clamp-2 text-xs font-medium text-ink-2'>
                             {resource.title}
                           </p>
                           <div
-                            className='mt-1 h-1 overflow-hidden rounded-full bg-neutral-200'
+                            className='mt-1 h-1 overflow-hidden rounded-full bg-surface-3'
                             role='progressbar'
                             aria-valuenow={Math.round(resource.relevance * 100)}
                             aria-valuemin={0}
@@ -243,20 +243,20 @@ function PipelineRail({
 
                 {stage.key === 'generating' && usage
                   ? (
-                    <dl className='mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-neutral-500'>
+                    <dl className='mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-ink-3'>
                       <dt>Input tokens</dt>
-                      <dd className='text-right font-medium text-neutral-700'>
+                      <dd className='text-right font-medium text-ink-2'>
                         {usage.inputTokens}
                       </dd>
                       <dt>Output tokens</dt>
-                      <dd className='text-right font-medium text-neutral-700'>
+                      <dd className='text-right font-medium text-ink-2'>
                         {usage.outputTokens}
                       </dd>
                       {usage.firstChunkSec !== undefined
                         ? (
                           <>
                             <dt>First chunk</dt>
-                            <dd className='text-right font-medium text-neutral-700'>
+                            <dd className='text-right font-medium text-ink-2'>
                               {usage.firstChunkSec.toFixed(2)}s
                             </dd>
                           </>
@@ -266,7 +266,7 @@ function PipelineRail({
                         ? (
                           <>
                             <dt>Total time</dt>
-                            <dd className='text-right font-medium text-neutral-700'>
+                            <dd className='text-right font-medium text-ink-2'>
                               {usage.totalSec.toFixed(2)}s
                             </dd>
                           </>
@@ -456,10 +456,10 @@ export function AgenticPage() {
   return (
     <main aria-label='Agentic retrieval' className='mx-auto max-w-6xl px-4 py-8 sm:px-6'>
       <header>
-        <h1 className='text-2xl font-semibold tracking-tight text-neutral-900'>
+        <h1 className='text-2xl font-semibold tracking-tight text-ink'>
           Agentic retrieval
         </h1>
-        <p className='mt-1 text-sm text-neutral-500'>
+        <p className='mt-1 text-sm text-ink-3'>
           Ask a complex question and watch the full retrieval pipeline - every signal below is live
           from the platform, nothing simulated.
         </p>
@@ -469,7 +469,7 @@ export function AgenticPage() {
         <label htmlFor='agentic-query' className='sr-only'>
           Ask a complex question
         </label>
-        <div className='flex items-center gap-2 rounded-full border border-neutral-200 bg-white p-2 shadow-sm'>
+        <div className='flex items-center gap-2 rounded-[var(--rp-radius)] border border-line bg-surface p-1.5 shadow-sm'>
           <input
             id='agentic-query'
             type='text'
@@ -477,13 +477,12 @@ export function AgenticPage() {
             onChange={(event) => setQuery(event.target.value)}
             placeholder={config.searchPlaceholder}
             disabled={isRunning}
-            className='min-w-0 flex-1 rounded-full border-0 bg-transparent px-4 py-2.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none disabled:opacity-60'
+            className='min-w-0 flex-1 rounded-[var(--rp-radius)] border-0 bg-transparent px-3 py-2 text-sm text-ink placeholder:text-ink-3 focus:outline-none disabled:opacity-60'
           />
           <button
             type='submit'
             disabled={isRunning || query.trim().length === 0}
-            className='shrink-0 rounded-full px-5 py-2.5 text-sm font-semibold text-white transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40'
-            style={{ backgroundColor: 'var(--rp-primary)', outlineColor: 'var(--rp-accent)' }}
+            className='rp-btn rp-btn-primary shrink-0'
           >
             {isRunning ? 'Running…' : 'Run'}
           </button>
@@ -499,8 +498,7 @@ export function AgenticPage() {
                 type='button'
                 disabled={isRunning}
                 onClick={() => void run(question.text)}
-                className='rounded-full border border-neutral-200 bg-white px-3.5 py-1.5 text-xs text-neutral-600 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50'
-                style={{ outlineColor: 'var(--rp-accent)' }}
+                className='rp-chip disabled:opacity-50'
               >
                 {question.text}
               </button>
@@ -511,9 +509,11 @@ export function AgenticPage() {
 
       {errorMessage
         ? (
-          <div className='mt-6 rounded-2xl border border-rose-200 bg-rose-50 p-5'>
-            <p className='text-sm font-medium text-rose-800'>The pipeline hit an error</p>
-            <p className='mt-1 text-sm text-rose-700'>{errorMessage}</p>
+          <div className='mt-6 rounded-[calc(var(--rp-radius)+4px)] border border-[var(--rp-bad-line)] bg-[var(--rp-bad-bg)] p-5'>
+            <p className='text-sm font-medium text-[var(--rp-bad-ink)]'>
+              The pipeline hit an error
+            </p>
+            <p className='mt-1 text-sm text-[var(--rp-bad-ink)]'>{errorMessage}</p>
           </div>
         )
         : null}
@@ -523,14 +523,14 @@ export function AgenticPage() {
           <div className='mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]'>
             <section
               aria-label='Answer'
-              className='min-w-0 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'
+              className='min-w-0 rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-6 shadow-sm'
             >
               {answerText.length > 0
                 ? renderMarkdown(answerText)
                 : isRunning
-                ? <p className='text-sm text-neutral-400'>Working on it…</p>
+                ? <p className='text-sm text-ink-3'>Working on it…</p>
                 : !errorMessage
-                ? <p className='text-sm text-neutral-400'>No answer yet.</p>
+                ? <p className='text-sm text-ink-3'>No answer yet.</p>
                 : null}
 
               {isRunning && answerText.length > 0
@@ -545,8 +545,8 @@ export function AgenticPage() {
 
               {citations.length > 0
                 ? (
-                  <div className='mt-4 border-t border-neutral-100 pt-3'>
-                    <p className='text-xs font-medium text-neutral-500'>
+                  <div className='mt-4 border-t border-line pt-3'>
+                    <p className='text-xs font-medium text-ink-3'>
                       Sources: {citations.length}
                     </p>
                     <div className='mt-2 flex flex-wrap gap-1.5'>
@@ -559,7 +559,7 @@ export function AgenticPage() {
                             key={citation.index}
                             to={citationHref(config.slug, citation.resourceId, matchedPassage)}
                             title={citation.title}
-                            className='inline-flex items-center gap-1 rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-xs font-medium text-neutral-600 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
+                            className='rp-chip'
                             style={{ outlineColor: 'var(--rp-accent)' }}
                           >
                             <span
@@ -579,7 +579,7 @@ export function AgenticPage() {
 
               {!isRunning && sources.length > 0
                 ? (
-                  <div className='mt-4 border-t border-neutral-100 pt-3'>
+                  <div className='mt-4 border-t border-line pt-3'>
                     <ContextJourney slug={config.slug} sources={sources} query={lastQuestion} />
                   </div>
                 )
@@ -594,17 +594,17 @@ export function AgenticPage() {
         : null}
 
       <section aria-label='Trace history' className='mt-10'>
-        <h2 className='text-sm font-semibold uppercase tracking-wide text-neutral-500'>
+        <h2 className='text-sm font-semibold uppercase tracking-wide text-ink-3'>
           Recent runs
         </h2>
 
         {traces.length === 0
-          ? <p className='mt-3 text-sm text-neutral-500'>No runs yet - ask a question above.</p>
+          ? <p className='mt-3 text-sm text-ink-3'>No runs yet - ask a question above.</p>
           : (
-            <div className='mt-3 overflow-x-auto rounded-2xl border border-neutral-200 bg-white shadow-sm'>
+            <div className='mt-3 overflow-x-auto rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface shadow-sm'>
               <table className='w-full min-w-[560px] text-left text-sm'>
                 <thead>
-                  <tr className='border-b border-neutral-100 text-xs font-medium uppercase tracking-wide text-neutral-400'>
+                  <tr className='border-b border-line text-xs font-medium uppercase tracking-wide text-ink-3'>
                     <th scope='col' className='px-4 py-2.5 font-medium'>Question</th>
                     <th scope='col' className='px-4 py-2.5 font-medium'>Sources</th>
                     <th scope='col' className='px-4 py-2.5 font-medium'>Tokens</th>
@@ -614,27 +614,27 @@ export function AgenticPage() {
                 </thead>
                 <tbody>
                   {traces.map((trace) => (
-                    <tr key={trace.id} className='border-b border-neutral-50 last:border-0'>
+                    <tr key={trace.id} className='border-b border-line last:border-0'>
                       <td className='px-4 py-2.5'>
                         <button
                           type='button'
                           onClick={() =>
                             void run(trace.question)}
                           disabled={isRunning}
-                          className='rp-clamp-2 max-w-xs text-left text-neutral-800 underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50'
+                          className='rp-clamp-2 max-w-xs text-left text-ink-2 underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50'
                           style={{ outlineColor: 'var(--rp-accent)' }}
                         >
                           {trace.question}
                         </button>
                       </td>
-                      <td className='px-4 py-2.5 text-neutral-600'>{trace.sourceCount}</td>
-                      <td className='px-4 py-2.5 text-neutral-600'>
+                      <td className='px-4 py-2.5 text-ink-2'>{trace.sourceCount}</td>
+                      <td className='px-4 py-2.5 text-ink-2'>
                         {trace.tokens ? `${trace.tokens.input} / ${trace.tokens.output}` : 'n/a'}
                       </td>
-                      <td className='px-4 py-2.5 text-neutral-600'>
+                      <td className='px-4 py-2.5 text-ink-2'>
                         {trace.seconds !== null ? `${trace.seconds.toFixed(1)}s` : 'n/a'}
                       </td>
-                      <td className='px-4 py-2.5 text-neutral-500'>{relativeAge(trace.when)}</td>
+                      <td className='px-4 py-2.5 text-ink-3'>{relativeAge(trace.when)}</td>
                     </tr>
                   ))}
                 </tbody>

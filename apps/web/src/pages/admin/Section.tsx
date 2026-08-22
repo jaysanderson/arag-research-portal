@@ -30,17 +30,17 @@ export function Section({
   }
 
   return (
-    <div className='border-t border-neutral-100 py-3 first:border-t-0 first:pt-0'>
+    <div className='border-t border-line py-3 first:border-t-0 first:pt-0'>
       <button
         type='button'
         onClick={toggle}
         aria-expanded={open}
         className='flex w-full items-center gap-2 text-left'
       >
-        <span aria-hidden='true' className='text-xs text-neutral-400'>
+        <span aria-hidden='true' className='text-xs text-ink-3'>
           {open ? '▾' : '▸'}
         </span>
-        <span className='text-sm font-semibold text-neutral-900'>{title}</span>
+        <span className='text-sm font-semibold text-ink'>{title}</span>
       </button>
       {open && <div className='mt-3'>{children}</div>}
     </div>

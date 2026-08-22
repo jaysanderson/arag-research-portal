@@ -22,9 +22,9 @@ const SORT_OPTIONS: Record<
   title: { label: 'Title A-Z', sort: 'title', order: 'asc' },
 }
 
-const STATUS_STYLES: Record<'pending' | 'error', { label: string; className: string }> = {
-  pending: { label: 'Processing', className: 'bg-amber-50 text-amber-700 ring-amber-200' },
-  error: { label: 'Error', className: 'bg-rose-50 text-rose-700 ring-rose-200' },
+const STATUS_BADGES: Record<'pending' | 'error', { label: string; className: string }> = {
+  pending: { label: 'Processing', className: 'rp-badge rp-badge-warn' },
+  error: { label: 'Error', className: 'rp-badge rp-badge-bad' },
 }
 
 function formatDate(iso: string): string {
@@ -43,37 +43,34 @@ function LibraryCard(
   const topicLabels = item.topicIds
     .map((id) => topicLabel(id))
     .filter((label): label is string => Boolean(label))
-  const statusInfo = item.status === 'processed' ? null : STATUS_STYLES[item.status]
+  const statusInfo = item.status === 'processed' ? null : STATUS_BADGES[item.status]
 
   return (
     <Link
       to={`/t/${slug}/library/${item.id}`}
-      className='flex flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm transition-shadow duration-150 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-      style={{ outlineColor: 'var(--rp-accent)' }}
+      className='rp-card rp-lift rp-focus flex flex-col overflow-hidden'
     >
-      <div className='h-28 w-full overflow-hidden rounded-t-2xl' aria-hidden='true'>
+      <div className='relative h-24 w-full overflow-hidden bg-surface-2' aria-hidden='true'>
         <ResourceThumb slug={slug} id={item.id} type='document' />
-      </div>
-      <div className='flex flex-1 flex-col gap-2 p-4'>
         {statusInfo
           ? (
-            <span
-              className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${statusInfo.className}`}
-            >
+            <span className={`absolute left-2 top-2 ${statusInfo.className}`}>
               {statusInfo.label}
             </span>
           )
           : null}
-        <h3 className='rp-clamp-2 text-sm font-semibold leading-snug text-neutral-900'>
+      </div>
+      <div className='flex flex-1 flex-col gap-2 border-t border-line p-3.5'>
+        <h3 className='rp-clamp-2 text-sm font-semibold leading-snug text-ink'>
           {item.title}
         </h3>
         {topicLabels.length > 0
           ? (
-            <div className='flex flex-wrap gap-1.5'>
-              {topicLabels.map((label) => (
+            <div className='flex flex-wrap gap-1'>
+              {topicLabels.slice(0, 3).map((label) => (
                 <span
                   key={label}
-                  className='inline-flex items-center rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600'
+                  className='rounded-[4px] bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-2'
                 >
                   {label}
                 </span>
@@ -82,7 +79,11 @@ function LibraryCard(
           )
           : null}
         {item.created
-          ? <p className='mt-auto pt-1 text-xs text-neutral-400'>{formatDate(item.created)}</p>
+          ? (
+            <p className='mt-auto pt-1 text-xs tabular-nums text-ink-3'>
+              {formatDate(item.created)}
+            </p>
+          )
           : null}
       </div>
     </Link>
@@ -91,9 +92,9 @@ function LibraryCard(
 
 function LibraryCardSkeleton() {
   return (
-    <div className='flex flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm'>
-      <Skeleton className='h-28 w-full rounded-none' />
-      <div className='flex flex-col gap-2 p-4'>
+    <div className='rp-card flex flex-col overflow-hidden'>
+      <div className='rp-shimmer bg-surface-3 h-24 w-full' aria-hidden='true' />
+      <div className='flex flex-col gap-2 border-t border-line p-3.5'>
         <Skeleton className='h-4 w-3/4' />
         <Skeleton className='h-4 w-1/2' />
         <Skeleton className='h-3 w-24' />
@@ -176,30 +177,43 @@ export function LibraryPage() {
   const isInitialLoading = isLoading && page === 0
 
   return (
-    <main className='mx-auto max-w-6xl px-6 py-10'>
+    <main className='mx-auto max-w-6xl px-6 py-8'>
       <div className='flex flex-wrap items-baseline justify-between gap-2'>
-        <h1 className='text-2xl font-semibold tracking-tight text-neutral-900'>Library</h1>
+        <h1 className='rp-display text-2xl text-ink'>Library</h1>
         {!isInitialLoading && !isError
           ? (
-            <p className='text-sm font-medium text-neutral-500'>
+            <p className='text-sm font-medium tabular-nums text-ink-3'>
               {total.toLocaleString()} {total === 1 ? 'resource' : 'resources'}
             </p>
           )
           : null}
       </div>
 
-      <div className='mt-6 flex flex-wrap items-center gap-3'>
-        <div className='flex min-w-[16rem] flex-1 items-center gap-2 rounded-full border border-neutral-200 bg-white px-4 py-2.5 shadow-sm'>
+      <div className='mt-4 flex flex-wrap items-center gap-2'>
+        <div className='flex min-w-[16rem] flex-1 items-center gap-2 rounded-[6px] border border-line bg-surface px-3 py-1.5'>
           <label htmlFor='library-search' className='sr-only'>
             Search the library
           </label>
+          <svg
+            viewBox='0 0 20 20'
+            fill='none'
+            stroke='currentColor'
+            strokeWidth='1.8'
+            strokeLinecap='round'
+            aria-hidden='true'
+            className='h-4 w-4 shrink-0 text-ink-3'
+          >
+            <circle cx='9' cy='9' r='5.5' />
+            <path d='M13.2 13.2L17 17' />
+          </svg>
           <input
             id='library-search'
-            type='search'
+            type='text'
+            autoComplete='off'
             value={queryDraft}
             onChange={(event: ChangeEvent<HTMLInputElement>) => setQueryDraft(event.target.value)}
             placeholder='Search within the library'
-            className='min-w-0 flex-1 border-0 bg-transparent text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none'
+            className='min-w-0 flex-1 border-0 bg-transparent py-1 text-sm text-ink placeholder:text-[var(--rp-ink-3)] focus:outline-none'
           />
         </div>
 
@@ -210,8 +224,7 @@ export function LibraryPage() {
           id='library-sort'
           value={sort}
           onChange={(event) => setSort(event.target.value as SortValue)}
-          className='rounded-full border border-neutral-200 bg-white px-4 py-2.5 text-sm text-neutral-700 shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-          style={{ outlineColor: 'var(--rp-accent)' }}
+          className='rp-focus rounded-[6px] border border-line bg-surface px-3 py-2 text-sm text-ink'
         >
           {SORT_VALUES.map((value) => (
             <option key={value} value={value}>
@@ -225,7 +238,8 @@ export function LibraryPage() {
             <button
               type='button'
               onClick={() => setFiltersOpen((open) => !open)}
-              className='inline-flex items-center gap-1 rounded-full border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-600 transition-colors duration-150 hover:text-neutral-900 lg:hidden'
+              className='rp-chip lg:hidden'
+              aria-expanded={filtersOpen}
             >
               Filters{selectedTopics.length > 0 ? ` (${selectedTopics.length})` : ''}
             </button>
@@ -233,36 +247,50 @@ export function LibraryPage() {
           : null}
       </div>
 
-      <div className='mt-8 grid grid-cols-1 gap-8 lg:grid-cols-[220px_1fr]'>
+      <div className='mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[230px_1fr]'>
         {config.topics.length > 0
           ? (
             <aside className={`${filtersOpen ? 'block' : 'hidden'} lg:block`}>
-              <h2 className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>
-                Topics
-              </h2>
-              <div className='mt-3 space-y-2'>
-                {config.topics.map((topic) => {
-                  const count = topicCounts[topic.id] ?? 0
-                  const checked = selectedTopics.includes(topic.id)
-                  return (
-                    <label
-                      key={topic.id}
-                      className={`flex items-center gap-2 text-sm ${
-                        count === 0 && !checked ? 'text-neutral-300' : 'text-neutral-700'
-                      }`}
-                    >
-                      <input
-                        type='checkbox'
-                        checked={checked}
-                        onChange={() => toggleTopic(topic.id)}
-                        className='rounded border-neutral-300'
-                        style={{ accentColor: 'var(--rp-accent)' }}
-                      />
-                      <span className='flex-1'>{topic.label}</span>
-                      <span className='text-xs text-neutral-400'>{count}</span>
-                    </label>
-                  )
-                })}
+              <div className='rp-card p-4 lg:sticky lg:top-20'>
+                <div className='flex items-center justify-between gap-2'>
+                  <p className='rp-eyebrow text-ink-3'>Topics</p>
+                  {selectedTopics.length > 0
+                    ? (
+                      <button
+                        type='button'
+                        onClick={() => setSelectedTopics([])}
+                        className='text-xs font-medium text-[var(--rp-ink-3)] transition-colors duration-150 hover:text-[var(--rp-ink)]'
+                      >
+                        Clear
+                      </button>
+                    )
+                    : null}
+                </div>
+                <div className='mt-2.5 space-y-0.5'>
+                  {config.topics.map((topic) => {
+                    const count = topicCounts[topic.id] ?? 0
+                    const checked = selectedTopics.includes(topic.id)
+                    const muted = count === 0 && !checked
+                    return (
+                      <label
+                        key={topic.id}
+                        className={`flex cursor-pointer items-center gap-2.5 rounded-[6px] px-1 py-1 text-sm ${
+                          muted ? 'text-ink-3' : 'text-ink-2'
+                        }`}
+                      >
+                        <input
+                          type='checkbox'
+                          checked={checked}
+                          onChange={() => toggleTopic(topic.id)}
+                          className='h-4 w-4 shrink-0 rounded-[3px] border-line'
+                          style={{ accentColor: 'var(--rp-accent)' }}
+                        />
+                        <span className='min-w-0 flex-1'>{topic.label}</span>
+                        <span className='text-xs tabular-nums text-ink-3'>{count}</span>
+                      </label>
+                    )
+                  })}
+                </div>
               </div>
             </aside>
           )
@@ -280,7 +308,7 @@ export function LibraryPage() {
 
           {isInitialLoading
             ? (
-              <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3'>
+              <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'>
                 {Array.from({ length: 6 }).map((_, index) => <LibraryCardSkeleton key={index} />)}
               </div>
             )
@@ -298,7 +326,7 @@ export function LibraryPage() {
           {!isInitialLoading && !isError && accumulated.length > 0
             ? (
               <>
-                <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3'>
+                <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'>
                   {accumulated.map((item) => (
                     <LibraryCard
                       key={item.id}
@@ -311,13 +339,12 @@ export function LibraryPage() {
 
                 {hasMore
                   ? (
-                    <div className='mt-8 flex justify-center'>
+                    <div className='mt-6 flex justify-center'>
                       <button
                         type='button'
                         onClick={() => setPage((prev) => prev + 1)}
                         disabled={isFetching}
-                        className='inline-flex items-center rounded-full border border-neutral-200 bg-white px-5 py-2.5 text-sm font-medium text-neutral-700 shadow-sm transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-                        style={{ outlineColor: 'var(--rp-accent)' }}
+                        className='rp-btn rp-btn-outline'
                       >
                         {isFetching ? 'Loading…' : 'Load more'}
                       </button>

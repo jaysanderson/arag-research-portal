@@ -42,11 +42,11 @@ export function AnalysePanel({ slug, passcode }: { slug: string; passcode: strin
   }
 
   return (
-    <div className='mt-5 rounded-xl border border-neutral-200 bg-neutral-50 p-4'>
+    <div className='mt-5 rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface-2 p-4'>
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <div>
-          <p className='text-sm font-semibold text-neutral-900'>Analyse and configure</p>
-          <p className='mt-0.5 text-xs text-neutral-500'>
+          <p className='text-sm font-semibold text-ink'>Analyse and configure</p>
+          <p className='mt-0.5 text-xs text-ink-3'>
             Interrogates the box and derives the taxonomy, graph dimensions and suggested questions
             from what is actually in it.
           </p>
@@ -54,30 +54,29 @@ export function AnalysePanel({ slug, passcode }: { slug: string; passcode: strin
         <button
           type='button'
           disabled={running}
-          onClick={run}
-          className='inline-flex items-center rounded-full px-4 py-2 text-sm font-medium text-white transition-opacity duration-150 disabled:opacity-60'
-          style={{ backgroundColor: '#27364b' }}
+          onClick={() => void run()}
+          className='rp-btn rp-btn-primary'
         >
           {running ? 'Analysing…' : 'Run analysis'}
         </button>
       </div>
 
       {log.length > 0 && (
-        <ol className='mt-3 max-h-56 space-y-1 overflow-y-auto rounded-lg border border-neutral-200 bg-white p-3 text-xs'>
+        <ol className='mt-3 max-h-56 space-y-1 overflow-y-auto rounded-[var(--rp-radius)] border border-line bg-surface p-3 text-xs'>
           {log.map((event, index) => (
             <li key={index} className='flex gap-2'>
               {event.type === 'stage' && (
-                <span className='font-semibold text-neutral-900'>{event.label}</span>
+                <span className='font-semibold text-ink'>{event.label}</span>
               )}
               {event.type === 'item' && (
-                <span className='text-neutral-600' title={event.detail}>
-                  {event.label}
-                </span>
+                <span className='text-ink-2' title={event.detail}>{event.label}</span>
               )}
               {event.type === 'done' && (
-                <span className='font-medium text-emerald-700'>Finished.</span>
+                <span className='font-medium' style={{ color: 'var(--rp-ok-ink)' }}>Finished.</span>
               )}
-              {event.type === 'error' && <span className='text-rose-700'>{event.message}</span>}
+              {event.type === 'error' && (
+                <span style={{ color: 'var(--rp-bad-ink)' }}>{event.message}</span>
+              )}
             </li>
           ))}
         </ol>

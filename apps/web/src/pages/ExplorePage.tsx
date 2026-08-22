@@ -1,15 +1,28 @@
-import { type FormEvent, useMemo, useState } from 'react'
+import { type FormEvent, useCallback, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useOutletContext } from 'react-router-dom'
 import type { KbCounters, ResourceSummary, TenantConfig } from '@research-portal/core'
 import { getCounters, getResources } from '../api/client.ts'
 import { EmptyState, ErrorCard, Skeleton, TypeBadge } from '../components/ui.tsx'
 import { ResourceThumb } from '../components/ResourceThumb.tsx'
+import { TypeaheadDropdown, type TypeaheadItem, useTypeahead } from '../components/Typeahead.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
 /* -------------------------------------------------------------------------
  * Hero
  * ---------------------------------------------------------------------- */
+
+/**
+ * The hero prompt. The tenant writes a search placeholder ("Search the grains
+ * research library"); the portal asks rather than searches, so the leading verb
+ * is swapped and the corpus flavour is kept.
+ */
+function askPlaceholder(searchPlaceholder: string): string {
+  const trimmed = searchPlaceholder.trim()
+  if (trimmed.length === 0) return 'Ask a question of this corpus'
+  if (/^search\b/i.test(trimmed)) return trimmed.replace(/^search\b/i, 'Ask')
+  return `Ask ${trimmed.charAt(0).toLowerCase()}${trimmed.slice(1)}`
+}
 
 /**
  * The hero backdrop. With a tenant hero photograph it is a full-bleed cover
@@ -58,74 +71,94 @@ function Hero({
   onSearch: (text: string) => void
 }) {
   const [query, setQuery] = useState('')
+  const inputRef = useRef<HTMLInputElement | null>(null)
   const suggested = config.suggestedQuestions.slice(0, 4)
+
+  // An entity folds back into the question being written; a resource title is
+  // a destination, so it goes straight to the results for that title.
+  const onPick = useCallback((item: TypeaheadItem) => {
+    if (item.kind === 'title') {
+      onSearch(item.text)
+      return
+    }
+    setQuery((prev) => `${prev.trim()} ${item.text} `.trimStart())
+    inputRef.current?.focus()
+  }, [onSearch])
+
+  const typeahead = useTypeahead(config.slug, query, onPick)
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const trimmed = query.trim()
     if (trimmed.length === 0) return
+    typeahead.close()
     onSearch(trimmed)
   }
 
   return (
-    <section className='relative isolate px-6 pb-28 pt-16 sm:pb-32 sm:pt-24'>
+    <section className='relative isolate px-6 pb-24 pt-14 sm:pb-28 sm:pt-20'>
       <HeroBackdrop imageUrl={config.branding.heroImageUrl} />
 
       <div className='mx-auto max-w-3xl text-center'>
         <p className='rp-eyebrow rp-anim-rise text-white/70'>{config.branding.organisation}</p>
 
-        <h1 className='rp-display rp-anim-rise rp-delay-1 mt-4 text-4xl text-white sm:text-5xl md:text-[3.5rem]'>
+        <h1 className='rp-display rp-anim-rise rp-delay-1 mt-3 text-4xl text-white sm:text-5xl md:text-[3.25rem]'>
           What would you like to explore?
         </h1>
 
-        <p className='rp-anim-rise rp-delay-2 mx-auto mt-4 max-w-xl text-base leading-relaxed text-white/75'>
+        <p className='rp-anim-rise rp-delay-2 mx-auto mt-3 max-w-xl text-base leading-relaxed text-white/75'>
           {config.branding.tagline}
         </p>
 
-        <form onSubmit={handleSubmit} className='rp-anim-rise rp-delay-3 mt-9' role='search'>
+        <form onSubmit={handleSubmit} className='rp-anim-rise rp-delay-3 mt-7' role='search'>
           <label htmlFor='explore-search' className='sr-only'>
-            Search {config.branding.productName}
+            Ask {config.branding.productName}
           </label>
-          <div className='rp-shadow-xl mx-auto flex max-w-2xl items-center gap-1 rounded-full bg-white p-1.5 pl-4 ring-1 ring-white/40 focus-within:ring-2 focus-within:ring-white'>
-            <svg
-              viewBox='0 0 20 20'
-              fill='none'
-              stroke='currentColor'
-              strokeWidth='1.8'
-              strokeLinecap='round'
-              aria-hidden='true'
-              className='h-5 w-5 shrink-0 text-neutral-400'
-            >
-              <circle cx='9' cy='9' r='5.5' />
-              <path d='M13.2 13.2L17 17' />
-            </svg>
-            <input
-              id='explore-search'
-              type='search'
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={config.searchPlaceholder}
-              className='min-w-0 flex-1 rounded-full border-0 bg-transparent px-3 py-2.5 text-[0.95rem] text-neutral-900 placeholder:text-neutral-400 focus:outline-none'
-            />
-            <button
-              type='submit'
-              className='rp-focus shrink-0 rounded-full px-5 py-2.5 text-sm font-semibold text-white transition-transform duration-150 hover:-translate-y-px'
-              style={{ backgroundColor: 'var(--rp-primary)' }}
-            >
-              Search
-            </button>
+          <div ref={typeahead.wrapRef} className='relative mx-auto max-w-2xl'>
+            <div className='rp-shadow-xl flex items-center gap-2 rounded-[10px] bg-surface p-1.5 pl-3.5 ring-1 ring-white/40 focus-within:ring-2 focus-within:ring-white'>
+              <svg
+                viewBox='0 0 20 20'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth='1.8'
+                strokeLinecap='round'
+                aria-hidden='true'
+                className='h-5 w-5 shrink-0 text-ink-3'
+              >
+                <circle cx='9' cy='9' r='5.5' />
+                <path d='M13.2 13.2L17 17' />
+              </svg>
+              <input
+                id='explore-search'
+                ref={inputRef}
+                type='text'
+                autoComplete='off'
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={typeahead.onKeyDown}
+                placeholder={askPlaceholder(config.searchPlaceholder)}
+                role='combobox'
+                aria-autocomplete='list'
+                aria-expanded={typeahead.open}
+                className='min-w-0 flex-1 border-0 bg-transparent px-2 py-2 text-[0.95rem] text-ink placeholder:text-[var(--rp-ink-3)] focus:outline-none'
+              />
+              <button type='submit' className='rp-btn rp-btn-primary shrink-0 font-semibold'>
+                Ask
+              </button>
+            </div>
+            <TypeaheadDropdown state={typeahead} />
           </div>
         </form>
 
         {suggested.length > 0
           ? (
-            <div className='rp-anim-rise rp-delay-4 mt-6 flex flex-wrap justify-center gap-2'>
+            <div className='rp-anim-rise rp-delay-4 mt-5 flex flex-wrap justify-center gap-2'>
               {suggested.map((question) => (
                 <button
                   key={question.id}
                   type='button'
                   onClick={() => onSearch(question.text)}
-                  className='rp-focus-inverse rounded-full bg-white/12 px-4 py-2 text-sm text-white ring-1 ring-inset ring-white/25 backdrop-blur-sm transition-colors duration-150 hover:bg-white/22'
+                  className='rp-focus-inverse rounded-[6px] bg-white/12 px-3 py-1.5 text-sm text-white ring-1 ring-inset ring-white/25 backdrop-blur-sm transition-colors duration-150 hover:bg-white/25'
                 >
                   {question.text}
                 </button>
@@ -144,9 +177,9 @@ function Hero({
 
 function StatTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className='rp-glass rp-shadow-md flex flex-col items-center gap-1 rounded-2xl border border-white/60 px-4 py-4 text-center'>
-      <span className='rp-display text-2xl text-neutral-900 sm:text-[1.75rem]'>{value}</span>
-      <span className='rp-eyebrow text-neutral-500'>{label}</span>
+    <div className='rp-glass rp-shadow-md flex flex-col gap-0.5 rounded-[10px] border border-line px-4 py-3'>
+      <span className='rp-display text-2xl text-ink'>{value}</span>
+      <span className='rp-eyebrow text-ink-3'>{label}</span>
     </div>
   )
 }
@@ -164,7 +197,7 @@ function StatsStrip({ counters }: { counters: KbCounters }) {
   ]
 
   return (
-    <div className='rp-anim-rise rp-delay-4 relative z-10 mx-auto -mt-16 grid max-w-4xl grid-cols-2 gap-3 px-6 sm:-mt-14 sm:grid-cols-4'>
+    <div className='rp-anim-rise rp-delay-4 relative z-10 mx-auto -mt-12 grid max-w-4xl grid-cols-2 gap-2.5 px-6 sm:grid-cols-4'>
       {stats.map((stat) => <StatTile key={stat.label} label={stat.label} value={stat.value} />)}
     </div>
   )
@@ -172,11 +205,11 @@ function StatsStrip({ counters }: { counters: KbCounters }) {
 
 function StatsStripSkeleton() {
   return (
-    <div className='relative z-10 mx-auto -mt-16 grid max-w-4xl grid-cols-2 gap-3 px-6 sm:-mt-14 sm:grid-cols-4'>
+    <div className='relative z-10 mx-auto -mt-12 grid max-w-4xl grid-cols-2 gap-2.5 px-6 sm:grid-cols-4'>
       {Array.from({ length: 4 }).map((_, index) => (
         <div
           key={index}
-          className='rp-glass rp-shadow-md flex flex-col items-center gap-2 rounded-2xl border border-white/60 px-4 py-5'
+          className='rp-glass rp-shadow-md flex flex-col gap-2 rounded-[10px] border border-line px-4 py-4'
         >
           <Skeleton className='h-6 w-16' />
           <Skeleton className='h-2.5 w-20' />
@@ -194,24 +227,24 @@ function ResourceCard({ slug, resource }: { slug: string; resource: ResourceSumm
   return (
     <Link
       to={`/t/${slug}/library/${resource.id}`}
-      className='rp-lift rp-shadow-sm rp-focus group flex w-60 shrink-0 flex-col overflow-hidden rounded-2xl border border-neutral-900/[0.07] bg-white sm:w-72'
+      className='rp-card rp-lift rp-focus group flex w-60 shrink-0 flex-col overflow-hidden sm:w-72'
     >
-      <div className='relative aspect-[16/10] w-full overflow-hidden bg-neutral-100'>
+      <div className='relative aspect-[16/10] w-full overflow-hidden bg-surface-2'>
         <ResourceThumb
           slug={slug}
           id={resource.id}
           type={resource.type}
           className='rp-zoom'
         />
-        <span className='absolute left-2.5 top-2.5'>
+        <span className='absolute left-2 top-2'>
           <TypeBadge type={resource.type} />
         </span>
       </div>
-      <div className='flex flex-1 flex-col gap-1.5 p-4'>
-        <h3 className='rp-clamp-2 text-[0.9375rem] font-semibold leading-snug tracking-[-0.01em] text-neutral-900'>
+      <div className='flex flex-1 flex-col gap-1.5 border-t border-line p-3.5'>
+        <h3 className='rp-clamp-2 text-[0.9375rem] font-semibold leading-snug tracking-[-0.01em] text-ink'>
           {resource.title}
         </h3>
-        <p className='rp-clamp-3 text-sm leading-relaxed text-neutral-500'>{resource.summary}</p>
+        <p className='rp-clamp-3 text-sm leading-relaxed text-ink-3'>{resource.summary}</p>
       </div>
     </Link>
   )
@@ -219,11 +252,10 @@ function ResourceCard({ slug, resource }: { slug: string; resource: ResourceSumm
 
 function SectionHeading({ label, count }: { label: string; count: number }) {
   return (
-    <div className='flex items-baseline gap-2.5'>
-      <h2 className='rp-display text-xl text-neutral-900 sm:text-2xl'>{label}</h2>
-      <span className='rounded-full bg-neutral-900/[0.06] px-2 py-0.5 text-xs font-semibold tabular-nums text-neutral-500'>
-        {count}
-      </span>
+    <div className='flex items-center gap-2.5'>
+      <h2 className='rp-display text-xl text-ink sm:text-[1.375rem]'>{label}</h2>
+      <span className='rp-badge rp-badge-quiet tabular-nums'>{count}</span>
+      <span className='h-px flex-1 bg-[var(--rp-line)]' aria-hidden='true' />
     </div>
   )
 }
@@ -232,14 +264,14 @@ function TopicRowSkeleton() {
   return (
     <div>
       <Skeleton className='h-6 w-56' />
-      <div className='mt-4 flex gap-4'>
+      <div className='mt-4 flex gap-3'>
         {Array.from({ length: 4 }).map((_, index) => (
           <div
             key={index}
-            className='w-60 shrink-0 overflow-hidden rounded-2xl border border-neutral-900/[0.07] bg-white sm:w-72'
+            className='rp-card w-60 shrink-0 overflow-hidden sm:w-72'
           >
-            <div className='rp-shimmer aspect-[16/10] w-full' aria-hidden='true' />
-            <div className='space-y-2 p-4'>
+            <div className='rp-shimmer bg-surface-3 aspect-[16/10] w-full' aria-hidden='true' />
+            <div className='space-y-2 border-t border-line p-3.5'>
               <Skeleton className='h-4 w-4/5' />
               <Skeleton className='h-3 w-full' />
               <Skeleton className='h-3 w-2/3' />
@@ -291,7 +323,10 @@ export function ExplorePage() {
     queryFn: () => getCounters(config.slug),
   })
 
-  const search = (text: string) => navigate(`search?q=${encodeURIComponent(text)}`)
+  const search = useCallback(
+    (text: string) => navigate(`search?q=${encodeURIComponent(text)}`),
+    [navigate],
+  )
 
   const hasRows = resourcesByTopic.size > 0
 
@@ -305,7 +340,7 @@ export function ExplorePage() {
         ? <StatsStrip counters={counters} />
         : null}
 
-      <section className='mx-auto max-w-6xl space-y-12 px-6 pb-20 pt-14'>
+      <section className='mx-auto max-w-6xl space-y-10 px-6 pb-16 pt-12'>
         {isError
           ? (
             <ErrorCard
@@ -330,11 +365,7 @@ export function ExplorePage() {
               title='Nothing to browse yet'
               description='This portal has no resources filed against its topics. Add content in the management screen, or run a corpus analysis to build the taxonomy.'
             >
-              <Link
-                to={`/t/${config.slug}/library`}
-                className='rp-focus inline-flex items-center rounded-full px-4 py-2 text-sm font-medium text-white'
-                style={{ backgroundColor: 'var(--rp-primary)' }}
-              >
+              <Link to={`/t/${config.slug}/library`} className='rp-btn rp-btn-primary'>
                 Open the library
               </Link>
             </EmptyState>
@@ -349,7 +380,7 @@ export function ExplorePage() {
             return (
               <div key={topic.id}>
                 <SectionHeading label={topic.label} count={items.length} />
-                <div className='rp-scroll-row rp-no-scrollbar -mx-6 mt-4 flex gap-4 overflow-x-auto px-6 pb-4 pt-2'>
+                <div className='rp-scroll-row rp-no-scrollbar -mx-6 mt-3.5 flex gap-3 overflow-x-auto px-6 pb-4 pt-1'>
                   {items.map((resource) => (
                     <ResourceCard key={resource.id} slug={config.slug} resource={resource} />
                   ))}
