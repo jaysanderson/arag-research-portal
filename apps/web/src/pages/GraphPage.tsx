@@ -166,29 +166,24 @@ function useLiveSimulation(nodes: MapNode[], edges: MapEdge[]) {
       .force('collide', forceCollide<SimNode>().radius((d) => radiusFor(d.weight) + 8))
     simRef.current = simulation
 
-    let raf = 0
-    const loop = () => {
-      setFrame((f) => f + 1)
-      if (simulation.alpha() > 0.011) raf = requestAnimationFrame(loop)
-    }
-    raf = requestAnimationFrame(loop)
-    simulation.on('tick', () => {
-      // rAF drives the repaint; the tick itself stays cheap.
-    })
+    // Settle the layout synchronously - instant, and immune to background-tab
+    // rAF throttling. Live physics then only animates real interactions.
+    simulation.stop()
+    simulation.tick(280)
+    setFrame((f) => f + 1)
     return () => {
-      cancelAnimationFrame(raf)
       simulation.stop()
     }
   }, [nodes, edges])
 
-  /** Wake the simulation (after a drag) and keep repainting until it cools. */
+  /** Wake the simulation (for a drag) and keep repainting until it cools. */
   const reheat = useCallback(() => {
     const simulation = simRef.current
     if (!simulation) return
-    simulation.alphaTarget(0.12).restart()
+    simulation.alphaTarget(0.25).restart()
     const loop = () => {
       setFrame((f) => f + 1)
-      if ((simRef.current?.alpha() ?? 0) > 0.011) requestAnimationFrame(loop)
+      if ((simRef.current?.alpha() ?? 0) > 0.02) requestAnimationFrame(loop)
     }
     requestAnimationFrame(loop)
   }, [])
