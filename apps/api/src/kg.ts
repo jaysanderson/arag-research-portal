@@ -182,8 +182,7 @@ export async function* implementKgStrategy(
         }
         yield {
           type: 'item',
-          label:
-            `${label} deferred - the platform runs one labelling agent at a time. Re-run ` +
+          label: `${label} deferred - the platform runs one labelling agent at a time. Re-run ` +
             'Implement once the document labeller has finished to register it.',
         }
       } else {

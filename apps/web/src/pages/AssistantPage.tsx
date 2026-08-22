@@ -6,10 +6,11 @@ import {
   useRef,
   useState,
 } from 'react'
-import { useOutletContext } from 'react-router-dom'
+import { Link, useOutletContext } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import type { AskEvent, Citation } from '@research-portal/core'
+import type { AskEvent, Citation, ScoredResource } from '@research-portal/core'
 import { getSuggestedQuestions, streamAsk } from '../api/client.ts'
+import { citationHref, ContextJourney } from '../components/AnswerStream.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
 // ---------------------------------------------------------------------------
@@ -21,6 +22,7 @@ type ChatMessage = {
   author: 'USER' | 'AGENT'
   text: string
   citations: Citation[]
+  sources: ScoredResource[]
   usage?: {
     inputTokens: number
     outputTokens: number
@@ -44,13 +46,46 @@ function storageKey(slug: string): string {
   return `rp-chat-${slug}`
 }
 
+/**
+ * Defensively rebuilds a message from localStorage: older sessions were
+ * saved before `sources` existed on `ChatMessage`, so any missing/malformed
+ * field falls back to an empty array rather than throwing or leaving
+ * `undefined` around for later code to trip over.
+ */
+function migrateMessage(raw: unknown): ChatMessage {
+  const message = raw as Partial<ChatMessage> | null | undefined
+  return {
+    id: typeof message?.id === 'string' ? message.id : makeId(),
+    author: message?.author === 'USER' ? 'USER' : 'AGENT',
+    text: typeof message?.text === 'string' ? message.text : '',
+    citations: Array.isArray(message?.citations) ? message.citations : [],
+    sources: Array.isArray(message?.sources) ? message.sources : [],
+    usage: message?.usage,
+    error: typeof message?.error === 'string' ? message.error : undefined,
+    pending: false,
+  }
+}
+
+function migrateSession(raw: unknown): ChatSession | null {
+  const session = raw as Partial<ChatSession> | null | undefined
+  if (!session || typeof session.id !== 'string') return null
+  return {
+    id: session.id,
+    createdAt: typeof session.createdAt === 'number' ? session.createdAt : Date.now(),
+    updatedAt: typeof session.updatedAt === 'number' ? session.updatedAt : Date.now(),
+    messages: Array.isArray(session.messages) ? session.messages.map(migrateMessage) : [],
+  }
+}
+
 function loadSessions(slug: string): ChatSession[] {
   try {
     const raw = localStorage.getItem(storageKey(slug))
     if (!raw) return []
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []
-    return parsed as ChatSession[]
+    return parsed
+      .map(migrateSession)
+      .filter((session): session is ChatSession => session !== null)
   } catch {
     return []
   }
@@ -90,16 +125,66 @@ function sessionTitle(session: ChatSession): string {
 // blank lines, "### " headings, "- " bullet lists and **bold** spans.
 // ---------------------------------------------------------------------------
 
-function renderInline(text: string): ReactNode[] {
+/**
+ * Replaces `[n]` markers in a plain-text run with superscript, accent-
+ * coloured links to the matching citation's deep link. Run AFTER other
+ * inline parsing (bold) has already split the text into nodes, so this only
+ * ever sees plain text segments - never markup.
+ */
+function renderCitationMarkers(
+  text: string,
+  citations: Citation[],
+  sources: ScoredResource[],
+  slug: string,
+  keyPrefix: string,
+): ReactNode[] {
+  const segments = text.split(/(\[\d+\])/g)
+  return segments.map((segment, index) => {
+    const match = /^\[(\d+)\]$/.exec(segment)
+    const citationIndex = match?.[1] ? Number(match[1]) : null
+    const citation = citationIndex === null
+      ? undefined
+      : citations.find((item) => item.index === citationIndex)
+
+    if (citation) {
+      const matchedPassage = sources.find((source) => source.id === citation.resourceId)
+        ?.matchedPassage
+      return (
+        <sup key={`${keyPrefix}-${index}`}>
+          <Link
+            to={citationHref(slug, citation.resourceId, matchedPassage)}
+            className='font-semibold no-underline'
+            style={{ color: 'var(--rp-accent)' }}
+          >
+            [{citationIndex}]
+          </Link>
+        </sup>
+      )
+    }
+    return <span key={`${keyPrefix}-${index}`}>{segment}</span>
+  })
+}
+
+function renderInline(
+  text: string,
+  citations: Citation[],
+  sources: ScoredResource[],
+  slug: string,
+): ReactNode[] {
   const parts = text.split(/(\*\*[^*]+\*\*)/g)
-  return parts.map((part, index) =>
+  return parts.flatMap((part, index): ReactNode[] =>
     part.startsWith('**') && part.endsWith('**')
-      ? <strong key={index}>{part.slice(2, -2)}</strong>
-      : <span key={index}>{part}</span>
+      ? [<strong key={index}>{part.slice(2, -2)}</strong>]
+      : renderCitationMarkers(part, citations, sources, slug, String(index))
   )
 }
 
-function renderMarkdown(text: string): ReactNode {
+function renderMarkdown(
+  text: string,
+  citations: Citation[],
+  sources: ScoredResource[],
+  slug: string,
+): ReactNode {
   const blocks = text.split(/\n{2,}/).filter((block) => block.trim().length > 0)
   return (
     <div className='space-y-3'>
@@ -108,7 +193,7 @@ function renderMarkdown(text: string): ReactNode {
         if (trimmed.startsWith('### ')) {
           return (
             <h3 key={index} className='text-sm font-semibold text-neutral-900'>
-              {renderInline(trimmed.slice(4))}
+              {renderInline(trimmed.slice(4), citations, sources, slug)}
             </h3>
           )
         }
@@ -119,7 +204,7 @@ function renderMarkdown(text: string): ReactNode {
             <ul key={index} className='list-disc space-y-1 pl-5'>
               {lines.map((line, lineIndex) => (
                 <li key={lineIndex} className='text-sm leading-relaxed text-neutral-700'>
-                  {renderInline(line.slice(2))}
+                  {renderInline(line.slice(2), citations, sources, slug)}
                 </li>
               ))}
             </ul>
@@ -127,7 +212,7 @@ function renderMarkdown(text: string): ReactNode {
         }
         return (
           <p key={index} className='text-sm leading-relaxed text-neutral-700'>
-            {renderInline(trimmed)}
+            {renderInline(trimmed, citations, sources, slug)}
           </p>
         )
       })}
@@ -219,10 +304,12 @@ function UserBubble({ message }: { message: ChatMessage }) {
 
 function AssistantCard({
   message,
+  slug,
   activeStage,
   onRetry,
 }: {
   message: ChatMessage
+  slug: string
   activeStage: string | null
   onRetry: () => void
 }) {
@@ -258,7 +345,7 @@ function AssistantCard({
         : null}
 
       {message.text.length > 0
-        ? renderMarkdown(message.text)
+        ? renderMarkdown(message.text, message.citations, message.sources, slug)
         : message.pending
         ? <p className='text-sm text-neutral-400'>Thinking…</p>
         : null}
@@ -280,21 +367,28 @@ function AssistantCard({
               Sources: {message.citations.length}
             </p>
             <div className='mt-2 flex flex-wrap gap-1.5'>
-              {message.citations.map((citation) => (
-                <span
-                  key={citation.index}
-                  title={citation.title}
-                  className='inline-flex items-center gap-1 rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-xs font-medium text-neutral-600'
-                >
-                  <span
-                    className='inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold text-white'
-                    style={{ backgroundColor: 'var(--rp-accent)' }}
+              {message.citations.map((citation) => {
+                const matchedPassage = message.sources.find((source) =>
+                  source.id === citation.resourceId
+                )?.matchedPassage
+                return (
+                  <Link
+                    key={citation.index}
+                    to={citationHref(slug, citation.resourceId, matchedPassage)}
+                    title={citation.title}
+                    className='inline-flex items-center gap-1 rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-xs font-medium text-neutral-600 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
+                    style={{ outlineColor: 'var(--rp-accent)' }}
                   >
-                    {citation.index}
-                  </span>
-                  <span className='rp-clamp-2 max-w-[10rem]'>{citation.title}</span>
-                </span>
-              ))}
+                    <span
+                      className='inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold text-white'
+                      style={{ backgroundColor: 'var(--rp-accent)' }}
+                    >
+                      {citation.index}
+                    </span>
+                    <span className='rp-clamp-2 max-w-[10rem]'>{citation.title}</span>
+                  </Link>
+                )
+              })}
             </div>
           </div>
         )
@@ -305,6 +399,14 @@ function AssistantCard({
           <p className='mt-3 text-xs text-neutral-400'>
             {message.usage.inputTokens} in / {message.usage.outputTokens} out tokens
           </p>
+        )
+        : null}
+
+      {!message.pending && message.sources.length > 0
+        ? (
+          <div className='mt-4 border-t border-neutral-100 pt-3'>
+            <ContextJourney slug={slug} sources={message.sources} />
+          </div>
         )
         : null}
     </div>
@@ -384,7 +486,7 @@ export function AssistantPage() {
 
     let working: ChatMessage[] = [
       ...baseMessages,
-      { id: assistantId, author: 'AGENT', text: '', citations: [], pending: true },
+      { id: assistantId, author: 'AGENT', text: '', citations: [], sources: [], pending: true },
     ]
     setMessages(working)
     setIsStreaming(true)
@@ -410,6 +512,7 @@ export function AssistantPage() {
               )
               break
             case 'sources':
+              update((message) => ({ ...message, sources: event.resources }))
               break
             case 'delta':
               update((message) => ({ ...message, text: message.text + event.text }))
@@ -479,6 +582,7 @@ export function AssistantPage() {
       author: 'USER',
       text: trimmed,
       citations: [],
+      sources: [],
     }
     const baseMessages = [...messages, userMessage]
     setMessages(baseMessages)
@@ -610,6 +714,7 @@ export function AssistantPage() {
                     <AssistantCard
                       key={message.id}
                       message={message}
+                      slug={config.slug}
                       activeStage={index === messages.length - 1 ? activeStageLabel : null}
                       onRetry={() => retry(message.id)}
                     />

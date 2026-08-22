@@ -1,8 +1,9 @@
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react'
-import { useOutletContext } from 'react-router-dom'
+import { Link, useOutletContext } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import type { AskEvent, AskStage, Citation, ScoredResource } from '@research-portal/core'
 import { getSuggestedQuestions, streamAsk } from '../api/client.ts'
+import { citationHref, ContextJourney } from '../components/AnswerStream.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
 // ---------------------------------------------------------------------------
@@ -547,22 +548,37 @@ export function AgenticPage() {
                       Sources: {citations.length}
                     </p>
                     <div className='mt-2 flex flex-wrap gap-1.5'>
-                      {citations.map((citation) => (
-                        <span
-                          key={citation.index}
-                          title={citation.title}
-                          className='inline-flex items-center gap-1 rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-xs font-medium text-neutral-600'
-                        >
-                          <span
-                            className='inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold text-white'
-                            style={{ backgroundColor: 'var(--rp-accent)' }}
+                      {citations.map((citation) => {
+                        const matchedPassage = sources.find((resource) =>
+                          resource.id === citation.resourceId
+                        )?.matchedPassage
+                        return (
+                          <Link
+                            key={citation.index}
+                            to={citationHref(config.slug, citation.resourceId, matchedPassage)}
+                            title={citation.title}
+                            className='inline-flex items-center gap-1 rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-xs font-medium text-neutral-600 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
+                            style={{ outlineColor: 'var(--rp-accent)' }}
                           >
-                            {citation.index}
-                          </span>
-                          <span className='rp-clamp-2 max-w-[10rem]'>{citation.title}</span>
-                        </span>
-                      ))}
+                            <span
+                              className='inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold text-white'
+                              style={{ backgroundColor: 'var(--rp-accent)' }}
+                            >
+                              {citation.index}
+                            </span>
+                            <span className='rp-clamp-2 max-w-[10rem]'>{citation.title}</span>
+                          </Link>
+                        )
+                      })}
                     </div>
+                  </div>
+                )
+                : null}
+
+              {!isRunning && sources.length > 0
+                ? (
+                  <div className='mt-4 border-t border-neutral-100 pt-3'>
+                    <ContextJourney slug={config.slug} sources={sources} />
                   </div>
                 )
                 : null}

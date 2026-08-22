@@ -650,7 +650,12 @@ export class AragProvider implements RetrievalProvider {
       const raw = await client.getJson<{
         groups?: Record<string, { entities?: Record<string, unknown> }>
       }>('/entitiesgroups')
-      const names = Object.keys(raw.groups ?? {}).slice(0, 16)
+      // Only custom-created groups (from the box's own graph agents). The
+      // platform's built-in NER groups use ALL-CAPS codes (ORG, LOC, DATE...)
+      // and are excluded from the portal's graph views.
+      const names = Object.keys(raw.groups ?? {})
+        .filter((name) => !/^[A-Z0-9_]+$/.test(name))
+        .slice(0, 16)
       const out = await Promise.all(names.map(async (group) => {
         const inline = Object.keys(raw.groups?.[group]?.entities ?? {})
         if (inline.length > 0) return { group, entities: inline.slice(0, 100) }
