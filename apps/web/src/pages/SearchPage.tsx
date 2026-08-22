@@ -142,6 +142,7 @@ function SummaryModal({
   onRetry: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -156,6 +157,16 @@ function SummaryModal({
     document.body.style.overflow = 'hidden'
     return () => {
       document.body.style.overflow = previous
+    }
+  }, [])
+
+  // Move focus into the dialog on open, and give it back to whatever
+  // triggered it once the dialog closes.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    dialogRef.current?.focus()
+    return () => {
+      previouslyFocused?.focus()
     }
   }, [])
 
@@ -176,6 +187,8 @@ function SummaryModal({
       }}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         role='dialog'
         aria-modal='true'
         aria-label='Summary'
@@ -247,21 +260,31 @@ function useResourceSummary(slug: string) {
   const [summary, setSummary] = useState('')
   const [titles, setTitles] = useState<string[]>([])
   const lastRequest = useRef<{ ids: string[]; kind: 'simple' | 'extended' } | null>(null)
+  // A slower earlier request must never overwrite a newer one.
+  const requestSeq = useRef(0)
 
   const run = useCallback(
     (ids: string[], resourceTitles: string[], kind: 'simple' | 'extended' = 'simple') => {
       lastRequest.current = { ids, kind }
+      const requestId = ++requestSeq.current
       setTitles(resourceTitles)
       setOpen(true)
       setLoading(true)
       setError(null)
       setSummary('')
       summarizeResources(slug, ids, kind)
-        .then((res) => setSummary(res.summary))
-        .catch((err) =>
+        .then((res) => {
+          if (requestId !== requestSeq.current) return
+          setSummary(res.summary)
+        })
+        .catch((err) => {
+          if (requestId !== requestSeq.current) return
           setError(err instanceof Error ? err.message : 'Could not generate a summary.')
-        )
-        .finally(() => setLoading(false))
+        })
+        .finally(() => {
+          if (requestId !== requestSeq.current) return
+          setLoading(false)
+        })
     },
     [slug],
   )
@@ -295,15 +318,19 @@ function WatchStrip(
           <button
             type='button'
             onClick={() => onRun(watch)}
-            className='rp-focus flex items-center gap-1.5 rounded-[3px] px-1.5 py-1 text-xs text-ink-2 transition-colors duration-150 hover:text-ink'
+            className='rp-focus flex items-center gap-1.5 rounded-[3px] px-1.5 py-1 text-xs text-ink-2 transition-colors duration-150 hover:text-[var(--rp-ink)]'
           >
             {watch.changed
               ? (
-                <span
-                  className='h-1.5 w-1.5 shrink-0 rounded-full'
-                  style={{ backgroundColor: 'var(--rp-accent)' }}
-                  aria-label='New results'
-                />
+                <>
+                  <span
+                    role='status'
+                    className='h-1.5 w-1.5 shrink-0 rounded-full'
+                    style={{ backgroundColor: 'var(--rp-accent)' }}
+                    aria-label='New results'
+                  />
+                  <span className='sr-only'>has new results</span>
+                </>
               )
               : null}
             <span className='max-w-[12rem] truncate'>{watch.query}</span>
@@ -315,7 +342,7 @@ function WatchStrip(
               onDelete(watch.id)
             }}
             aria-label={`Remove saved search "${watch.query}"`}
-            className='rp-focus flex h-6 w-6 shrink-0 items-center justify-center rounded-[3px] text-ink-3 transition-colors duration-150 hover:bg-[var(--rp-surface-2)] hover:text-ink'
+            className='rp-focus flex h-6 w-6 shrink-0 items-center justify-center rounded-[3px] text-ink-3 transition-colors duration-150 hover:bg-[var(--rp-surface-2)] hover:text-[var(--rp-ink)]'
           >
             <svg viewBox='0 0 20 20' fill='currentColor' aria-hidden='true' className='h-3 w-3'>
               <path d='M5.3 4.3l4.7 4.7 4.7-4.7 1 1L11 10l4.7 4.7-1 1L10 11l-4.7 4.7-1-1L9 10 4.3 5.3z' />
@@ -494,6 +521,8 @@ export function SearchPage() {
               role='combobox'
               aria-autocomplete='list'
               aria-expanded={typeahead.open}
+              aria-controls={typeahead.listboxId}
+              aria-activedescendant={typeahead.activeDescendant}
               className='min-w-0 flex-1 border-0 bg-transparent px-1.5 py-1.5 text-sm text-ink placeholder:text-[var(--rp-ink-3)] focus:outline-none'
             />
             <button type='submit' className='rp-btn rp-btn-primary shrink-0 font-semibold'>

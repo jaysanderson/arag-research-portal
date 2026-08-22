@@ -33,6 +33,8 @@ async function fetchText(url: string): Promise<{ body: string; contentType: stri
     headers: { 'user-agent': 'research-portal-crawler/1.0' },
     signal: AbortSignal.timeout(20_000),
   })
+  // A public URL may redirect anywhere - re-validate where we actually landed.
+  if (res.url) assertPublicHttpUrl(res.url)
   if (!res.ok) throw new Error(`The site responded with ${res.status}`)
   return { body: await res.text(), contentType: res.headers.get('content-type') ?? '' }
 }
@@ -72,7 +74,11 @@ export async function discoverLinks(
     for (const child of childSitemaps) {
       if (links.length >= cap) break
       try {
-        const { body: childBody } = await fetchText(child)
+        // Child sitemap URLs come from remote content - hold them to the same
+        // public-host, same-origin standard as the entry URL.
+        const childUrl = assertPublicHttpUrl(child)
+        if (childUrl.origin !== origin.origin) continue
+        const { body: childBody } = await fetchText(childUrl.href)
         extractLocs(childBody)
           .filter((l) => !/\.xml(\?|$)/i.test(l))
           .forEach(push)

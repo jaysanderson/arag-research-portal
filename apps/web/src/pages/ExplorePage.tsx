@@ -144,6 +144,8 @@ function Hero({
                 role='combobox'
                 aria-autocomplete='list'
                 aria-expanded={typeahead.open}
+                aria-controls={typeahead.listboxId}
+                aria-activedescendant={typeahead.activeDescendant}
                 className='min-w-0 flex-1 border-0 bg-transparent px-2 py-2 text-[0.95rem] text-ink placeholder:text-[var(--rp-ink-3)] focus:outline-none'
               />
               <button type='submit' className='rp-btn rp-btn-primary shrink-0 font-semibold'>

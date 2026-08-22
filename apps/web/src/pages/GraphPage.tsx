@@ -110,7 +110,7 @@ function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (mode: Mode) => 
 
   return (
     <div
-      role='tablist'
+      role='group'
       aria-label='Graph mode'
       className='inline-flex rounded-[calc(var(--rp-radius)+2px)] border border-line bg-surface-2 p-1'
     >
@@ -118,8 +118,7 @@ function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (mode: Mode) => 
         <button
           key={option.value}
           type='button'
-          role='tab'
-          aria-selected={mode === option.value}
+          aria-pressed={mode === option.value}
           onClick={() => onChange(option.value)}
           className={`rp-focus rounded-[var(--rp-radius)] px-3 py-1.5 text-sm font-medium transition-colors duration-150 ${
             mode === option.value
@@ -355,7 +354,11 @@ function ConceptGraph({
   return (
     <div className='mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]'>
       <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-4 shadow-sm'>
-        <div className='overflow-x-auto'>
+        <div
+          className='overflow-x-auto'
+          tabIndex={0}
+          aria-label='Knowledge graph canvas - scrollable'
+        >
           <svg
             viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
             className='h-auto w-full min-w-[640px]'
@@ -385,9 +388,9 @@ function ConceptGraph({
                     y1={from.y}
                     x2={to.x}
                     y2={to.y}
-                    stroke={touchesSelected ? 'var(--rp-accent)' : 'var(--rp-line)'}
+                    stroke={touchesSelected ? 'var(--rp-accent)' : 'var(--rp-ink-3)'}
                     strokeWidth={Math.max(1, (e.weight / maxEdgeWeight) * 4)}
-                    strokeOpacity={dimmed ? 0.08 : Math.max(0.2, e.weight / maxEdgeWeight)}
+                    strokeOpacity={dimmed ? 0.08 : Math.max(0.3, e.weight / maxEdgeWeight)}
                   />
                 )
               })}
@@ -401,14 +404,24 @@ function ConceptGraph({
                 const isNeighbour = neighbourIds.has(n.id)
                 const dimmed = selectedId !== null && !isSelected && !isNeighbour
                 const showLabel = isSelected || isNeighbour || n.weight >= maxWeight * 0.25
+                const selectNode = (event: { stopPropagation: () => void }) => {
+                  event.stopPropagation()
+                  setSelectedId(n.id)
+                }
                 return (
                   <g
                     key={n.id}
                     opacity={dimmed ? 0.2 : 1}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      setSelectedId(n.id)
+                    onClick={selectNode}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        selectNode(event)
+                      }
                     }}
+                    tabIndex={0}
+                    role='button'
+                    aria-label={`Select node ${n.label}`}
                     style={{ cursor: 'pointer' }}
                   >
                     <circle
@@ -423,7 +436,7 @@ function ConceptGraph({
                       <text
                         x={pos.x + r + 5}
                         y={pos.y + 4}
-                        fontSize={11}
+                        fontSize={13}
                         fill='var(--rp-ink-2)'
                         className='select-none'
                       >
@@ -504,7 +517,11 @@ function EntityGraph({ graph, slug }: { graph: RelationsGraph; slug: string }) {
   return (
     <div className='mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]'>
       <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-4 shadow-sm'>
-        <div className='overflow-x-auto'>
+        <div
+          className='overflow-x-auto'
+          tabIndex={0}
+          aria-label='Knowledge graph canvas - scrollable'
+        >
           <svg
             viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
             className='h-auto w-full min-w-[640px]'
@@ -593,14 +610,24 @@ function EntityGraph({ graph, slug }: { graph: RelationsGraph; slug: string }) {
                 const isNeighbour = neighbourIds.has(n.id)
                 const dimmed = selectedId !== null && !isSelected && !isNeighbour
                 const showLabel = isSelected || isNeighbour || n.weight >= maxWeight * 0.25
+                const selectNode = (event: { stopPropagation: () => void }) => {
+                  event.stopPropagation()
+                  setSelectedId(n.id)
+                }
                 return (
                   <g
                     key={n.id}
                     opacity={dimmed ? 0.2 : 1}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      setSelectedId(n.id)
+                    onClick={selectNode}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        selectNode(event)
+                      }
                     }}
+                    tabIndex={0}
+                    role='button'
+                    aria-label={`Select node ${n.id}`}
                     style={{ cursor: 'pointer' }}
                   >
                     <circle
@@ -615,7 +642,7 @@ function EntityGraph({ graph, slug }: { graph: RelationsGraph; slug: string }) {
                       <text
                         x={pos.x + r + 5}
                         y={pos.y + 4}
-                        fontSize={11}
+                        fontSize={13}
                         fill='var(--rp-ink-2)'
                         className='select-none'
                       >
@@ -748,7 +775,7 @@ export function GraphPage() {
         <div className='mt-8'>
           <EmptyState
             title='No extracted relations yet'
-            description='The knowledge graph agent may still be working through the corpus, or needs to be implemented in Manage.'
+            description="The knowledge graph agent may still be working through the corpus, or hasn't been set up yet - configure it from Manage."
           >
             <Link to='../manage' className='rp-btn rp-btn-primary'>
               Go to Manage

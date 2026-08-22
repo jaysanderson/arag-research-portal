@@ -649,6 +649,7 @@ export function ResourceDetailPage() {
                       <AnswerStream
                         slug={config.slug}
                         request={{ query: askQuery, resourceId: resource.id }}
+                        onRetry={() => setAskQuery(askQuery)}
                       />
                     </div>
                   )

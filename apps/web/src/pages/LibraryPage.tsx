@@ -167,6 +167,7 @@ function SummaryModal({
   onRetry: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -181,6 +182,16 @@ function SummaryModal({
     document.body.style.overflow = 'hidden'
     return () => {
       document.body.style.overflow = previous
+    }
+  }, [])
+
+  // Move focus into the dialog on open, and give it back to whatever
+  // triggered it once the dialog closes.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    dialogRef.current?.focus()
+    return () => {
+      previouslyFocused?.focus()
     }
   }, [])
 
@@ -201,6 +212,8 @@ function SummaryModal({
       }}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         role='dialog'
         aria-modal='true'
         aria-label='Summary'
@@ -272,21 +285,31 @@ function useResourceSummary(slug: string) {
   const [summary, setSummary] = useState('')
   const [titles, setTitles] = useState<string[]>([])
   const lastRequest = useRef<{ ids: string[]; kind: 'simple' | 'extended' } | null>(null)
+  // A slower earlier request must never overwrite a newer one.
+  const requestSeq = useRef(0)
 
   const run = useCallback(
     (ids: string[], resourceTitles: string[], kind: 'simple' | 'extended' = 'simple') => {
       lastRequest.current = { ids, kind }
+      const requestId = ++requestSeq.current
       setTitles(resourceTitles)
       setOpen(true)
       setLoading(true)
       setError(null)
       setSummary('')
       summarizeResources(slug, ids, kind)
-        .then((res) => setSummary(res.summary))
-        .catch((err) =>
+        .then((res) => {
+          if (requestId !== requestSeq.current) return
+          setSummary(res.summary)
+        })
+        .catch((err) => {
+          if (requestId !== requestSeq.current) return
           setError(err instanceof Error ? err.message : 'Could not generate a summary.')
-        )
-        .finally(() => setLoading(false))
+        })
+        .finally(() => {
+          if (requestId !== requestSeq.current) return
+          setLoading(false)
+        })
     },
     [slug],
   )
@@ -577,7 +600,11 @@ export function LibraryPage() {
           {!isInitialLoading && !isError && accumulated.length > 0
             ? (
               <>
-                <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'>
+                <div
+                  className={`grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 ${
+                    selecting ? 'pb-24' : ''
+                  }`}
+                >
                   {accumulated.map((item) => (
                     <LibraryCard
                       key={item.id}

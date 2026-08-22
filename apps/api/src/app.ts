@@ -1,5 +1,4 @@
 import { type Context, Hono } from 'hono'
-import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
 import { z } from 'zod'
 import { GenerateKindSchema } from '@research-portal/core'
@@ -84,10 +83,17 @@ const generateBodySchema = z.object({
   kind: GenerateKindSchema,
   query: z.string().min(3).max(2000),
 })
+const hexColour = z.string().regex(/^#[0-9a-fA-F]{6}$/)
 const renameTenantSchema = z.object({
   name: z.string().min(2).max(60).optional(),
   organisation: z.string().min(1).max(120).optional(),
   tagline: z.string().min(1).max(160).optional(),
+  colours: z.object({
+    primary: hexColour,
+    accent: hexColour,
+    heroFrom: hexColour,
+    heroTo: hexColour,
+  }).optional(),
 })
 const kgImplementSchema = z.object({
   applyExisting: z.boolean(),
@@ -139,7 +145,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
   const clientId = (c: Context): string => c.req.header('x-rp-client') ?? 'anonymous'
   const app = new Hono()
 
-  app.use('/api/*', cors({ origin: (origin) => origin }))
+  // The SPA is served same-origin; no cross-origin API access is needed.
 
   app.onError((err, c) => {
     if (err instanceof KnowledgeBoxNotConnectedError) {
@@ -150,6 +156,17 @@ export function buildApp(opts: BuildAppOptions): Hono {
   })
 
   const tenant = (slug: string): TenantConfig | undefined => tenants.get(slug)
+
+  /** Streamed errors must never carry internal URLs, box ids or upstream bodies. */
+  const publicErrorMessage = (err: unknown): string => {
+    if (err instanceof KnowledgeBoxNotConnectedError) {
+      return 'This portal is not connected to its content yet.'
+    }
+    const message = err instanceof Error ? err.message : ''
+    const status = /Agentic RAG API (\d+)/.exec(message)?.[1]
+    if (status) return `The answer service had a problem (HTTP ${status}) - please try again.`
+    return 'The answer service had a problem - please try again.'
+  }
 
   app.get('/api/tenants', (c) => c.json(tenants.list()))
 
@@ -230,8 +247,11 @@ export function buildApp(opts: BuildAppOptions): Hono {
     const orderRaw = c.req.query('order')
     return c.json(
       await provider.catalog(config, {
-        page: Number(c.req.query('page') ?? 0) || 0,
-        pageSize: Math.min(Number(c.req.query('pageSize') ?? 24) || 24, 100),
+        page: Math.max(0, Math.floor(Number(c.req.query('page') ?? 0) || 0)),
+        pageSize: Math.min(
+          Math.max(1, Math.floor(Number(c.req.query('pageSize') ?? 24) || 24)),
+          100,
+        ),
         query: c.req.query('q') || undefined,
         topicIds: (c.req.query('topics') ?? '').split(',').filter(Boolean),
         sortField: sortRaw === 'modified' || sortRaw === 'title' ? sortRaw : 'created',
@@ -481,6 +501,13 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (!parsed.success || parsed.data.id !== c.req.param('id')) {
       return c.json({ error: 'invalid_request' }, 400)
     }
+    if (JSON.stringify(parsed.data).length > 2 * 1024 * 1024) {
+      return c.json({ error: 'session_too_large' }, 413)
+    }
+    const existing = sessions.list(config.slug, clientId(c))
+    if (existing.length >= 200 && !existing.some((s) => s.id === parsed.data.id)) {
+      return c.json({ error: 'too_many_sessions' }, 429)
+    }
     sessions.put(config.slug, clientId(c), parsed.data)
     return c.json({ ok: true })
   })
@@ -511,7 +538,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
   app.post('/api/t/:slug/watches/:id/seen', (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
-    watches.update(config.slug, c.req.param('id'), { changed: false })
+    watches.update(config.slug, c.req.param('id'), { changed: false }, clientId(c))
     return c.json({ ok: true })
   })
 
@@ -587,7 +614,15 @@ export function buildApp(opts: BuildAppOptions): Hono {
   // KB id and service-account token in the app; both stay server-side. When
   // ADMIN_PASSCODE is configured every admin call must present it.
   app.use('/api/admin/*', async (c, next) => {
-    if (opts.adminPasscode && c.req.header('x-admin-passcode') !== opts.adminPasscode) {
+    // Fail closed: with no passcode configured the admin surface is disabled,
+    // never open. Local dev sets ADMIN_PASSCODE in .env.
+    if (!opts.adminPasscode) {
+      return c.json({
+        error: 'admin_disabled',
+        message: 'Administration is not configured on this server - set ADMIN_PASSCODE.',
+      }, 503)
+    }
+    if (c.req.header('x-admin-passcode') !== opts.adminPasscode) {
       return c.json({ error: 'unauthorised' }, 401)
     }
     await next()
@@ -778,6 +813,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
     const parsed = renameTenantSchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
     tenants.patchBranding(config.slug, {
+      ...(parsed.data.colours ? { colours: parsed.data.colours } : {}),
       productName: parsed.data.name,
       organisation: parsed.data.organisation,
       tagline: parsed.data.tagline,
@@ -1153,6 +1189,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
         groundedness: null as number | null,
         contextRelevance: null as number | null,
         failed: false,
+        refused: false,
       }
       try {
         for await (
@@ -1170,6 +1207,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
             record.contextRelevance = event.contextRelevance
           }
           if (event.type === 'error') record.failed = true
+          if (event.type === 'done' && event.refused) record.refused = true
           if (!interpretedSent && interpreted) {
             interpretedSent = true
             await stream.writeSSE({
@@ -1180,14 +1218,15 @@ export function buildApp(opts: BuildAppOptions): Hono {
         }
       } catch (err) {
         record.failed = true
-        const message = err instanceof Error ? err.message : 'unknown_error'
-        await stream.writeSSE({ data: JSON.stringify({ type: 'error', message }) })
+        await stream.writeSSE({
+          data: JSON.stringify({ type: 'error', message: publicErrorMessage(err) }),
+        })
       }
       try {
         insights.record(config.slug, {
           ts: new Date().toISOString(),
           question: query.slice(0, 500),
-          answered: !record.failed && record.citations > 0,
+          answered: !record.failed && !record.refused && record.citations > 0,
           citations: record.citations,
           durationSec: record.durationSec,
           answerRelevance: record.answerRelevance,

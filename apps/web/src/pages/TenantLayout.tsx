@@ -169,7 +169,7 @@ export function TenantLayout() {
                 <Link
                   to='/admin'
                   className='rp-badge rp-badge-warn rp-focus'
-                  title='This portal is running on the demo knowledge box - click to connect the real one'
+                  title='This portal is running on demonstration content - click to connect the real one'
                 >
                   Demo only
                 </Link>

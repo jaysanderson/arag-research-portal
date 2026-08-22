@@ -57,10 +57,10 @@ function VisibilityControl({
         disabled={busy}
         onClick={() => void toggle()}
         className='text-xs font-medium text-ink-3 transition-colors duration-150 hover:text-[var(--rp-ink)]'
-        title={error ?? undefined}
       >
         {busy ? '…' : resource.hidden ? 'Publish' : 'Hide'}
       </button>
+      {error && <span className='text-xs text-[var(--rp-bad-ink)]'>{error}</span>}
     </span>
   )
 }

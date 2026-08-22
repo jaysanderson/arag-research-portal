@@ -22,6 +22,7 @@ import {
 } from '../api/client.ts'
 import { citationHref, ContextJourney } from '../components/AnswerStream.tsx'
 import { type QualityScores, TrustSignals } from '../components/QualityGauge.tsx'
+import { LiveStatus } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
 // ---------------------------------------------------------------------------
@@ -156,9 +157,19 @@ function loadSessions(slug: string): ChatSession[] {
   }
 }
 
-function saveSessions(slug: string, sessions: ChatSession[]) {
+function saveSessions(slug: string, sessions: ChatSession[], deletedIds?: Set<string>) {
   try {
-    localStorage.setItem(storageKey(slug), JSON.stringify(sessions.slice(0, SESSION_CAP)))
+    // Merge with what is currently stored: another tab may have added or
+    // updated sessions since this tab mounted. In-memory wins for ids we
+    // hold; stored-only ids are kept unless this tab deleted them.
+    const stored = loadSessions(slug)
+    const mine = new Map(sessions.map((s) => [s.id, s]))
+    const merged = [
+      ...sessions,
+      ...stored.filter((s) => !mine.has(s.id) && !(deletedIds?.has(s.id))),
+    ]
+    merged.sort((a, b) => b.updatedAt - a.updatedAt)
+    localStorage.setItem(storageKey(slug), JSON.stringify(merged.slice(0, SESSION_CAP)))
   } catch {
     // localStorage unavailable or full - sessions simply won't persist this run.
   }
@@ -550,7 +561,7 @@ function AssistantCard({
   onFeedback: (good: boolean, text?: string) => Promise<boolean>
   onReanswerDeeply: () => void
 }) {
-  if (message.error) {
+  if (message.error && !message.text.trim()) {
     return (
       <div
         className='rounded-[calc(var(--rp-radius)+4px)] border p-5'
@@ -565,11 +576,14 @@ function AssistantCard({
     )
   }
 
-  // Only offer the deep re-answer when the original ask was not already deep.
+  // Only offer the deep re-answer when the original ask was not already deep,
+  // and only for genuinely weak answers - REMi grades some corpora harshly, so
+  // a well-cited answer at 2/5 should not carry an amber warning.
+  const groundedness = message.quality?.groundedness
+  const citationCount = message.citations?.length ?? 0
   const isThinlyGrounded = !message.pending && !message.healDismissed && !message.wasDeep &&
-    !message.deepBadge &&
-    message.quality?.groundedness !== null && message.quality?.groundedness !== undefined &&
-    message.quality.groundedness <= 2
+    !message.deepBadge && groundedness !== null && groundedness !== undefined &&
+    (groundedness <= 1 || (groundedness <= 2 && citationCount <= 1))
 
   return (
     <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-5 shadow-sm'>
@@ -648,6 +662,26 @@ function AssistantCard({
                 )
               })}
             </div>
+          </div>
+        )
+        : null}
+
+      {message.error && message.text.trim()
+        ? (
+          <div
+            className='mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[var(--rp-radius)] border p-3'
+            style={{ borderColor: 'var(--rp-bad-line)', background: 'var(--rp-bad-bg)' }}
+          >
+            <p className='text-xs text-[var(--rp-bad-ink)]'>
+              The answer was cut short - {message.error}
+            </p>
+            <button
+              type='button'
+              onClick={onRetry}
+              className='rp-btn rp-btn-outline h-7 shrink-0 px-2 text-xs'
+            >
+              Retry
+            </button>
           </div>
         )
         : null}
@@ -818,7 +852,13 @@ export function AssistantPage() {
   const [deepResearch, setDeepResearch] = useState(false)
 
   const abortRef = useRef<AbortController | null>(null)
+  /** Sessions deleted in THIS tab - saveSessions must not resurrect them. */
+  const deletedIdsRef = useRef(new Set<string>())
+
+  // Leaving the page cancels any in-flight answer stream.
+  useEffect(() => () => abortRef.current?.abort(), [])
   const threadEndRef = useRef<HTMLDivElement | null>(null)
+  const sidebarDrawerRef = useRef<HTMLDivElement | null>(null)
   // Guards the `?ask=` handoff from Explore against a double-send (React 18
   // Strict Mode replays effects) and resets whenever the tenant changes.
   const askHandledRef = useRef(false)
@@ -854,6 +894,18 @@ export function AssistantPage() {
     }, 1500)
     timers.set(session.id, timer)
   }
+
+  // The mobile sessions drawer is a dialog: Escape closes it, and focus
+  // moves into it on open so keyboard users land in the right place.
+  useEffect(() => {
+    if (!showSidebar) return
+    sidebarDrawerRef.current?.focus()
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setShowSidebar(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [showSidebar])
 
   // Re-load sessions if the tenant slug changes, then merge in any
   // server-side sessions this browser doesn't have locally yet (or that are
@@ -901,7 +953,7 @@ export function AssistantPage() {
           }
           const merged = [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt)
             .slice(0, SESSION_CAP)
-          saveSessions(config.slug, merged)
+          saveSessions(config.slug, merged, deletedIdsRef.current)
           return merged
         })
       } catch {
@@ -948,22 +1000,25 @@ export function AssistantPage() {
         : { id: sessionId, createdAt: now, updatedAt: now, messages: nextMessages }
       const rest = prev.filter((session) => session.id !== sessionId)
       const next = [updatedSession, ...rest].slice(0, SESSION_CAP)
-      saveSessions(config.slug, next)
+      saveSessions(config.slug, next, deletedIdsRef.current)
       scheduleServerSync(updatedSession)
       return next
     })
   }
 
   function startNewSession() {
+    if (isStreaming) return
     setActiveSessionId(null)
     setMessages([])
     setShowSidebar(false)
   }
 
   function deleteSession(id: string) {
+    if (isStreaming) return
+    deletedIdsRef.current.add(id)
     setSessions((prev) => {
       const next = prev.filter((session) => session.id !== id)
-      saveSessions(config.slug, next)
+      saveSessions(config.slug, next, deletedIdsRef.current)
       return next
     })
     const timer = syncTimersRef.current.get(id)
@@ -981,6 +1036,7 @@ export function AssistantPage() {
   }
 
   function selectSession(id: string) {
+    if (isStreaming) return
     const session = sessions.find((item) => item.id === id)
     if (!session) return
     setActiveSessionId(id)
@@ -1138,12 +1194,21 @@ export function AssistantPage() {
       // ask (depth only, no prequeries) - deep research never blocks on this.
       setIsStreaming(true)
       setActiveStageLabel('Mapping the research space…')
+      // Stop must work during this phase too - give it a controller before
+      // the sub-question call, and bail out if the user aborted meanwhile.
+      const mappingController = new AbortController()
+      abortRef.current = mappingController
       let subqueries: string[] = []
       try {
         const result = await getSubqueries(config.slug, trimmed)
         subqueries = Array.isArray(result.questions) ? result.questions : []
       } catch {
         subqueries = []
+      }
+      if (mappingController.signal.aborted) {
+        setIsStreaming(false)
+        setActiveStageLabel(null)
+        return
       }
       if (subqueries.length > 0) {
         baseMessages = baseMessages.map((message) =>
@@ -1251,11 +1316,17 @@ export function AssistantPage() {
   }
 
   const isEmpty = messages.length === 0
+  const lastMessage = messages[messages.length - 1]
+  const liveMessage = isStreaming
+    ? 'Answer in progress'
+    : lastMessage?.author === 'AGENT' && !lastMessage.pending
+    ? 'Answer complete'
+    : ''
 
   return (
     <main
       aria-label='Research assistant'
-      className='mx-auto flex h-[calc(100vh-65px)] max-w-6xl flex-col gap-3 px-4 py-4 sm:px-6 sm:py-6 lg:flex-row lg:gap-6'
+      className='mx-auto flex h-[calc(100dvh-65px)] max-w-6xl flex-col gap-3 px-4 py-4 sm:px-6 sm:py-6 lg:flex-row lg:gap-6'
     >
       <div className='flex shrink-0 items-center justify-between lg:hidden'>
         <button
@@ -1282,14 +1353,23 @@ export function AssistantPage() {
 
       {showSidebar
         ? (
-          <div className='fixed inset-0 z-40 flex lg:hidden'>
+          <div
+            role='dialog'
+            aria-modal='true'
+            aria-label='Sessions'
+            className='fixed inset-0 z-40 flex lg:hidden'
+          >
             <button
               type='button'
               aria-label='Close sessions'
               onClick={() => setShowSidebar(false)}
               className='flex-1 bg-black/30'
             />
-            <div className='h-full w-72 max-w-[80vw] bg-surface-2 p-3 shadow-xl'>
+            <div
+              ref={sidebarDrawerRef}
+              tabIndex={-1}
+              className='h-full w-72 max-w-[80vw] bg-surface-2 p-3 shadow-xl'
+            >
               <SessionList
                 sessions={sessions}
                 activeSessionId={activeSessionId}
@@ -1306,7 +1386,7 @@ export function AssistantPage() {
         {!isEmpty
           ? (
             <div className='mb-2 flex shrink-0 items-center justify-between gap-2'>
-              <p className='rp-clamp-1 text-sm font-medium text-ink-2'>
+              <p className='min-w-0 truncate text-sm font-medium text-ink-2'>
                 {sessionTitle({ id: '', createdAt: 0, updatedAt: 0, messages })}
               </p>
               <button
@@ -1319,6 +1399,8 @@ export function AssistantPage() {
             </div>
           )
           : null}
+
+        <LiveStatus message={liveMessage} />
 
         <section
           aria-label='Conversation'
@@ -1426,7 +1508,7 @@ export function AssistantPage() {
               disabled={isStreaming}
               rows={1}
               placeholder={config.searchPlaceholder}
-              className='max-h-40 min-w-0 flex-1 resize-none rounded-[var(--rp-radius)] border-0 bg-transparent px-3 py-2 text-sm text-ink placeholder:text-ink-3 focus:outline-none disabled:opacity-60'
+              className='max-h-40 min-w-0 flex-1 resize-none rounded-[var(--rp-radius)] border-0 bg-transparent px-3 py-2 text-sm text-ink placeholder:text-[var(--rp-ink-3)] focus:outline-none disabled:opacity-60'
             />
             {isStreaming
               ? (

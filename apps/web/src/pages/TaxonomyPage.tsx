@@ -121,6 +121,7 @@ function AddLabelsetCard({
           <div className='inline-flex rounded-[var(--rp-radius)] border border-line bg-surface p-1'>
             <button
               type='button'
+              aria-pressed={!multiple}
               onClick={() => setMultiple(false)}
               className={`rounded-[calc(var(--rp-radius)-2px)] px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
                 !multiple
@@ -132,6 +133,7 @@ function AddLabelsetCard({
             </button>
             <button
               type='button'
+              aria-pressed={multiple}
               onClick={() => setMultiple(true)}
               className={`rounded-[calc(var(--rp-radius)-2px)] px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
                 multiple

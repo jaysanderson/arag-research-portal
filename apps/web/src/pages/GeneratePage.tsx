@@ -24,7 +24,7 @@ const KINDS: KindMeta[] = [
     label: 'Comparison',
     placeholder: 'e.g. Compare controlled traffic farming with conventional tillage',
     description:
-      'A side-by-side matrix that scores a handful of options against the dimensions that matter, grounded in the knowledge box.',
+      "A side-by-side matrix that scores a handful of options against the dimensions that matter, grounded in the portal's content.",
   },
   {
     id: 'briefing',
@@ -311,12 +311,12 @@ function ProsConsView({ data }: { data: ProsConsObject }) {
             {data.pros.map((p, i) => (
               <li key={i}>
                 <p className='text-sm font-medium text-[var(--rp-ok-ink)]'>{p.point}</p>
-                <p className='mt-0.5 text-sm text-[var(--rp-ok-ink)] opacity-80'>{p.rationale}</p>
+                <p className='mt-0.5 text-sm text-[var(--rp-ok-ink)]'>{p.rationale}</p>
               </li>
             ))}
           </ul>
           {data.pros.length === 0 && (
-            <p className='mt-3 text-sm text-[var(--rp-ok-ink)] opacity-70'>
+            <p className='mt-3 text-sm text-ink-3'>
               None found.
             </p>
           )}
@@ -329,13 +329,11 @@ function ProsConsView({ data }: { data: ProsConsObject }) {
             {data.cons.map((c, i) => (
               <li key={i}>
                 <p className='text-sm font-medium text-[var(--rp-bad-ink)]'>{c.point}</p>
-                <p className='mt-0.5 text-sm text-[var(--rp-bad-ink)] opacity-80'>{c.rationale}</p>
+                <p className='mt-0.5 text-sm text-[var(--rp-bad-ink)]'>{c.rationale}</p>
               </li>
             ))}
           </ul>
-          {data.cons.length === 0 && (
-            <p className='mt-3 text-sm text-[var(--rp-bad-ink)] opacity-70'>None found.</p>
-          )}
+          {data.cons.length === 0 && <p className='mt-3 text-sm text-ink-3'>None found.</p>}
         </div>
       </div>
     </div>
@@ -422,16 +420,27 @@ function AssessmentQuiz({ data }: { data: AssessmentObject }) {
                   cls = ''
                   optStyle = { borderColor: 'var(--rp-ink)' }
                 }
+                const answerHint = submitted
+                  ? isChosen && isCorrect
+                    ? ' - your answer, correct'
+                    : isChosen
+                    ? ' - your answer, incorrect'
+                    : isCorrect
+                    ? ' - correct answer'
+                    : null
+                  : null
                 return (
                   <button
                     key={oi}
                     type='button'
                     disabled={submitted}
+                    aria-pressed={isChosen}
                     onClick={() => setSelected((prev) => ({ ...prev, [qi]: oi }))}
                     style={optStyle}
                     className={`block w-full rounded-[var(--rp-radius)] border px-4 py-2.5 text-left text-sm transition-colors duration-150 disabled:cursor-default ${cls}`}
                   >
                     {opt}
+                    {answerHint && <span className='sr-only'>{answerHint}</span>}
                   </button>
                 )
               })}
@@ -818,7 +827,7 @@ export function GeneratePage() {
     <main className='mx-auto max-w-4xl px-6 py-10'>
       <h1 className='text-2xl font-semibold tracking-tight text-ink'>Generate</h1>
       <p className='mt-1 text-sm text-ink-3'>
-        Schema-enforced research artifacts, grounded in the knowledge box.
+        Schema-enforced research artifacts, grounded in the portal's content.
       </p>
 
       <div className='rp-no-scrollbar mt-6 flex items-center gap-1 overflow-x-auto whitespace-nowrap rounded-[var(--rp-radius)] border border-line bg-surface p-1'>
@@ -826,6 +835,7 @@ export function GeneratePage() {
           <button
             key={k.id}
             type='button'
+            aria-pressed={kind === k.id}
             onClick={() => selectKind(k.id)}
             className={`shrink-0 rounded-[calc(var(--rp-radius)-2px)] px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ${
               kind === k.id

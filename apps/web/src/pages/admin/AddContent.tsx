@@ -323,6 +323,7 @@ export function AddContent({
               <button
                 key={t.id}
                 type='button'
+                aria-pressed={tab === t.id}
                 onClick={() => {
                   setTab(t.id)
                   setMessage(null)

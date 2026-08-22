@@ -38,20 +38,37 @@ export class ApiError extends Error {
   }
 }
 
+/** Human-readable fallbacks for the API's machine error codes. */
+const ERROR_COPY: Record<string, string> = {
+  knowledge_box_not_connected:
+    'This portal is not connected to its content yet - an administrator can connect it from Administration.',
+  unknown_tenant: 'This portal does not exist or has been removed.',
+  management_unavailable: 'The content service is not available right now - try again shortly.',
+  summarize_failed: 'The summary could not be generated - try fewer documents or try again.',
+  empty_summary: 'The platform returned an empty summary - try different documents.',
+  feedback_failed: 'The feedback could not be sent - try again shortly.',
+  internal_error: 'Something went wrong on our side - try again shortly.',
+  invalid_request: 'The request was not valid - check the details and try again.',
+  invalid_query: 'The request was not valid - check the details and try again.',
+}
+
+function friendlyError(body: unknown, fallback: string): string {
+  if (body && typeof body === 'object') {
+    const record = body as { message?: unknown; error?: unknown }
+    if (typeof record.message === 'string' && record.message.trim()) return record.message
+    if (typeof record.error === 'string') {
+      return ERROR_COPY[record.error] ?? fallback
+    }
+  }
+  return fallback
+}
+
 async function request<T>(path: string): Promise<T> {
   const res = await fetch(path)
 
   if (!res.ok) {
-    let message = res.statusText || 'Request failed'
-    try {
-      const body: unknown = await res.json()
-      if (body && typeof body === 'object' && 'error' in body && typeof body.error === 'string') {
-        message = body.error
-      }
-    } catch {
-      // Body wasn't JSON - fall back to statusText.
-    }
-    throw new ApiError(res.status, message)
+    const body: unknown = await res.json().catch(() => null)
+    throw new ApiError(res.status, friendlyError(body, res.statusText || 'Request failed'))
   }
 
   return (await res.json()) as T
@@ -204,7 +221,11 @@ export async function streamAsk(
     const line = frame.trim()
     if (!line) return
     const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
-    onEvent(JSON.parse(data) as AskEvent)
+    try {
+      onEvent(JSON.parse(data) as AskEvent)
+    } catch {
+      // A truncated trailing frame (dropped connection) is not an event.
+    }
   }
   for (;;) {
     const { done, value } = await reader.read()
@@ -394,7 +415,11 @@ export async function migrateKb(
     const line = frame.trim()
     if (!line) return
     const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
-    onEvent(JSON.parse(data) as MigrationEvent)
+    try {
+      onEvent(JSON.parse(data) as MigrationEvent)
+    } catch {
+      // A truncated trailing frame (dropped connection) is not an event.
+    }
   }
 
   for (;;) {
@@ -482,7 +507,11 @@ export async function analysePortal(
     const line = frame.trim()
     if (!line) return
     const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
-    onEvent(JSON.parse(data) as AnalyseEvent)
+    try {
+      onEvent(JSON.parse(data) as AnalyseEvent)
+    } catch {
+      // A truncated trailing frame (dropped connection) is not an event.
+    }
   }
   for (;;) {
     const { done, value } = await reader.read()
@@ -577,7 +606,11 @@ export async function implementKg(
     const line = frame.trim()
     if (!line) return
     const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
-    onEvent(JSON.parse(data) as KgImplementEvent)
+    try {
+      onEvent(JSON.parse(data) as KgImplementEvent)
+    } catch {
+      // A truncated trailing frame (dropped connection) is not an event.
+    }
   }
   for (;;) {
     const { done, value } = await reader.read()
@@ -681,11 +714,7 @@ async function clientRequest<T>(path: string, init?: RequestInit): Promise<T> {
   })
   const body: unknown = await res.json().catch(() => null)
   if (!res.ok) {
-    const message = body && typeof body === 'object' && 'error' in body &&
-        typeof (body as { error: unknown }).error === 'string'
-      ? (body as { error: string }).error
-      : 'Request failed'
-    throw new ApiError(res.status, message)
+    throw new ApiError(res.status, friendlyError(body, 'Request failed'))
   }
   return body as T
 }
@@ -847,7 +876,11 @@ export async function streamEstateAsk(
     const line = frame.trim()
     if (!line) return
     const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
-    onEvent(JSON.parse(data) as EstateEvent)
+    try {
+      onEvent(JSON.parse(data) as EstateEvent)
+    } catch {
+      // A truncated trailing frame (dropped connection) is not an event.
+    }
   }
   for (;;) {
     const { done, value } = await reader.read()
@@ -969,7 +1002,11 @@ export async function syncSource(
     const line = frame.trim()
     if (!line) return
     const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
-    onEvent(JSON.parse(data) as SourceSyncEvent)
+    try {
+      onEvent(JSON.parse(data) as SourceSyncEvent)
+    } catch {
+      // A truncated trailing frame (dropped connection) is not an event.
+    }
   }
   for (;;) {
     const { done, value } = await reader.read()

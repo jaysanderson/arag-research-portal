@@ -489,13 +489,30 @@ export class AragProvider implements RetrievalProvider {
    * primary filter become edges. N+1 catalog calls, so primaries are capped.
    */
   async graphData(tenant: TenantConfig, primary: string, secondary: string): Promise<GraphData> {
-    const primaryCounts = (await this.facets(tenant, [primary]))[primary] ?? {}
+    const [primaryCountsAll, labelsets] = await Promise.all([
+      this.facets(tenant, [primary]),
+      this.labelsets(tenant).catch(() => []),
+    ])
+    // Facet keys are label slugs - show the labelset's display title instead.
+    const displayTitle = new Map<string, string>()
+    for (const ls of labelsets) {
+      for (const label of ls.labels) {
+        displayTitle.set(
+          label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+          label,
+        )
+      }
+    }
+    const pretty = (slug: string) =>
+      displayTitle.get(slug) ??
+        slug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+    const primaryCounts = primaryCountsAll[primary] ?? {}
     const primaries = Object.entries(primaryCounts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 14)
     const nodes: GraphData['nodes'] = primaries.map(([label, weight]) => ({
       id: `${primary}:${label}`,
-      label,
+      label: pretty(label),
       group: 'primary',
       weight,
     }))
@@ -518,7 +535,7 @@ export class AragProvider implements RetrievalProvider {
       }
     }
     for (const [label, weight] of secondaryTotals) {
-      nodes.push({ id: `${secondary}:${label}`, label, group: 'secondary', weight })
+      nodes.push({ id: `${secondary}:${label}`, label: pretty(label), group: 'secondary', weight })
     }
     return { primary, secondary, nodes, edges }
   }
@@ -812,9 +829,13 @@ export class AragProvider implements RetrievalProvider {
       }>(
         `/suggest?query=${encodeURIComponent(query)}&features=entities&features=paragraph`,
       )
+      // The graph agent occasionally extracts vague time/direction words as
+      // entities - keep suggestions to substantive names.
+      const NOISE =
+        /^(recent|early|late|last|next|this|coming|current|previous)\b|^(north|south|east|west)$|^(january|february|march|april|may|june|july|august|september|october|november|december)\b|^\d{1,4}$/i
       const entities = (raw.entities?.entities ?? [])
-        .map((e) => e.value ?? '')
-        .filter(Boolean)
+        .map((e) => (e.value ?? '').trim())
+        .filter((v) => v.length > 2 && !NOISE.test(v) && !v.includes('\n'))
         .slice(0, 6)
       const seen = new Set<string>()
       const titles: string[] = []
@@ -1147,6 +1168,17 @@ export class AragProvider implements RetrievalProvider {
     // streams; retry up to 3 times then, but never after output has started.
     const MAX_ATTEMPTS = 3
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      // A retried attempt starts clean - no half-accumulated answer, contexts
+      // or citations from the failed one.
+      if (attempt > 1) {
+        sources = []
+        contextTexts.length = 0
+        fullAnswer = ''
+        refusalPossible = true
+        generating = false
+        citationIndex = 0
+        cited.clear()
+      }
       try {
         const res = await client.postStream('/ask', body, { 'x-show-consumption': 'true' })
         const learningId = res.headers.get('nuclia-learning-id')
@@ -1175,7 +1207,14 @@ export class AragProvider implements RetrievalProvider {
             // if that is all the model produced.
             if (refusalPossible) {
               const lowered = fullAnswer.trim().toLowerCase()
-              if (REFUSAL.startsWith(lowered) || lowered.startsWith(REFUSAL)) {
+              // Keep buffering while the text is still a prefix of the
+              // guardrail sentence, or is the full sentence with only a few
+              // trailing characters - but the moment real content follows it,
+              // release everything (the model refused then kept going).
+              if (
+                REFUSAL.startsWith(lowered) ||
+                (lowered.startsWith(REFUSAL) && lowered.length <= REFUSAL.length + 12)
+              ) {
                 continue
               }
               refusalPossible = false
@@ -1210,15 +1249,17 @@ export class AragProvider implements RetrievalProvider {
             return
           }
         }
+        let refused = false
         if (refusalPossible && fullAnswer.trim()) {
           // The model produced only the guardrail sentence - replace it with
           // guidance the reader can act on.
+          refused = true
           fullAnswer = ''
           yield {
             type: 'delta',
-            text: 'The knowledge box does not hold enough relevant material to answer this ' +
+            text: "This portal's content does not hold enough relevant material to answer this " +
               'confidently. Try rephrasing the question, narrowing it to a topic, or browsing ' +
-              'the Library to see what the corpus covers.',
+              'the Library to see what it covers.',
           }
         }
         yield { type: 'stage', stage: 'generating', status: 'completed' }
@@ -1228,21 +1269,25 @@ export class AragProvider implements RetrievalProvider {
         // never held hostage by the scorer.
         if (fullAnswer.trim() && contextTexts.length > 0) {
           try {
+            let capTimer: ReturnType<typeof setTimeout> | undefined
             const quality = await Promise.race([
               this.remi(tenant, {
                 question: query,
                 answer: fullAnswer,
                 contexts: contextTexts,
               }),
-              new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000)),
+              new Promise<null>((resolve) => {
+                capTimer = setTimeout(() => resolve(null), 12000)
+              }),
             ])
+            clearTimeout(capTimer)
             if (quality) yield { type: 'quality', ...quality }
           } catch {
             // scoring unavailable - skip silently
           }
         }
         yield { type: 'stage', stage: 'validating', status: 'completed' }
-        yield { type: 'done' }
+        yield { type: 'done', refused }
         return
       } catch (err) {
         const status = err instanceof AragApiError ? err.status : 0

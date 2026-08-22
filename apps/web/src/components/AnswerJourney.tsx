@@ -325,6 +325,14 @@ export function AnswerJourney({
         onClose()
         return
       }
+
+      // Don't swallow keys a focused control needs for its own behaviour -
+      // Space/Enter to activate a button, arrow keys inside an input, etc.
+      const target = event.target as HTMLElement | null
+      if (target?.closest('button, input, textarea, select, a[href]')) {
+        return
+      }
+
       if (event.key === 'ArrowRight') {
         event.preventDefault()
         event.stopPropagation()

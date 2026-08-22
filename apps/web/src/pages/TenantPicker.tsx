@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import type { TenantSummary } from '@research-portal/core'
 import { type EstateEvent, getTenants, streamEstateAsk } from '../api/client.ts'
-import { EmptyState, ErrorCard, Skeleton } from '../components/ui.tsx'
+import { EmptyState, ErrorCard, LiveStatus, Skeleton } from '../components/ui.tsx'
 import { ThemeToggle } from '../components/ThemeToggle.tsx'
 import { TrustSignals } from '../components/QualityGauge.tsx'
 
@@ -96,6 +96,7 @@ function EstateAsk({ tenants }: { tenants: TenantSummary[] | undefined }) {
   const [estateDone, setEstateDone] = useState(false)
   const [order, setOrder] = useState<string[]>([])
   const [results, setResults] = useState<Record<string, PortalAskState>>({})
+  const [askError, setAskError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => () => abortRef.current?.abort(), [])
@@ -123,36 +124,53 @@ function EstateAsk({ tenants }: { tenants: TenantSummary[] | undefined }) {
     setOrder((prev) => (prev.includes(slug) ? prev : [...prev, slug]))
   }
 
-  function handleSubmit(formEvent: FormEvent<HTMLFormElement>) {
-    formEvent.preventDefault()
-    const trimmed = draft.trim()
-    if (trimmed.length === 0 || asking) return
+  function runAsk(query: string) {
+    if (query.length === 0 || asking) return
 
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
 
-    setAskedQuery(trimmed)
+    setAskedQuery(query)
     setOrder([])
     setResults({})
     setEstateDone(false)
+    setAskError(null)
     setAsking(true)
 
-    streamEstateAsk(trimmed, onEvent, controller.signal)
-      .catch(() => {
+    streamEstateAsk(query, onEvent, controller.signal)
+      .then(() => {
+        // A stream that closes without the final event (proxy timeout,
+        // machine restart) must still release the ask button.
+        if (!controller.signal.aborted) {
+          setAsking(false)
+          setEstateDone(true)
+        }
+      })
+      .catch((error: unknown) => {
         if (controller.signal.aborted) return
         setAsking(false)
+        // Treat a caught error as done so the layout doesn't sit in a
+        // permanent "working" state with no way forward.
+        setEstateDone(true)
+        setAskError(error instanceof Error ? error.message : 'Could not ask the portals.')
       })
   }
 
+  function handleSubmit(formEvent: FormEvent<HTMLFormElement>) {
+    formEvent.preventDefault()
+    runAsk(draft.trim())
+  }
+
   const hasAsked = askedQuery.length > 0
+  const liveMessage = asking ? 'Portals are answering' : hasAsked ? 'All portals have answered' : ''
 
   return (
     <div className='mt-8'>
       <div className='rp-card p-5 sm:p-6'>
         <p className='rp-eyebrow text-ink-3'>Ask everything at once</p>
         <h2 className='rp-display mt-1.5 text-xl text-ink sm:text-2xl'>
-          Ask across every knowledge box
+          Ask across every portal
         </h2>
         <p className='mt-2 max-w-xl text-sm leading-relaxed text-ink-2'>
           One question, every portal - each corpus answers on its own, side by side.
@@ -194,6 +212,8 @@ function EstateAsk({ tenants }: { tenants: TenantSummary[] | undefined }) {
           </div>
         </form>
 
+        <LiveStatus message={liveMessage} />
+
         {hasAsked
           ? (
             <div className='mt-5 border-t border-line pt-5'>
@@ -233,7 +253,15 @@ function EstateAsk({ tenants }: { tenants: TenantSummary[] | undefined }) {
                 )
                 : null}
 
-              {!asking && estateDone && order.length === 0
+              {askError
+                ? (
+                  <div className='mt-4'>
+                    <ErrorCard message={askError} onRetry={() => runAsk(askedQuery)} />
+                  </div>
+                )
+                : null}
+
+              {!asking && !askError && estateDone && order.length === 0
                 ? (
                   <p className='mt-4 text-sm text-ink-3'>
                     No portal was able to answer that one.
@@ -264,7 +292,8 @@ export function TenantPicker() {
               Choose a portal
             </h1>
             <p className='mt-2 max-w-lg text-sm leading-relaxed text-ink-2'>
-              Each portal is a corpus of its own - its own knowledge box, taxonomy and branding.
+              Each portal is a research collection of its own - its own content, taxonomy and
+              branding.
             </p>
           </header>
           <ThemeToggle />

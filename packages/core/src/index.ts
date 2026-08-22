@@ -323,7 +323,11 @@ export const AskEventSchema = z.discriminatedUnion('type', [
     firstChunkSec: z.number().nonnegative().optional(),
     totalSec: z.number().nonnegative().optional(),
   }),
-  z.object({ type: z.literal('done') }),
+  z.object({
+    type: z.literal('done'),
+    /** True when the corpus could not answer and guidance was shown instead. */
+    refused: z.boolean().optional(),
+  }),
   z.object({ type: z.literal('error'), message: z.string() }),
 ])
 

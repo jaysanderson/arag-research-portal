@@ -17,6 +17,8 @@ export interface AnswerStreamProps {
    * re-implementing the stream itself.
    */
   onSources?: (resources: ScoredResource[]) => void
+  /** Optional hook fired when the reader retries a failed answer - the stream itself always retries the same request either way. */
+  onRetry?: () => void
 }
 
 /**
@@ -183,7 +185,7 @@ export function ContextJourney({ slug, sources, query = '' }: ContextJourneyProp
  * trigger, and a usage line. Reused by SearchPage (whole-corpus asks) and
  * ResourceDetailPage (single-document asks via `resourceId`).
  */
-export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
+export function AnswerStream({ slug, request, onSources, onRetry }: AnswerStreamProps) {
   const [status, setStatus] = useState<Status>('idle')
   const [text, setText] = useState('')
   const [sources, setSources] = useState<ScoredResource[]>([])
@@ -191,11 +193,17 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
   const [usage, setUsage] = useState<UsageEvent | null>(null)
   const [quality, setQuality] = useState<QualityScores | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [retryToken, setRetryToken] = useState(0)
   const abortRef = useRef<AbortController | null>(null)
 
   const key = `${slug}|${request.query}|${request.resourceId ?? ''}|${
     (request.topicIds ?? []).join(',')
-  }`
+  }|${retryToken}`
+
+  function retry() {
+    setRetryToken((prev) => prev + 1)
+    onRetry?.()
+  }
 
   const existingResultIds = useExistingResultIds(citations.map((citation) => citation.resourceId))
 
@@ -366,9 +374,18 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
 
       {errorMessage
         ? (
-          <p className='mt-3 text-xs text-[var(--rp-bad-ink)]'>
-            Answer unavailable right now - {errorMessage}
-          </p>
+          <div className='mt-3 flex flex-wrap items-center gap-2'>
+            <p className='text-xs text-[var(--rp-bad-ink)]'>
+              Answer unavailable right now - {errorMessage}
+            </p>
+            <button
+              type='button'
+              onClick={retry}
+              className='rp-btn rp-btn-outline h-auto px-2.5 py-1 text-xs'
+            >
+              Try again
+            </button>
+          </div>
         )
         : null}
 

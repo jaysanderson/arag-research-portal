@@ -96,7 +96,9 @@ function EntitySkeleton() {
 export function EntityPage() {
   const { config } = useOutletContext<TenantOutletContext>()
   const params = useParams<{ name: string }>()
-  const name = params.name ? decodeURIComponent(params.name) : ''
+  // React Router has already decoded the path param - decoding again throws
+  // on names that legitimately contain a percent sign.
+  const name = params.name ?? ''
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['entity', config.slug, name],

@@ -11,6 +11,9 @@ import type { TenantStore } from './tenants.ts'
 // synced on demand from Manage > Content.
 // ---------------------------------------------------------------------------
 
+/** Pages discovered per crawl - deep enough to reach past already-synced ones. */
+const DISCOVER_CAP = 500
+/** New pages ingested per sync run - the rest arrive on later runs. */
 const SYNC_CAP = 60
 
 /** Ingest new pages from one source; returns how many were added. */
@@ -21,11 +24,13 @@ export async function syncSource(
   source: Source,
   emit: (label: string) => void | Promise<void>,
 ): Promise<number> {
-  const discovered = await discoverLinks(source.url, SYNC_CAP)
+  const discovered = await discoverLinks(source.url, DISCOVER_CAP)
   const known = new Set(source.synced ?? [])
-  const fresh = discovered.links.filter((l) => !known.has(l))
+  const freshAll = discovered.links.filter((l) => !known.has(l))
+  const fresh = freshAll.slice(0, SYNC_CAP)
   await emit(
-    `Found ${discovered.links.length} pages via ${discovered.source} - ${fresh.length} new`,
+    `Found ${discovered.links.length} pages via ${discovered.source} - ${freshAll.length} new` +
+      (freshAll.length > fresh.length ? ` (ingesting ${fresh.length} this run)` : ''),
   )
   let added = 0
   for (const url of fresh) {
@@ -33,7 +38,7 @@ export async function syncSource(
       await management.createLink(config, { url })
       known.add(url)
       added += 1
-      if (added % 5 === 0) await emit(`Ingested ${added} of ${fresh.length} new pages...`)
+      if (added % 5 === 0) await emit(`Ingested ${added} of ${fresh.length} new pages…`)
     } catch {
       await emit(`Skipped ${url} - the platform rejected it`)
     }
@@ -41,7 +46,7 @@ export async function syncSource(
   sources.update(config.slug, source.id, {
     lastSync: new Date().toISOString(),
     lastAdded: added,
-    synced: [...known].slice(-2000),
+    synced: [...known].slice(-5000),
   })
   await emit(added > 0 ? `Sync complete - ${added} pages added` : 'Sync complete - nothing new')
   return added

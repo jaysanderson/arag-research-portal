@@ -3,6 +3,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -20,6 +21,11 @@ const DEBOUNCE_MS = 200
 const MAX_ENTITIES = 6
 const MAX_TITLES = 5
 
+/** Id for one flattened option, shared between the input's `aria-activedescendant` and the listbox. */
+export function typeaheadOptionId(listboxId: string, index: number): string {
+  return `${listboxId}-option-${index}`
+}
+
 export interface TypeaheadState {
   open: boolean
   loading: boolean
@@ -33,6 +39,10 @@ export interface TypeaheadState {
   close: () => void
   onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void
   wrapRef: RefObject<HTMLDivElement>
+  /** Id of the listbox element - wire to the input's `aria-controls`. */
+  listboxId: string
+  /** Id of the highlighted option, or undefined when nothing is highlighted - wire to `aria-activedescendant`. */
+  activeDescendant: string | undefined
 }
 
 /**
@@ -56,6 +66,7 @@ export function useTypeahead(
   const [interacted, setInteracted] = useState(false)
   const [highlight, setHighlight] = useState(-1)
   const wrapRef = useRef<HTMLDivElement>(null) as RefObject<HTMLDivElement>
+  const listboxId = useId()
 
   const trimmed = query.trim()
 
@@ -182,6 +193,8 @@ export function useTypeahead(
     close,
     onKeyDown,
     wrapRef,
+    listboxId,
+    activeDescendant: highlight >= 0 ? typeaheadOptionId(listboxId, highlight) : undefined,
   }
 }
 
@@ -190,11 +203,12 @@ export function useTypeahead(
  * positioned, so the element carrying `wrapRef` must be `relative`.
  */
 export function TypeaheadDropdown({ state }: { state: TypeaheadState }) {
-  const { open, loading, entities, titles, items, highlight, setHighlight, pick } = state
+  const { open, loading, entities, titles, items, highlight, setHighlight, pick, listboxId } = state
   if (!open) return null
 
   return (
     <div
+      id={listboxId}
       className='rp-card rp-anim-fade absolute left-0 right-0 top-full z-40 mt-2 p-2.5 text-left'
       role='listbox'
       aria-label='Suggestions'
@@ -214,17 +228,23 @@ export function TypeaheadDropdown({ state }: { state: TypeaheadState }) {
             <p className='rp-eyebrow px-1 pb-1.5 text-ink-3'>Entities</p>
             <div className='flex flex-wrap gap-1.5'>
               {entities.map((text, index) => (
-                <button
+                <div
                   key={text}
-                  type='button'
+                  id={typeaheadOptionId(listboxId, index)}
                   role='option'
+                  tabIndex={-1}
                   aria-selected={highlight === index}
                   onMouseEnter={() => setHighlight(index)}
-                  onClick={() => pick({ kind: 'entity', text })}
-                  className={`rp-chip ${highlight === index ? 'rp-chip-active' : ''}`}
+                  onMouseDown={(event) => {
+                    event.preventDefault()
+                    pick({ kind: 'entity', text })
+                  }}
+                  className={`rp-chip cursor-pointer ${
+                    highlight === index ? 'rp-chip-active' : ''
+                  }`}
                 >
                   {text}
-                </button>
+                </div>
               ))}
             </div>
           </div>
@@ -239,14 +259,18 @@ export function TypeaheadDropdown({ state }: { state: TypeaheadState }) {
               {titles.map((text, index) => {
                 const flatIndex = entities.length + index
                 return (
-                  <button
+                  <div
                     key={text}
-                    type='button'
+                    id={typeaheadOptionId(listboxId, flatIndex)}
                     role='option'
+                    tabIndex={-1}
                     aria-selected={highlight === flatIndex}
                     onMouseEnter={() => setHighlight(flatIndex)}
-                    onClick={() => pick({ kind: 'title', text })}
-                    className={`flex items-center gap-2.5 rounded-[6px] px-1.5 py-2 text-left text-sm transition-colors duration-150 ${
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      pick({ kind: 'title', text })
+                    }}
+                    className={`flex cursor-pointer items-center gap-2.5 rounded-[6px] px-1.5 py-2 text-left text-sm transition-colors duration-150 ${
                       highlight === flatIndex ? 'bg-surface-2 text-ink' : 'text-ink-2'
                     }`}
                   >
@@ -263,7 +287,7 @@ export function TypeaheadDropdown({ state }: { state: TypeaheadState }) {
                       <path d='M7 3h7l5 5v13H7zM14 3v5h5' />
                     </svg>
                     <span className='rp-clamp-2 min-w-0'>{text}</span>
-                  </button>
+                  </div>
                 )
               })}
             </div>

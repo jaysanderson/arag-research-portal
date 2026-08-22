@@ -218,6 +218,13 @@ function PipelineRail({
                   }`}
                 >
                   {stage.label}
+                  <span className='sr-only'>
+                    {status === 'active'
+                      ? ' - in progress'
+                      : status === 'complete'
+                      ? ' - complete'
+                      : ' - pending'}
+                  </span>
                 </p>
 
                 {stage.key === 'retrieval' && sources.length > 0
@@ -226,7 +233,7 @@ function PipelineRail({
                       {sources.slice(0, 6).map((resource) => (
                         <div
                           key={resource.id}
-                          className='rounded-lg border border-line bg-surface-2 px-2.5 py-2'
+                          className='rounded-[var(--rp-radius)] border border-line bg-surface-2 px-2.5 py-2'
                         >
                           <p className='rp-clamp-2 text-xs font-medium text-ink-2'>
                             {resource.title}
@@ -509,7 +516,7 @@ export function AgenticPage() {
             onChange={(event) => setQuery(event.target.value)}
             placeholder={config.searchPlaceholder}
             disabled={isRunning}
-            className='min-w-0 flex-1 rounded-[var(--rp-radius)] border-0 bg-transparent px-3 py-2 text-sm text-ink placeholder:text-ink-3 focus:outline-none disabled:opacity-60'
+            className='min-w-0 flex-1 rounded-[var(--rp-radius)] border-0 bg-transparent px-3 py-2 text-sm text-ink placeholder:text-[var(--rp-ink-3)] focus:outline-none disabled:opacity-60'
           />
           <button
             type='submit'

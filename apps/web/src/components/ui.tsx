@@ -80,6 +80,15 @@ export function EmptyState(
   )
 }
 
+/** Minimal live region for status announcements - render with an empty message while idle. */
+export function LiveStatus({ message }: { message: string }) {
+  return (
+    <div aria-live='polite' role='status' className='sr-only'>
+      {message}
+    </div>
+  )
+}
+
 /** Deterministic, pleasant muted hue derived from a resource id - used for thumbnail colour blocks. */
 export function hueFromId(id: string): number {
   let hash = 0

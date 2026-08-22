@@ -22,7 +22,7 @@ const grdc: TenantConfig = TenantConfigSchema.parse({
       heroTo: '#1a5632',
     },
   },
-  searchPlaceholder: 'Search crop protection, soils, farm business, climate...',
+  searchPlaceholder: 'Search crop protection, soils, farm business, climate…',
   topics: [
     { id: 'crop-protection', label: 'Crop protection' },
     { id: 'soils-nutrition', label: 'Soils and nutrition' },
@@ -73,7 +73,7 @@ const frdc: TenantConfig = TenantConfigSchema.parse({
       heroTo: '#14503f',
     },
   },
-  searchPlaceholder: 'Search fisheries, aquaculture, stock assessment, marine ecology...',
+  searchPlaceholder: 'Search fisheries, aquaculture, stock assessment, marine ecology…',
   topics: [
     { id: 'stock-assessment', label: 'Fisheries stock assessment' },
     { id: 'aquaculture-biosecurity', label: 'Aquaculture biosecurity' },
@@ -217,10 +217,15 @@ export class TenantStore {
     this.persist()
   }
 
-  /** Rename a portal (product name, organisation, tagline). */
+  /** Rename or re-theme a portal (product name, organisation, tagline, palette). */
   patchBranding(
     slug: string,
-    branding: { productName?: string; organisation?: string; tagline?: string },
+    branding: {
+      productName?: string
+      organisation?: string
+      tagline?: string
+      colours?: TenantConfig['branding']['colours']
+    },
   ): void {
     const base = this.get(slug)
     if (!base) return
@@ -229,6 +234,7 @@ export class TenantStore {
       ...(branding.productName ? { productName: branding.productName } : {}),
       ...(branding.organisation ? { organisation: branding.organisation } : {}),
       ...(branding.tagline ? { tagline: branding.tagline } : {}),
+      ...(branding.colours ? { colours: branding.colours } : {}),
     }
     if (this.custom[slug]) {
       this.custom[slug] = { ...this.custom[slug], branding: merged }
@@ -270,7 +276,7 @@ export class TenantStore {
         tagline: input.tagline?.trim() || 'Research, discovery and development',
         colours: DEFAULT_COLOURS,
       },
-      searchPlaceholder: 'Search this knowledge box...',
+      searchPlaceholder: 'Search this portal…',
       topics: [],
       suggestedQuestions: [],
       entityTypes: [],

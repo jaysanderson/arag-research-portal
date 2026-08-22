@@ -52,6 +52,11 @@
   --font-display: 'Fraunces', 'Iowan Old Style', Georgia, ui-serif, serif;
 }
 
+html {
+  /* Rubber-band overscroll shows the html background - keep it on-theme. */
+  background-color: var(--rp-paper);
+}
+
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -101,15 +106,8 @@ body {
 /* Glassy surface: translucent paper over a blur. Falls back to a near-opaque
  * fill where backdrop-filter is unavailable. */
 .rp-glass {
-  background-color: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(14px) saturate(160%);
   -webkit-backdrop-filter: blur(14px) saturate(160%);
-}
-
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .rp-glass {
-    background-color: rgba(255, 255, 255, 0.95);
-  }
 }
 
 .rp-shadow-sm {
@@ -401,11 +399,11 @@ body {
   --rp-radius: 6px;
   --rp-app: var(--rp-n-50);
   --rp-surface: var(--rp-n-0);
-  --rp-surface-2: var(--rp-surface-2);
-  --rp-surface-3: var(--rp-surface-3);
+  --rp-surface-2: var(--rp-n-100);
+  --rp-surface-3: var(--rp-n-200);
   --rp-ink: var(--rp-n-900);
   --rp-ink-2: var(--rp-n-600);
-  --rp-ink-3: var(--rp-n-500);
+  --rp-ink-3: #6f6c64;
   --rp-line: var(--rp-surface-3);
   --rp-line-2: var(--rp-surface-2);
   --rp-glass-bg: rgba(255, 255, 255, 0.72);
@@ -430,6 +428,27 @@ body {
   --rp-cat-5: #e87ba4;
   --rp-cat-6: #4a3aa7;
   color-scheme: light;
+}
+
+/* `divide-y divide-line` - Tailwind has no divide-line; bind it to the token. */
+.divide-line > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--rp-line);
+}
+
+/* Static chips (labels, list items) must not read as clickable. */
+span.rp-chip,
+li.rp-chip {
+  cursor: default;
+}
+span.rp-chip:hover,
+li.rp-chip:hover {
+  background-color: var(--rp-surface-2);
+}
+
+/* File pickers hide their input inside a label.rp-btn - surface its focus. */
+label.rp-btn:has(input:focus-visible) {
+  outline: 2px solid var(--rp-accent, var(--rp-ink));
+  outline-offset: 2px;
 }
 
 html[data-theme='dark'] {
@@ -497,6 +516,14 @@ html[data-theme='dark'] {
 }
 .rp-glass {
   background: var(--rp-glass-bg);
+}
+
+/* Without backdrop-filter a translucent header lets content ghost through -
+ * go near-opaque instead. Placed after the token rule so it wins. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .rp-glass {
+    background: color-mix(in srgb, var(--rp-surface) 96%, transparent);
+  }
 }
 
 /* Component classes - the single source of shape. */

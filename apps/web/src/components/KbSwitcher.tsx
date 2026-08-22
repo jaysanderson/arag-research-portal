@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { type KeyboardEvent, useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import type { KnowledgeBoxStatus, TenantConfig } from '@research-portal/core'
@@ -13,7 +13,7 @@ function StatusDot({ status }: { status?: KnowledgeBoxStatus['status'] }) {
   const label = status === 'connected'
     ? 'Connected'
     : status === 'demo'
-    ? 'Demo knowledge box'
+    ? 'Demo content'
     : 'Not connected'
   return (
     <span className='relative flex h-2.5 w-2.5 shrink-0 items-center justify-center'>
@@ -49,6 +49,8 @@ function TenantMark({ src, alt }: { src: string; alt: string }) {
 export function KbSwitcher({ config }: { config: TenantConfig }) {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -75,8 +77,11 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
     const onDown = (event: MouseEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) setOpen(false)
     }
-    const onEsc = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+    const onEsc = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false)
+        triggerRef.current?.focus()
+      }
     }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onEsc)
@@ -85,6 +90,27 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
       document.removeEventListener('keydown', onEsc)
     }
   }, [open])
+
+  // Focus the first menu item on open, then let arrow keys walk the list.
+  useEffect(() => {
+    if (!open) return
+    const items = panelRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]')
+    items?.[0]?.focus()
+  }, [open])
+
+  function onMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    const items = Array.from(
+      panelRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+    )
+    if (items.length === 0) return
+    event.preventDefault()
+    const current = items.indexOf(document.activeElement as HTMLElement)
+    const next = event.key === 'ArrowDown'
+      ? (current + 1) % items.length
+      : (current <= 0 ? items.length - 1 : current - 1)
+    items[next]?.focus()
+  }
 
   const switchTo = (slug: string) => {
     setOpen(false)
@@ -99,6 +125,7 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
   return (
     <div ref={wrapRef} className='relative'>
       <button
+        ref={triggerRef}
         type='button'
         onClick={() => setOpen((prev) => !prev)}
         aria-haspopup='menu'
@@ -127,7 +154,9 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
 
       {open && (
         <div
+          ref={panelRef}
           role='menu'
+          onKeyDown={onMenuKeyDown}
           className='rp-glass rp-shadow-lg rp-anim-fade absolute left-0 top-full z-50 mt-2 w-[calc(100vw-2rem)] max-w-72 rounded-[10px] border border-line p-1.5 sm:w-[18.5rem] sm:max-w-none'
         >
           <p className='rp-eyebrow px-2.5 pb-1.5 pt-2 text-ink-3'>
@@ -141,6 +170,7 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
                   key={t.slug}
                   type='button'
                   role='menuitem'
+                  tabIndex={-1}
                   onClick={() => switchTo(t.slug)}
                   className={`rp-focus flex w-full items-center gap-3 rounded-[6px] px-2.5 py-2 text-left transition-colors duration-150 hover:bg-[var(--rp-surface-2)] ${
                     current ? 'bg-surface-2' : ''
@@ -178,6 +208,7 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
           <Link
             to='/admin'
             role='menuitem'
+            tabIndex={-1}
             onClick={() => setOpen(false)}
             className='rp-focus flex w-full items-center gap-2.5 rounded-[6px] px-2.5 py-2 text-sm font-medium text-ink-2 transition-colors duration-150 hover:bg-[var(--rp-surface-2)]'
           >
@@ -189,11 +220,12 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
             >
               <path d='M10 4a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 0110 4z' />
             </svg>
-            Add a knowledge box
+            Add a portal
           </Link>
           <Link
             to='/admin'
             role='menuitem'
+            tabIndex={-1}
             onClick={() => setOpen(false)}
             className='rp-focus flex w-full items-center gap-2.5 rounded-[6px] px-2.5 py-2 text-sm font-medium text-ink-2 transition-colors duration-150 hover:bg-[var(--rp-surface-2)]'
           >
@@ -209,7 +241,7 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
                 clipRule='evenodd'
               />
             </svg>
-            Manage knowledge boxes
+            Manage portals
           </Link>
         </div>
       )}

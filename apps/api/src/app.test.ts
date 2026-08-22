@@ -194,6 +194,12 @@ describe('POST /api/t/:slug/ask', () => {
 describe('admin', () => {
   const passcode = 'test-passcode'
 
+  it('disables the admin surface entirely when no passcode is configured', async () => {
+    const app = buildApp({ provider: new StubProvider(), tenants: freshTenants() })
+    const response = await app.request('/api/admin/overview')
+    expect(response.status).toBe(503)
+  })
+
   it('rejects admin calls without the passcode', async () => {
     const app = buildApp({
       provider: new StubProvider(),

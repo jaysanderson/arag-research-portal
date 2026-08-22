@@ -98,7 +98,7 @@ export async function* analyseTenant(
     `research approach), also with kebab-case ids; (3) for EVERY numbered resource above, an ` +
     `assignment of exactly one topicId and one kindId; (4) 6 suggested questions a researcher ` +
     `would genuinely ask of this corpus; (5) a short search placeholder listing 3 or 4 corpus ` +
-    `themes, e.g. "Search x, y, z...". Use only ids you defined. Cover every resource number ` +
+    `themes, e.g. "Search x, y, z…". Use only ids you defined. Cover every resource number ` +
     `from 1 to ${resources.length}.`
 
   yield { type: 'stage', label: 'Designing taxonomy, graph dimensions and questions' }

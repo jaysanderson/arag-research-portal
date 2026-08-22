@@ -11,19 +11,19 @@ const METRICS: { key: keyof QualityScores; label: string; description: string }[
     key: 'answerRelevance',
     label: 'Relevance',
     description: 'Answer relevance: how directly the answer addresses the question asked - ' +
-      "scored by the platform's REMi model.",
+      'scored automatically against the retrieved sources.',
   },
   {
     key: 'groundedness',
     label: 'Groundedness',
     description: 'Groundedness: how firmly the answer is supported by the retrieved material - ' +
-      "scored by the platform's REMi model.",
+      'scored automatically against the retrieved sources.',
   },
   {
     key: 'contextRelevance',
     label: 'Context',
     description: 'Context relevance: how well the retrieved passages match the question asked - ' +
-      "scored by the platform's REMi model.",
+      'scored automatically against the retrieved sources.',
   },
 ]
 

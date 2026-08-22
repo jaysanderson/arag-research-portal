@@ -93,7 +93,7 @@ export function ManagePage() {
 
   if (!passcode || unauthorised) {
     return (
-      <main className='flex min-h-[calc(100vh-65px)] flex-col items-center justify-center bg-app px-6'>
+      <main className='flex min-h-[calc(100dvh-65px)] flex-col items-center justify-center bg-app px-6'>
         <div className='rp-card w-full max-w-sm p-8'>
           <p className='rp-eyebrow text-ink-3'>{config.branding.productName}</p>
           <h1 className='mt-1 text-xl font-semibold tracking-tight text-ink'>Manage this portal</h1>
@@ -138,7 +138,7 @@ export function ManagePage() {
   const reachable = row ? row.resourceCount !== null : false
 
   return (
-    <main className='min-h-[calc(100vh-65px)] bg-app'>
+    <main className='min-h-[calc(100dvh-65px)] bg-app'>
       <div className='mx-auto max-w-5xl px-6 py-10'>
         <div className='flex flex-wrap items-center justify-between gap-3'>
           <div>

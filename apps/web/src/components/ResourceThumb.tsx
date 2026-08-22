@@ -31,6 +31,7 @@ export function ResourceThumb({
   className?: string
 }) {
   const [failed, setFailed] = useState(false)
+  const [loaded, setLoaded] = useState(false)
   const glyph = TYPE_GLYPHS[type] ?? TYPE_GLYPHS.document
   return (
     <div
@@ -56,8 +57,12 @@ export function ResourceThumb({
           src={thumbnailUrl(slug, id)}
           alt=''
           loading='lazy'
+          onLoad={() => setLoaded(true)}
           onError={() => setFailed(true)}
-          className='absolute inset-0 h-full w-full object-cover'
+          // Invisible until it genuinely loads - never a broken-image glyph.
+          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${
+            loaded ? 'opacity-100' : 'opacity-0'
+          }`}
         />
       )}
     </div>

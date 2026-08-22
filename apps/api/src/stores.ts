@@ -197,22 +197,34 @@ export class WatchStore {
 
   add(slug: string, clientId: string, query: string): Watch {
     const all = readJson<Watch[]>(this.pathFor(slug), [])
+    const trimmed = query.trim()
+    // One watch per (client, query) - repeat clicks return the existing one.
+    const existing = all.find((w) => w.clientId === clientId && w.query === trimmed)
+    if (existing) return existing
     const watch: Watch = {
       id: crypto.randomUUID(),
       clientId,
-      query,
+      query: trimmed,
       createdAt: new Date().toISOString(),
       lastRun: null,
       fingerprint: null,
       changed: false,
     }
-    writeJson(this.pathFor(slug), [...all, watch].slice(-200))
+    // Cap per client, never across clients - one browser cannot evict another's.
+    const mine = all.filter((w) => w.clientId === clientId)
+    const keep = mine.length >= 50 ? all.filter((w) => w !== mine[0]) : all
+    writeJson(this.pathFor(slug), [...keep, watch])
     return watch
   }
 
-  update(slug: string, id: string, patch: Partial<Watch>): void {
+  update(slug: string, id: string, patch: Partial<Watch>, clientId?: string): void {
     const all = readJson<Watch[]>(this.pathFor(slug), [])
-    writeJson(this.pathFor(slug), all.map((w) => (w.id === id ? { ...w, ...patch } : w)))
+    writeJson(
+      this.pathFor(slug),
+      all.map((w) =>
+        w.id === id && (clientId === undefined || w.clientId === clientId) ? { ...w, ...patch } : w
+      ),
+    )
   }
 
   remove(slug: string, clientId: string, id: string): void {
