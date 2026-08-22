@@ -121,6 +121,34 @@ export class KbClient {
     return (await res.json().catch(() => ({}))) as T
   }
 
+  /** The data-plane host for this box (DA tasks live there). */
+  private dpUrl(path: string) {
+    return `${this.binding.baseUrl.replace('.rag.progress.cloud', '.dp.progress.cloud')}${path}`
+  }
+
+  async dpJson<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+    const url = this.dpUrl(path)
+    const res = await this.fetchImpl(url, {
+      method,
+      headers: this.headers(),
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!res.ok) throw new AragApiError(res.status, url, await res.text())
+    return (await res.json().catch(() => ({}))) as T
+  }
+
+  /** Stream a stored file field (PDF/video/audio) with range support. */
+  async fileResponse(path: string, range?: string): Promise<Response> {
+    const url = this.url(path)
+    const headers: Record<string, string> = {
+      'x-nuclia-serviceaccount': `Bearer ${this.binding.token}`,
+    }
+    if (range) headers.range = range
+    const res = await this.fetchImpl(url, { headers })
+    if (!res.ok && res.status !== 206) throw new AragApiError(res.status, url, await res.text())
+    return res
+  }
+
   /** POST returning the raw streaming response (NDJSON body). */
   async postStream(path: string, body: unknown, extra?: Record<string, string>): Promise<Response> {
     const url = this.url(path)

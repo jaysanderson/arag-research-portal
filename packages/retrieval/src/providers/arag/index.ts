@@ -5,10 +5,12 @@ import type {
   Citation,
   FacetCounts,
   GraphData,
+  KbAgent,
   KbCounters,
   Labelset,
   Question,
   RecentResource,
+  ResourceContent,
   ResourceSummary,
   ResourceType,
   ScoredResource,
@@ -558,15 +560,204 @@ export class AragProvider implements RetrievalProvider {
 
   async createLabelset(
     tenant: TenantConfig,
-    input: { id: string; title: string; multiple: boolean; labels: string[] },
+    input: {
+      id: string
+      title: string
+      multiple: boolean
+      labels: string[]
+      kind?: 'RESOURCES' | 'PARAGRAPHS'
+    },
   ): Promise<void> {
     await this.client(tenant).postJson(`/labelset/${input.id}`, {
       title: input.title,
       color: '#556b5f',
       multiple: input.multiple,
-      kind: ['RESOURCES'],
+      kind: [input.kind ?? 'RESOURCES'],
       labels: input.labels.map((title) => ({ title })),
     })
+  }
+
+  // -------------------------------------------------------------------------
+  // Data-augmentation agents (DA tasks on the data-plane host).
+  // -------------------------------------------------------------------------
+
+  /** The box's configured generative model - DA tasks must pin it. */
+  async generativeModel(tenant: TenantConfig): Promise<string> {
+    try {
+      const cfg = await this.client(tenant).getJson<{ generative_model?: string }>(
+        '/configuration',
+      )
+      return cfg.generative_model ?? ''
+    } catch {
+      return ''
+    }
+  }
+
+  async listAgents(tenant: TenantConfig): Promise<KbAgent[]> {
+    const raw = await this.client(tenant).dpJson<Record<string, unknown>>('GET', '/tasks')
+    const agents: KbAgent[] = []
+    const collect = (entries: unknown) => {
+      if (!Array.isArray(entries)) return
+      for (const entry of entries) {
+        const e = entry as {
+          id?: string
+          task?: { name?: string }
+          parameters?: { name?: string }
+        }
+        const id = e.id
+        if (!id || agents.some((a) => a.id === id)) continue
+        agents.push({
+          id,
+          task: e.task?.name ?? 'unknown',
+          title: e.parameters?.name ?? e.task?.name ?? id,
+        })
+      }
+    }
+    for (const value of Object.values(raw ?? {})) collect(value)
+    return agents
+  }
+
+  async startAgent(
+    tenant: TenantConfig,
+    input: {
+      task: string
+      title: string
+      operations: unknown[]
+      applyExisting: boolean
+      model: string
+    },
+  ): Promise<void> {
+    const parameters: Record<string, unknown> = {
+      name: input.title,
+      on: 1,
+      operations: input.operations,
+    }
+    if (input.model) parameters.llm = { model: input.model }
+    await this.client(tenant).dpJson('POST', '/task/start', {
+      name: input.task,
+      parameters,
+      apply: input.applyExisting ? 'ALL' : 'NEW',
+      enabled: true,
+    })
+  }
+
+  /** Entity groups the graph agent has extracted (native knowledge graph). */
+  async entityGroups(
+    tenant: TenantConfig,
+  ): Promise<{ group: string; entities: string[] }[]> {
+    try {
+      const client = this.client(tenant)
+      const raw = await client.getJson<{
+        groups?: Record<string, { entities?: Record<string, unknown> }>
+      }>('/entitiesgroups')
+      const names = Object.keys(raw.groups ?? {}).slice(0, 16)
+      const out = await Promise.all(names.map(async (group) => {
+        const inline = Object.keys(raw.groups?.[group]?.entities ?? {})
+        if (inline.length > 0) return { group, entities: inline.slice(0, 100) }
+        try {
+          const detail = await client.getJson<{ entities?: Record<string, unknown> }>(
+            `/entitiesgroup/${encodeURIComponent(group)}`,
+          )
+          return { group, entities: Object.keys(detail.entities ?? {}).slice(0, 100) }
+        } catch {
+          return { group, entities: [] }
+        }
+      }))
+      return out.filter((g) => g.entities.length > 0)
+    } catch {
+      return []
+    }
+  }
+
+  async deleteAgent(tenant: TenantConfig, id: string): Promise<void> {
+    await this.client(tenant).dpJson('DELETE', `/task/${id}`)
+  }
+
+  /** Typed full content of a resource for the detail view. */
+  async resourceContent(tenant: TenantConfig, id: string): Promise<ResourceContent | null> {
+    let raw: RawResource & {
+      icon?: string
+      origin?: { url?: string }
+      summary?: string
+      data?: Record<
+        string,
+        Record<string, {
+          value?: { body?: string; file?: { content_type?: string } }
+          extracted?: {
+            text?: { text?: string }
+            metadata?: {
+              metadata?: {
+                paragraphs?: { start?: number; end?: number; start_seconds?: number[] }[]
+              }
+            }
+          }
+        }>
+      >
+    }
+    try {
+      raw = await this.client(tenant).getJson(
+        `/resource/${id}?show=basic&show=origin&show=values&show=extracted&show=extra&extracted=text&extracted=metadata`,
+      )
+    } catch (err) {
+      if (err instanceof AragApiError && err.status === 404) return null
+      throw err
+    }
+    const icon = raw.icon ?? ''
+    const texts: { fieldId: string; text: string }[] = []
+    const files: { group: string; fieldId: string; contentType?: string }[] = []
+    const transcript: { text: string; startSec?: number }[] = []
+    for (const [group, fields] of Object.entries(raw.data ?? {})) {
+      for (const [fieldId, field] of Object.entries(fields ?? {})) {
+        const text = field.extracted?.text?.text ?? field.value?.body ?? ''
+        if (text.trim()) texts.push({ fieldId: `${group}/${fieldId}`, text })
+        if (group === 'files') {
+          files.push({
+            group: 'file',
+            fieldId,
+            contentType: field.value?.file?.content_type,
+          })
+        }
+        const paragraphs = field.extracted?.metadata?.metadata?.paragraphs ?? []
+        for (const p of paragraphs) {
+          const startSec = Array.isArray(p.start_seconds) ? p.start_seconds[0] : undefined
+          if (startSec === undefined) continue
+          const chunk = text.slice(p.start ?? 0, p.end ?? 0).trim()
+          if (chunk) transcript.push({ text: chunk, startSec })
+        }
+      }
+    }
+    const originUrl = raw.origin?.url
+    const kind: ResourceContent['kind'] = originUrl && Object.keys(raw.data?.links ?? {}).length
+      ? 'web'
+      : icon === 'application/pdf'
+      ? 'pdf'
+      : icon.startsWith('video/')
+      ? 'video'
+      : icon.startsWith('audio/')
+      ? 'audio'
+      : icon.startsWith('image/')
+      ? 'image'
+      : files.length > 0
+      ? 'file'
+      : 'text'
+    return {
+      id,
+      title: raw.title || id,
+      kind,
+      originUrl,
+      summary: raw.summary || (raw.extra?.metadata as { summary?: string } | undefined)?.summary,
+      texts,
+      transcript,
+      files,
+    }
+  }
+
+  /** Proxy a stored file field (range-aware) for inline rendering. */
+  fileStream(tenant: TenantConfig, id: string, fieldId: string, range?: string) {
+    return this.client(tenant).fileResponse(
+      `/resource/${id}/file/${fieldId}/download/field`,
+      range,
+    )
   }
 
   async *ask(
@@ -609,12 +800,35 @@ export class AragProvider implements RetrievalProvider {
     let citationIndex = 0
     const cited = new Map<string, Citation>()
 
-    const toSources = (retrieved: Record<string, RawResource>): ScoredResource[] =>
-      Object.entries(retrieved).map(([id, raw]) => ({
-        ...(byId.get(id) ?? this.toSummary(id, raw)),
-        relevance: 1,
-        citedCount: 0,
-      }))
+    const toSources = (
+      retrieved: Record<
+        string,
+        RawResource & {
+          fields?: Record<
+            string,
+            { paragraphs?: Record<string, { score?: number; text?: string }> }
+          >
+        }
+      >,
+    ): ScoredResource[] =>
+      Object.entries(retrieved).map(([id, raw]) => {
+        let best = 0
+        let passage: string | undefined
+        for (const field of Object.values(raw.fields ?? {})) {
+          for (const paragraph of Object.values(field.paragraphs ?? {})) {
+            if ((paragraph.score ?? 0) >= best) {
+              best = paragraph.score ?? 0
+              passage = paragraph.text ?? passage
+            }
+          }
+        }
+        return {
+          ...(byId.get(id) ?? this.toSummary(id, raw)),
+          relevance: 1,
+          citedCount: 0,
+          matchedPassage: passage,
+        }
+      })
 
     const emitCitationsFor = (citations: Record<string, unknown>): Citation[] => {
       const fresh: Citation[] = []

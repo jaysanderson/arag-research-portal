@@ -17,6 +17,7 @@ import { BindingStore } from './bindings.ts'
 import { accountOpsAvailable, createKnowledgeBox } from './arag-account.ts'
 import { GENERATE_SCHEMAS } from './generate-schemas.ts'
 import { analyseTenant } from './analyse.ts'
+import { implementKgStrategy, KgProposalStore, proposeKgStrategy } from './kg.ts'
 import { discoverLinks } from './crawl.ts'
 
 const searchQuerySchema = z.object({ q: z.string().min(1) })
@@ -41,6 +42,15 @@ const migrateBodySchema = z.object({ from: z.string().min(1), to: z.string().min
 const generateBodySchema = z.object({
   kind: GenerateKindSchema,
   query: z.string().min(3).max(2000),
+})
+const renameTenantSchema = z.object({
+  name: z.string().min(2).max(60).optional(),
+  organisation: z.string().min(1).max(120).optional(),
+  tagline: z.string().min(1).max(160).optional(),
+})
+const kgImplementSchema = z.object({
+  applyExisting: z.boolean(),
+  includeSummaries: z.boolean().optional(),
 })
 const newTenantSchema = z.object({
   name: z.string().min(2).max(60),
@@ -157,6 +167,50 @@ export function buildApp(opts: BuildAppOptions): Hono {
     const resource = await provider.resource(config, c.req.param('id'))
     if (!resource) return c.json({ error: 'unknown_resource' }, 404)
     return c.json(resource)
+  })
+
+  app.get('/api/t/:slug/resources/:id/content', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
+    const content = await opts.management.resourceContent(config, c.req.param('id'))
+    if (!content) return c.json({ error: 'unknown_resource' }, 404)
+    return c.json(content)
+  })
+
+  app.get('/api/t/:slug/resources/:id/file/:fieldId', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
+    const upstream = await opts.management.fileStream(
+      config,
+      c.req.param('id'),
+      c.req.param('fieldId'),
+      c.req.header('range'),
+    )
+    const headers = new Headers()
+    for (
+      const h of [
+        'content-type',
+        'content-length',
+        'content-range',
+        'accept-ranges',
+        'etag',
+        'last-modified',
+      ]
+    ) {
+      const v = upstream.headers.get(h)
+      if (v) headers.set(h, v)
+    }
+    headers.set('content-disposition', 'inline')
+    return new Response(upstream.body, { status: upstream.status, headers })
+  })
+
+  app.get('/api/t/:slug/entities', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    if (!opts.management) return c.json([])
+    return c.json(await opts.management.entityGroups(config))
   })
 
   app.get('/api/t/:slug/knowledge-box', (c) => {
@@ -390,6 +444,80 @@ export function buildApp(opts: BuildAppOptions): Hono {
         })
       }
     })
+  })
+
+  const kgProposals = new KgProposalStore()
+
+  app.patch('/api/admin/tenants/:slug', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const parsed = renameTenantSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    tenants.patchBranding(config.slug, {
+      productName: parsed.data.name,
+      organisation: parsed.data.organisation,
+      tagline: parsed.data.tagline,
+    })
+    return c.json({ ok: true })
+  })
+
+  app.post('/api/admin/t/:slug/kg/propose', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailableKg = requireManagement(c)
+    if (unavailableKg) return unavailableKg
+    try {
+      const proposal = await proposeKgStrategy(management!, config)
+      kgProposals.set(config.slug, proposal)
+      return c.json(proposal)
+    } catch (err) {
+      return c.json({
+        error: 'proposal_failed',
+        message: err instanceof Error ? err.message : 'proposal failed',
+      }, 502)
+    }
+  })
+
+  app.post('/api/admin/t/:slug/kg/implement', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailableKgI = requireManagement(c)
+    if (unavailableKgI) return unavailableKgI
+    const proposal = kgProposals.get(config.slug)
+    if (!proposal) return c.json({ error: 'no_proposal', message: 'Run Propose first.' }, 400)
+    const parsed = kgImplementSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    return streamSSE(c, async (stream) => {
+      for await (
+        const event of implementKgStrategy(management!, config, proposal, {
+          applyExisting: parsed.data.applyExisting,
+          includeSummaries: parsed.data.includeSummaries ?? false,
+        })
+      ) {
+        await stream.writeSSE({ data: JSON.stringify(event) })
+      }
+    })
+  })
+
+  app.get('/api/admin/t/:slug/agents', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailableAg = requireManagement(c)
+    if (unavailableAg) return unavailableAg
+    try {
+      return c.json(await management!.listAgents(config))
+    } catch {
+      return c.json([])
+    }
+  })
+
+  app.delete('/api/admin/t/:slug/agents/:taskId', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailableAd = requireManagement(c)
+    if (unavailableAd) return unavailableAd
+    await management!.deleteAgent(config, c.req.param('taskId'))
+    return c.json({ ok: true })
   })
 
   app.get('/api/admin/t/:slug/crawl', async (c) => {

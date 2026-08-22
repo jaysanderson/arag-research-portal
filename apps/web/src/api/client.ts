@@ -7,12 +7,16 @@ import type {
   GenerateKind,
   GenerateResult,
   GraphData,
+  KbAgent,
   KbCounters,
+  KgImplementEvent,
+  KgProposal,
   KnowledgeBoxStatus,
   Labelset,
   MigrationEvent,
   Question,
   RecentResource,
+  ResourceContent,
   ResourceSummary,
   RetrievalMode,
   SearchResults,
@@ -475,6 +479,101 @@ export async function analysePortal(
     if (!line) return
     const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
     onEvent(JSON.parse(data) as AnalyseEvent)
+  }
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) emit(frame)
+  }
+  emit(buffer)
+}
+
+export function getResourceContent(slug: string, id: string): Promise<ResourceContent> {
+  return request<ResourceContent>(
+    `/api/t/${encodeURIComponent(slug)}/resources/${encodeURIComponent(id)}/content`,
+  )
+}
+
+/** URL for streaming a stored file field (PDF/video/audio) inline. */
+export function resourceFileUrl(slug: string, id: string, fieldId: string): string {
+  return `/api/t/${encodeURIComponent(slug)}/resources/${encodeURIComponent(id)}/file/${
+    encodeURIComponent(fieldId)
+  }`
+}
+
+export function getEntityGroups(
+  slug: string,
+): Promise<{ group: string; entities: string[] }[]> {
+  return request(`/api/t/${encodeURIComponent(slug)}/entities`)
+}
+
+export function renamePortal(
+  slug: string,
+  passcode: string,
+  input: { name?: string; organisation?: string; tagline?: string },
+): Promise<{ ok: boolean }> {
+  return adminRequest(`/api/admin/tenants/${encodeURIComponent(slug)}`, passcode, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+export function proposeKg(slug: string, passcode: string): Promise<KgProposal> {
+  return adminRequest<KgProposal>(
+    `/api/admin/t/${encodeURIComponent(slug)}/kg/propose`,
+    passcode,
+    { method: 'POST' },
+  )
+}
+
+export function getAgents(slug: string, passcode: string): Promise<KbAgent[]> {
+  return adminRequest<KbAgent[]>(`/api/admin/t/${encodeURIComponent(slug)}/agents`, passcode)
+}
+
+export function deleteAgent(
+  slug: string,
+  passcode: string,
+  taskId: string,
+): Promise<{ ok: boolean }> {
+  return adminRequest(
+    `/api/admin/t/${encodeURIComponent(slug)}/agents/${encodeURIComponent(taskId)}`,
+    passcode,
+    { method: 'DELETE' },
+  )
+}
+
+/** Implement the proposed knowledge-graph strategy, streaming progress. */
+export async function implementKg(
+  slug: string,
+  passcode: string,
+  opts: { applyExisting: boolean; includeSummaries: boolean },
+  onEvent: (event: KgImplementEvent) => void,
+): Promise<void> {
+  const res = await fetch(`/api/admin/t/${encodeURIComponent(slug)}/kg/implement`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-admin-passcode': passcode },
+    body: JSON.stringify(opts),
+  })
+  if (!res.ok || !res.body) {
+    const body: unknown = await res.json().catch(() => null)
+    const message = body && typeof body === 'object' && 'message' in body &&
+        typeof body.message === 'string'
+      ? body.message
+      : 'Implementation failed to start'
+    throw new ApiError(res.status, message)
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const emit = (frame: string) => {
+    const line = frame.trim()
+    if (!line) return
+    const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
+    onEvent(JSON.parse(data) as KgImplementEvent)
   }
   for (;;) {
     const { done, value } = await reader.read()

@@ -218,6 +218,47 @@ export const GenerateResultSchema = z.object({
   sources: z.lazy(() => ResourceSummarySchema.array()),
 })
 
+/** Full typed content of one resource, for the type-aware detail view. */
+export const ResourceContentSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  kind: z.enum(['web', 'pdf', 'video', 'audio', 'image', 'text', 'file']),
+  originUrl: z.string().optional(),
+  summary: z.string().optional(),
+  /** Extracted text per field. */
+  texts: z.object({ fieldId: z.string(), text: z.string() }).array(),
+  /** Timed transcript segments when the platform extracted timings. */
+  transcript: z
+    .object({ text: z.string(), startSec: z.number().nonnegative().optional() })
+    .array(),
+  /** Streamable file fields (group/field for the proxy route). */
+  files: z
+    .object({ group: z.string(), fieldId: z.string(), contentType: z.string().optional() })
+    .array(),
+})
+
+/** A data-augmentation agent registered on the knowledge box. */
+export const KbAgentSchema = z.object({
+  id: z.string(),
+  task: z.string(),
+  title: z.string(),
+})
+
+/** The proposed knowledge-graph strategy, shown to the user before implementing. */
+export const KgProposalSchema = z.object({
+  rationale: z.string(),
+  entityTypes: z.object({ label: z.string(), description: z.string() }).array(),
+  resourceLabels: z.object({ label: z.string(), description: z.string() }).array(),
+  chunkLabels: z.object({ label: z.string(), description: z.string() }).array(),
+})
+
+export const KgImplementEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('stage'), label: z.string() }),
+  z.object({ type: z.literal('item'), label: z.string(), detail: z.string().optional() }),
+  z.object({ type: z.literal('done'), agents: z.number().int().nonnegative() }),
+  z.object({ type: z.literal('error'), message: z.string() }),
+])
+
 // ---------------------------------------------------------------------------
 // Ask - the streamed, cited answer experience.
 // ---------------------------------------------------------------------------
@@ -268,6 +309,10 @@ export type KbCounters = z.infer<typeof KbCountersSchema>
 export type RecentResource = z.infer<typeof RecentResourceSchema>
 export type MigrationEvent = z.infer<typeof MigrationEventSchema>
 export type AnalyseEvent = z.infer<typeof AnalyseEventSchema>
+export type ResourceContent = z.infer<typeof ResourceContentSchema>
+export type KbAgent = z.infer<typeof KbAgentSchema>
+export type KgProposal = z.infer<typeof KgProposalSchema>
+export type KgImplementEvent = z.infer<typeof KgImplementEventSchema>
 export type RetrievalMode = z.infer<typeof RetrievalModeSchema>
 export type CatalogItem = z.infer<typeof CatalogItemSchema>
 export type CatalogPage = z.infer<typeof CatalogPageSchema>

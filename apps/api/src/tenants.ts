@@ -156,6 +156,7 @@ export interface TenantPatch {
   topics?: TenantConfig['topics']
   suggestedQuestions?: TenantConfig['suggestedQuestions']
   searchPlaceholder?: string
+  branding?: TenantConfig['branding']
 }
 
 export class TenantStore {
@@ -204,6 +205,27 @@ export class TenantStore {
   setDisabled(slug: string, disabled: boolean): void {
     if (disabled) this.disabled.add(slug)
     else this.disabled.delete(slug)
+    this.persist()
+  }
+
+  /** Rename a portal (product name, organisation, tagline). */
+  patchBranding(
+    slug: string,
+    branding: { productName?: string; organisation?: string; tagline?: string },
+  ): void {
+    const base = this.get(slug)
+    if (!base) return
+    const merged = {
+      ...base.branding,
+      ...(branding.productName ? { productName: branding.productName } : {}),
+      ...(branding.organisation ? { organisation: branding.organisation } : {}),
+      ...(branding.tagline ? { tagline: branding.tagline } : {}),
+    }
+    if (this.custom[slug]) {
+      this.custom[slug] = { ...this.custom[slug], branding: merged }
+    } else {
+      this.overrides[slug] = { ...this.overrides[slug], branding: merged }
+    }
     this.persist()
   }
 
