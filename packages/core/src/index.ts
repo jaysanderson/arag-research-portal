@@ -95,6 +95,8 @@ export const RecentResourceSchema = z.object({
   title: z.string().min(1),
   status: z.enum(['pending', 'processed', 'error']),
   created: z.string().optional(),
+  /** Draft resources are hidden from searchers until published. */
+  hidden: z.boolean().optional(),
 })
 
 /** Progress events streamed by corpus analysis (interrogate the box, derive
@@ -297,6 +299,16 @@ export const AskEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('sources'), resources: ScoredResourceSchema.array() }),
   z.object({ type: z.literal('delta'), text: z.string() }),
   z.object({ type: z.literal('citation'), citation: CitationSchema }),
+  z.object({
+    /** Platform learning id for this answer - target for feedback. */
+    type: z.literal('learning'),
+    id: z.string(),
+  }),
+  z.object({
+    /** The query as the platform interpreted or rephrased it. */
+    type: z.literal('interpreted'),
+    query: z.string(),
+  }),
   z.object({
     type: z.literal('quality'),
     /** REMi scores, 0 to 5. Null when a metric could not be computed. */

@@ -80,3 +80,11 @@ in-app admin surface, not by hand.
   (1) set up/create + connect knowledge boxes inside the app, (2) upload resources into a
   knowledge box from inside the app, (3) **migrate resources from one knowledge box to
   another** as an admin tool.
+- **2026-08-22** - Jay approved the full "world-class while ARAG-only" roadmap ("all of it."):
+  ask analytics + knowledge-gap dashboard (app-side insights log; the platform's activity
+  endpoints are 403 to service-account tokens), answer feedback into the platform learning
+  loop, self-healing deep re-answers, deep-research prequeries, federated ask across the whole
+  estate, "interpreted as" rephrasing, multi-document summaries, image/table grounding toggle,
+  hidden-resource draft/publish curation, scheduled source re-syncs (one Fly machine now stays
+  up for the daily job), entity dossier pages, server-synced research trails with export,
+  saved searches with change badges, and the conversation-memory DA agent.

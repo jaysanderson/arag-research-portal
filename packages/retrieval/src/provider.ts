@@ -25,6 +25,12 @@ export interface AskOptions {
   topicIds?: string[]
   /** Override the surface's system prompt (portal management setting). */
   systemPrompt?: string
+  /** 'deep' grounds on the full text of matching resources. */
+  depth?: 'default' | 'deep'
+  /** Sub-questions to research before the main query (deep-research mode). */
+  prequeries?: string[]
+  /** Also ground on page/table images (needs visual content in the box). */
+  images?: boolean
 }
 
 export interface CatalogOptions {

@@ -14,13 +14,15 @@ import {
 } from '@research-portal/retrieval'
 import { type NewTenantInput, TenantStore } from './tenants.ts'
 import { BindingStore } from './bindings.ts'
-import { accountOpsAvailable, createKnowledgeBox } from './arag-account.ts'
+import { accountOpsAvailable, createKnowledgeBox, enableHiddenResources } from './arag-account.ts'
 import { GENERATE_SCHEMAS } from './generate-schemas.ts'
 import { analyseTenant } from './analyse.ts'
 import { implementKgStrategy, KgProposalStore, proposeKgStrategy } from './kg.ts'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import process from 'node:process'
 import { discoverLinks } from './crawl.ts'
+import { InsightsStore, SessionsStore, SourceStore, WatchStore } from './stores.ts'
+import { syncSource } from './scheduler.ts'
 
 const searchQuerySchema = z.object({ q: z.string().min(1) })
 const askBodySchema = z.object({
@@ -32,13 +34,50 @@ const askBodySchema = z.object({
     .optional(),
   resourceId: z.string().optional(),
   topicIds: z.string().array().max(12).optional(),
+  depth: z.enum(['default', 'deep']).optional(),
+  prequeries: z.string().min(3).array().max(8).optional(),
 })
 const connectBodySchema = z.object({
   url: z.string().min(12),
   token: z.string().min(20),
 })
 const createKbBodySchema = z.object({ title: z.string().min(1).max(80).optional() })
-const linkBodySchema = z.object({ url: z.string().url(), title: z.string().optional() })
+const linkBodySchema = z.object({
+  url: z.string().url(),
+  title: z.string().optional(),
+  hidden: z.boolean().optional(),
+})
+const feedbackBodySchema = z.object({
+  learningId: z.string().min(8),
+  good: z.boolean(),
+  text: z.string().max(2000).optional(),
+})
+const summarizeBodySchema = z.object({
+  resourceIds: z.string().min(1).array().min(1).max(20),
+  kind: z.enum(['simple', 'extended']).optional(),
+})
+const subqueriesBodySchema = z.object({ query: z.string().min(3).max(2000) })
+const estateAskSchema = z.object({ query: z.string().min(1).max(2000) })
+const sessionPutSchema = z.object({
+  id: z.string().min(1).max(64),
+  title: z.string().min(1).max(200),
+  updatedAt: z.string(),
+  messages: z.unknown().array().max(500),
+})
+const watchBodySchema = z.object({ query: z.string().min(2).max(500) })
+const sourceBodySchema = z.object({ url: z.string().url(), auto: z.boolean().optional() })
+const hiddenBodySchema = z.object({ hidden: z.boolean() })
+
+const SUBQUERIES_SCHEMA = {
+  name: 'research_subquestions',
+  description: 'Decompose a research question into focused sub-questions',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { questions: { type: 'array', items: { type: 'string' } } },
+    required: ['questions'],
+  },
+}
 const textBodySchema = z.object({ title: z.string().min(1), body: z.string().min(1) })
 const migrateBodySchema = z.object({ from: z.string().min(1), to: z.string().min(1) })
 const generateBodySchema = z.object({
@@ -53,13 +92,17 @@ const renameTenantSchema = z.object({
 const kgImplementSchema = z.object({
   applyExisting: z.boolean(),
   includeSummaries: z.boolean().optional(),
+  includeMemory: z.boolean().optional(),
 })
 const newTenantSchema = z.object({
   name: z.string().min(2).max(60),
   organisation: z.string().max(120).optional(),
   tagline: z.string().max(160).optional(),
 })
-const promptsSchema = z.object({ ask: z.string().max(4000).optional() })
+const promptsSchema = z.object({
+  ask: z.string().max(4000).optional(),
+  images: z.boolean().optional(),
+})
 const labelsetBodySchema = z.object({
   title: z.string().min(1).max(60),
   multiple: z.boolean(),
@@ -89,6 +132,11 @@ export function buildApp(opts: BuildAppOptions): Hono {
   const { provider } = opts
   const bindings = opts.bindings ?? new BindingStore({})
   const tenants = opts.tenants ?? new TenantStore({})
+  const insights = new InsightsStore()
+  const sessions = new SessionsStore()
+  const watches = new WatchStore()
+  const sources = new SourceStore()
+  const clientId = (c: Context): string => c.req.header('x-rp-client') ?? 'anonymous'
   const app = new Hono()
 
   app.use('/api/*', cors({ origin: (origin) => origin }))
@@ -324,6 +372,191 @@ export function buildApp(opts: BuildAppOptions): Hono {
         : 'Generation failed - please try again.'
       return c.json({ error: 'generation_failed', message }, 502)
     }
+  })
+
+  app.post('/api/t/:slug/feedback', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
+    const parsed = feedbackBodySchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    try {
+      await opts.management.feedback(config, parsed.data)
+      return c.json({ ok: true })
+    } catch {
+      return c.json({ error: 'feedback_failed' }, 502)
+    }
+  })
+
+  app.post('/api/t/:slug/summarize', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
+    const parsed = summarizeBodySchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    try {
+      const summary = await opts.management.summarize(
+        config,
+        parsed.data.resourceIds,
+        parsed.data.kind ?? 'simple',
+      )
+      if (!summary.trim()) return c.json({ error: 'empty_summary' }, 502)
+      return c.json({ summary })
+    } catch {
+      return c.json({ error: 'summarize_failed' }, 502)
+    }
+  })
+
+  app.post('/api/t/:slug/subqueries', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
+    const parsed = subqueriesBodySchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    try {
+      const result = await opts.management.askStructured(
+        config,
+        SUBQUERIES_SCHEMA,
+        `Break this research question into 3 to 5 focused sub-questions that together cover it fully. Sub-questions must be answerable from the corpus and phrased as standalone questions: ${parsed.data.query}`,
+      )
+      const questions = ((result.object as { questions?: unknown }).questions ?? []) as string[]
+      return c.json({
+        questions: questions.filter((q) => typeof q === 'string' && q.trim().length > 3).slice(
+          0,
+          5,
+        ),
+      })
+    } catch {
+      return c.json({ questions: [] })
+    }
+  })
+
+  // Entity dossier: the graph neighbourhood plus the resources that discuss it.
+  app.get('/api/t/:slug/entity', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
+    const name = c.req.query('name')?.trim()
+    if (!name) return c.json({ error: 'invalid_request' }, 400)
+    const [graph, results] = await Promise.all([
+      opts.management.relationsGraph(config).catch(() => ({ nodes: [], edges: [] })),
+      provider.search(config, name, { mode: 'hybrid', pageSize: 12 }).catch(() => null),
+    ])
+    const lower = name.toLowerCase()
+    const neighbourIds = new Set<string>()
+    const edges = graph.edges.filter((e) => {
+      const hit = e.source.toLowerCase() === lower || e.target.toLowerCase() === lower
+      if (hit) {
+        neighbourIds.add(e.source)
+        neighbourIds.add(e.target)
+      }
+      return hit
+    })
+    return c.json({
+      name,
+      relations: { nodes: graph.nodes.filter((n) => neighbourIds.has(n.id)), edges },
+      resources: results?.resources ?? [],
+    })
+  })
+
+  // --- Research-trail sessions, synced server-side per anonymous client ----
+
+  app.get('/api/t/:slug/sessions', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    return c.json(sessions.list(config.slug, clientId(c)))
+  })
+
+  app.get('/api/t/:slug/sessions/:id', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const session = sessions.get(config.slug, clientId(c), c.req.param('id'))
+    return session ? c.json(session) : c.json({ error: 'not_found' }, 404)
+  })
+
+  app.put('/api/t/:slug/sessions/:id', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const parsed = sessionPutSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success || parsed.data.id !== c.req.param('id')) {
+      return c.json({ error: 'invalid_request' }, 400)
+    }
+    sessions.put(config.slug, clientId(c), parsed.data)
+    return c.json({ ok: true })
+  })
+
+  app.delete('/api/t/:slug/sessions/:id', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    sessions.remove(config.slug, clientId(c), c.req.param('id'))
+    return c.json({ ok: true })
+  })
+
+  // --- Saved searches / watches --------------------------------------------
+
+  app.get('/api/t/:slug/watches', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    return c.json(watches.list(config.slug, clientId(c)))
+  })
+
+  app.post('/api/t/:slug/watches', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const parsed = watchBodySchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    return c.json(watches.add(config.slug, clientId(c), parsed.data.query))
+  })
+
+  app.post('/api/t/:slug/watches/:id/seen', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    watches.update(config.slug, c.req.param('id'), { changed: false })
+    return c.json({ ok: true })
+  })
+
+  app.delete('/api/t/:slug/watches/:id', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    watches.remove(config.slug, clientId(c), c.req.param('id'))
+    return c.json({ ok: true })
+  })
+
+  // Federated ask: stream one grounded answer per enabled portal.
+  app.post('/api/ask-estate', async (c) => {
+    const parsed = estateAskSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_query' }, 400)
+    const targets = tenants.list().map((t) => tenants.get(t.slug)).filter(
+      (t): t is TenantConfig => t !== undefined,
+    )
+    return streamSSE(c, async (stream) => {
+      let chain: Promise<void> = Promise.resolve()
+      const write = (slug: string, event: unknown) => {
+        chain = chain.then(() => stream.writeSSE({ data: JSON.stringify({ slug, event }) }))
+        return chain
+      }
+      await Promise.all(targets.map(async (config) => {
+        try {
+          for await (const event of provider.ask(config, parsed.data.query, {})) {
+            if (
+              event.type === 'delta' || event.type === 'done' || event.type === 'sources' ||
+              event.type === 'quality' || event.type === 'error'
+            ) {
+              await write(config.slug, event)
+            }
+          }
+        } catch (err) {
+          await write(config.slug, {
+            type: 'error',
+            message: err instanceof Error ? err.message : 'unknown_error',
+          })
+        }
+      }))
+      await chain
+      await stream.writeSSE({
+        data: JSON.stringify({ slug: null, event: { type: 'estate-done' } }),
+      })
+    })
   })
 
   // Convenience: which passcode to prefill on the admin login (pre-release
@@ -688,6 +921,77 @@ export function buildApp(opts: BuildAppOptions): Hono {
     return c.json({ ok: true, id })
   })
 
+  app.get('/api/admin/t/:slug/insights', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    return c.json(insights.summary(config.slug))
+  })
+
+  app.post('/api/admin/t/:slug/resources/:id/hidden', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailable = requireManagement(c)
+    if (unavailable) return unavailable
+    const parsed = hiddenBodySchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    try {
+      await management!.setResourceHidden(config, c.req.param('id'), parsed.data.hidden)
+    } catch (err) {
+      // Boxes ship with the hidden-resources feature off - enable and retry.
+      const message = err instanceof Error ? err.message : ''
+      const kbId = bindings.get(config.slug)?.baseUrl.split('/kb/')[1]
+      if (!/hidden resources enabled/i.test(message) || !kbId) throw err
+      await enableHiddenResources(opts.zone ?? 'aws-ap-southeast-2-1', kbId)
+      await management!.setResourceHidden(config, c.req.param('id'), parsed.data.hidden)
+    }
+    return c.json({ ok: true })
+  })
+
+  app.get('/api/admin/t/:slug/sources', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    return c.json(sources.list(config.slug))
+  })
+
+  app.post('/api/admin/t/:slug/sources', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const parsed = sourceBodySchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    return c.json(sources.add(config.slug, parsed.data.url, parsed.data.auto ?? true))
+  })
+
+  app.delete('/api/admin/t/:slug/sources/:id', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    sources.remove(config.slug, c.req.param('id'))
+    return c.json({ ok: true })
+  })
+
+  app.post('/api/admin/t/:slug/sources/:id/sync', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const source = sources.list(config.slug).find((s) => s.id === c.req.param('id'))
+    if (!source) return c.json({ error: 'not_found' }, 404)
+    if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
+    const management = opts.management
+    return streamSSE(c, async (stream) => {
+      const emit = (event: unknown) => stream.writeSSE({ data: JSON.stringify(event) })
+      try {
+        const added = await syncSource(
+          management,
+          sources,
+          config,
+          source,
+          (label) => emit({ type: 'item', label }),
+        )
+        await emit({ type: 'done', added })
+      } catch (err) {
+        await emit({ type: 'error', message: err instanceof Error ? err.message : 'sync_failed' })
+      }
+    })
+  })
+
   app.post('/api/admin/migrate', async (c) => {
     const unavailable = requireManagement(c)
     if (unavailable) return unavailable
@@ -813,20 +1117,65 @@ export function buildApp(opts: BuildAppOptions): Hono {
     const parsed = askBodySchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return c.json({ error: 'invalid_query' }, 400)
     return streamSSE(c, async (stream) => {
+      const { query, ...askOpts } = parsed.data
+      const settings = tenants.promptsFor(config.slug)
+      // How the platform interpreted the question, surfaced when it lands in
+      // time (first turn only - follow-ups depend on chat context).
+      let interpreted: string | null | undefined
+      if (!askOpts.context?.length && opts.management) {
+        opts.management.rephrase(config, query).then((v) => interpreted = v, () => {})
+      }
+      let interpretedSent = false
+      const record = {
+        citations: 0,
+        durationSec: null as number | null,
+        answerRelevance: null as number | null,
+        groundedness: null as number | null,
+        contextRelevance: null as number | null,
+        failed: false,
+      }
       try {
-        const { query, ...askOpts } = parsed.data
-        const promptOverride = tenants.promptsFor(config.slug).ask
         for await (
           const event of provider.ask(config, query, {
             ...askOpts,
-            ...(promptOverride ? { systemPrompt: promptOverride } : {}),
+            ...(settings.ask ? { systemPrompt: settings.ask } : {}),
+            ...(settings.images ? { images: true } : {}),
           })
         ) {
+          if (event.type === 'citation') record.citations += 1
+          if (event.type === 'usage') record.durationSec = event.totalSec ?? null
+          if (event.type === 'quality') {
+            record.answerRelevance = event.answerRelevance
+            record.groundedness = event.groundedness
+            record.contextRelevance = event.contextRelevance
+          }
+          if (event.type === 'error') record.failed = true
+          if (!interpretedSent && interpreted) {
+            interpretedSent = true
+            await stream.writeSSE({
+              data: JSON.stringify({ type: 'interpreted', query: interpreted }),
+            })
+          }
           await stream.writeSSE({ data: JSON.stringify(event) })
         }
       } catch (err) {
+        record.failed = true
         const message = err instanceof Error ? err.message : 'unknown_error'
         await stream.writeSSE({ data: JSON.stringify({ type: 'error', message }) })
+      }
+      try {
+        insights.record(config.slug, {
+          ts: new Date().toISOString(),
+          question: query.slice(0, 500),
+          answered: !record.failed && record.citations > 0,
+          citations: record.citations,
+          durationSec: record.durationSec,
+          answerRelevance: record.answerRelevance,
+          groundedness: record.groundedness,
+          contextRelevance: record.contextRelevance,
+        })
+      } catch {
+        // insights are best-effort - never fail the answer over them
       }
     })
   })

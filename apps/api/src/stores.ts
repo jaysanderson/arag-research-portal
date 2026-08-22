@@ -1,0 +1,285 @@
+import {
+  appendFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { dirname, join } from 'node:path'
+import process from 'node:process'
+
+// ---------------------------------------------------------------------------
+// Volume-backed stores for the portal's own operational data: ask insights
+// (the platform's activity endpoints are auth-restricted to dashboard users,
+// so the proxy records what it already sees), research-trail sessions,
+// saved-search watches and per-portal source registries.
+// ---------------------------------------------------------------------------
+
+const DATA_DIR = process.env.DATA_DIR ?? './data'
+
+function readJson<T>(path: string, fallback: T): T {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as T
+  } catch {
+    return fallback
+  }
+}
+
+function writeJson(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, JSON.stringify(value, null, 2))
+}
+
+function safeSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64) || 'unknown'
+}
+
+// --- Ask insights -----------------------------------------------------------
+
+export interface AskInsight {
+  ts: string
+  question: string
+  answered: boolean
+  citations: number
+  durationSec: number | null
+  answerRelevance: number | null
+  groundedness: number | null
+  contextRelevance: number | null
+}
+
+export interface InsightsSummary {
+  totalAsks: number
+  answered: number
+  unanswered: number
+  avgGroundedness: number | null
+  avgAnswerRelevance: number | null
+  topQuestions: { question: string; count: number }[]
+  gaps: { question: string; ts: string; reason: string }[]
+  recent: AskInsight[]
+}
+
+export class InsightsStore {
+  private pathFor(slug: string): string {
+    return join(DATA_DIR, 'insights', `${safeSegment(slug)}.jsonl`)
+  }
+
+  record(slug: string, insight: AskInsight): void {
+    const path = this.pathFor(slug)
+    mkdirSync(dirname(path), { recursive: true })
+    appendFileSync(path, JSON.stringify(insight) + '\n')
+  }
+
+  private readAll(slug: string): AskInsight[] {
+    try {
+      return readFileSync(this.pathFor(slug), 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as AskInsight)
+    } catch {
+      return []
+    }
+  }
+
+  summary(slug: string, days = 90): InsightsSummary {
+    const cutoff = Date.now() - days * 24 * 3600 * 1000
+    const all = this.readAll(slug).filter((i) => Date.parse(i.ts) >= cutoff)
+    const answered = all.filter((i) => i.answered)
+    const counts = new Map<string, number>()
+    for (const i of all) {
+      const key = i.question.trim().toLowerCase().replace(/[?.!]+$/, '')
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    const byCount = [...counts.entries()].sort((a, b) => b[1] - a[1])
+    const avg = (values: (number | null)[]): number | null => {
+      const nums = values.filter((v): v is number => v !== null)
+      return nums.length
+        ? Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 10) / 10
+        : null
+    }
+    // Knowledge gaps: the corpus could not answer, or answered on thin ground.
+    const gaps = all
+      .filter((i) => !i.answered || (i.groundedness !== null && i.groundedness <= 2))
+      .slice(-30)
+      .reverse()
+      .map((i) => ({
+        question: i.question,
+        ts: i.ts,
+        reason: !i.answered
+          ? 'No answer found in the corpus'
+          : `Weak grounding (${i.groundedness}/5)`,
+      }))
+    return {
+      totalAsks: all.length,
+      answered: answered.length,
+      unanswered: all.length - answered.length,
+      avgGroundedness: avg(answered.map((i) => i.groundedness)),
+      avgAnswerRelevance: avg(answered.map((i) => i.answerRelevance)),
+      topQuestions: byCount.slice(0, 10).map(([question, count]) => ({ question, count })),
+      gaps,
+      recent: all.slice(-25).reverse(),
+    }
+  }
+}
+
+// --- Research-trail sessions (namespaced per anonymous client id) -----------
+
+export interface StoredSession {
+  id: string
+  title: string
+  updatedAt: string
+  messages: unknown[]
+}
+
+export class SessionsStore {
+  private dirFor(slug: string, clientId: string): string {
+    return join(DATA_DIR, 'sessions', safeSegment(slug), safeSegment(clientId))
+  }
+
+  list(slug: string, clientId: string): { id: string; title: string; updatedAt: string }[] {
+    try {
+      const dir = this.dirFor(slug, clientId)
+      return readdirSync(dir)
+        .filter((f) => f.endsWith('.json'))
+        .map((f) => readJson<StoredSession | null>(join(dir, f), null))
+        .filter((s): s is StoredSession => s !== null)
+        .map(({ id, title, updatedAt }) => ({ id, title, updatedAt }))
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .slice(0, 100)
+    } catch {
+      return []
+    }
+  }
+
+  get(slug: string, clientId: string, id: string): StoredSession | null {
+    return readJson<StoredSession | null>(
+      join(this.dirFor(slug, clientId), `${safeSegment(id)}.json`),
+      null,
+    )
+  }
+
+  put(slug: string, clientId: string, session: StoredSession): void {
+    writeJson(join(this.dirFor(slug, clientId), `${safeSegment(session.id)}.json`), session)
+  }
+
+  remove(slug: string, clientId: string, id: string): void {
+    try {
+      rmSync(join(this.dirFor(slug, clientId), `${safeSegment(id)}.json`))
+    } catch {
+      // already gone
+    }
+  }
+}
+
+// --- Saved searches / watches ------------------------------------------------
+
+export interface Watch {
+  id: string
+  clientId: string
+  query: string
+  createdAt: string
+  lastRun: string | null
+  /** Fingerprint of the top results last time the watch ran. */
+  fingerprint: string | null
+  /** True when the latest run saw results change since the user last viewed. */
+  changed: boolean
+}
+
+export class WatchStore {
+  private pathFor(slug: string): string {
+    return join(DATA_DIR, 'watches', `${safeSegment(slug)}.json`)
+  }
+
+  list(slug: string, clientId?: string): Watch[] {
+    const all = readJson<Watch[]>(this.pathFor(slug), [])
+    return clientId ? all.filter((w) => w.clientId === clientId) : all
+  }
+
+  add(slug: string, clientId: string, query: string): Watch {
+    const all = readJson<Watch[]>(this.pathFor(slug), [])
+    const watch: Watch = {
+      id: crypto.randomUUID(),
+      clientId,
+      query,
+      createdAt: new Date().toISOString(),
+      lastRun: null,
+      fingerprint: null,
+      changed: false,
+    }
+    writeJson(this.pathFor(slug), [...all, watch].slice(-200))
+    return watch
+  }
+
+  update(slug: string, id: string, patch: Partial<Watch>): void {
+    const all = readJson<Watch[]>(this.pathFor(slug), [])
+    writeJson(this.pathFor(slug), all.map((w) => (w.id === id ? { ...w, ...patch } : w)))
+  }
+
+  remove(slug: string, clientId: string, id: string): void {
+    const all = readJson<Watch[]>(this.pathFor(slug), [])
+    writeJson(this.pathFor(slug), all.filter((w) => !(w.id === id && w.clientId === clientId)))
+  }
+}
+
+// --- Source registry (scheduled re-syncs) ------------------------------------
+
+export interface Source {
+  id: string
+  url: string
+  addedAt: string
+  lastSync: string | null
+  lastAdded: number
+  /** Sync automatically on the daily schedule. */
+  auto: boolean
+  /** Urls already ingested from this source (dedupe across syncs). */
+  synced?: string[]
+}
+
+export class SourceStore {
+  private pathFor(slug: string): string {
+    return join(DATA_DIR, 'sources', `${safeSegment(slug)}.json`)
+  }
+
+  list(slug: string): Source[] {
+    return readJson<Source[]>(this.pathFor(slug), [])
+  }
+
+  /** Slugs that have at least one source registered. */
+  slugs(): string[] {
+    try {
+      return readdirSync(join(DATA_DIR, 'sources'))
+        .filter((f) => f.endsWith('.json'))
+        .map((f) => f.replace(/\.json$/, ''))
+    } catch {
+      return []
+    }
+  }
+
+  add(slug: string, url: string, auto: boolean): Source {
+    const all = this.list(slug)
+    const existing = all.find((s) => s.url === url)
+    if (existing) return existing
+    const source: Source = {
+      id: crypto.randomUUID(),
+      url,
+      addedAt: new Date().toISOString(),
+      lastSync: null,
+      lastAdded: 0,
+      auto,
+      synced: [],
+    }
+    writeJson(this.pathFor(slug), [...all, source])
+    return source
+  }
+
+  update(slug: string, id: string, patch: Partial<Source>): void {
+    writeJson(
+      this.pathFor(slug),
+      this.list(slug).map((s) => (s.id === id ? { ...s, ...patch } : s)),
+    )
+  }
+
+  remove(slug: string, id: string): void {
+    writeJson(this.pathFor(slug), this.list(slug).filter((s) => s.id !== id))
+  }
+}

@@ -157,8 +157,8 @@ export interface TenantPatch {
   suggestedQuestions?: TenantConfig['suggestedQuestions']
   searchPlaceholder?: string
   branding?: TenantConfig['branding']
-  /** Portal-managed system prompts per surface (app-side settings). */
-  prompts?: { ask?: string }
+  /** Portal-managed behaviour settings (system prompt, image grounding). */
+  prompts?: { ask?: string; images?: boolean }
 }
 
 export class TenantStore {
@@ -199,7 +199,7 @@ export class TenantStore {
   }
 
   /** App-side settings that never reach the public config payload. */
-  promptsFor(slug: string): { ask?: string } {
+  promptsFor(slug: string): { ask?: string; images?: boolean } {
     return this.overrides[slug]?.prompts ?? {}
   }
 

@@ -217,10 +217,12 @@ function NeighbourPanel({
 function EntityNeighbourPanel({
   graph,
   selectedId,
+  slug,
   onClear,
 }: {
   graph: RelationsGraph
   selectedId: string
+  slug: string
   onClear: () => void
 }) {
   const relations = graph.edges.filter((e) => e.source === selectedId || e.target === selectedId)
@@ -231,6 +233,14 @@ function EntityNeighbourPanel({
       countLabel={`Relations (${relations.length})`}
       onClear={onClear}
     >
+      <Link
+        to={`/t/${slug}/entity/${encodeURIComponent(selectedId)}`}
+        className='rp-focus mb-1 mt-2.5 inline-flex items-center gap-1 rounded-[4px] text-sm font-medium transition-colors duration-150'
+        style={{ color: 'var(--rp-accent)' }}
+      >
+        Open dossier
+        <span aria-hidden='true'>&rarr;</span>
+      </Link>
       {relations.length === 0
         ? <p className='mt-2 text-sm text-ink-3'>No extracted relations for this entity.</p>
         : (
@@ -458,7 +468,7 @@ function ConceptGraph({
 // Entity graph - extracted entities and the relations between them.
 // ---------------------------------------------------------------------------
 
-function EntityGraph({ graph }: { graph: RelationsGraph }) {
+function EntityGraph({ graph, slug }: { graph: RelationsGraph; slug: string }) {
   const [positions, setPositions] = useState<Map<string, Position>>(new Map())
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
@@ -628,6 +638,7 @@ function EntityGraph({ graph }: { graph: RelationsGraph }) {
           <EntityNeighbourPanel
             graph={graph}
             selectedId={selectedId}
+            slug={slug}
             onClear={() => setSelectedId(null)}
           />
         )
@@ -751,7 +762,7 @@ export function GraphPage() {
       )}
 
       {!isLoading && !isError && !isEmpty && !isConcept && relations && (
-        <EntityGraph graph={relations} />
+        <EntityGraph graph={relations} slug={slug} />
       )}
     </main>
   )

@@ -181,6 +181,7 @@ export class AragProvider implements RetrievalProvider {
         title: r.title ?? id,
         status: status === 'PROCESSED' ? 'processed' : status === 'ERROR' ? 'error' : 'pending',
         created: r.created,
+        hidden: (r as { hidden?: boolean }).hidden ?? false,
       }
     })
   }
@@ -201,13 +202,14 @@ export class AragProvider implements RetrievalProvider {
 
   async createLink(
     tenant: TenantConfig,
-    input: { url: string; title?: string },
+    input: { url: string; title?: string; hidden?: boolean },
   ): Promise<{ id: string }> {
     const res = await this.client(tenant).postJson<{ uuid?: string }>('/resources', {
       title: input.title ?? input.url,
       icon: 'application/stf-link',
       origin: { url: input.url },
       links: { link: { uri: input.url } },
+      ...(input.hidden ? { hidden: true } : {}),
     })
     this.invalidateCatalogue(tenant.slug)
     return { id: res.uuid ?? '' }
@@ -407,6 +409,7 @@ export class AragProvider implements RetrievalProvider {
     params.append('show', 'basic')
     params.set('sort_field', opts.sortField ?? 'created')
     params.set('sort_order', opts.sortOrder ?? 'desc')
+    params.set('hidden', 'false')
     if (opts.query) params.set('query', opts.query)
     for (const topic of opts.topicIds ?? []) {
       params.append('filters', `/classification.labels/topic/${topic}`)
@@ -739,6 +742,62 @@ export class AragProvider implements RetrievalProvider {
     }
   }
 
+  /** Grounded multi-resource summary via the box's summarize endpoint. */
+  async summarize(
+    tenant: TenantConfig,
+    resourceIds: string[],
+    kind: 'simple' | 'extended' = 'simple',
+  ): Promise<string> {
+    const raw = await this.client(tenant).postJson<{
+      summary?: string
+      resources?: Record<string, { summary?: string }>
+    }>('/summarize', { resources: resourceIds.slice(0, 20), summary_kind: kind })
+    if (raw.summary?.trim()) return raw.summary
+    return Object.values(raw.resources ?? {})
+      .map((r) => r.summary ?? '')
+      .filter(Boolean)
+      .join('\n\n')
+  }
+
+  /** The platform's rephrasing of a query; null when unchanged/unavailable. */
+  async rephrase(tenant: TenantConfig, question: string): Promise<string | null> {
+    try {
+      const raw = await this.client(tenant).postJson<unknown>('/predict/rephrase', {
+        question,
+        user_id: 'research-portal',
+      })
+      const text = typeof raw === 'string'
+        ? raw
+        : (raw as { rephrased_query?: string; text?: string }).rephrased_query ??
+          (raw as { text?: string }).text ?? ''
+      // The predict endpoint appends a single status digit to the rephrased text.
+      const cleaned = text.trim().replace(/[01]$/, '').trim().replace(/\?+$/, (m) => m.slice(0, 1))
+      if (!cleaned || cleaned.toLowerCase() === question.trim().toLowerCase()) return null
+      return cleaned
+    } catch {
+      return null
+    }
+  }
+
+  /** Give the platform feedback on an answer (its learning loop). */
+  async feedback(
+    tenant: TenantConfig,
+    input: { learningId: string; good: boolean; text?: string },
+  ): Promise<void> {
+    await this.client(tenant).postJson('/feedback', {
+      ident: input.learningId,
+      good: input.good,
+      task: 'CHAT',
+      ...(input.text ? { feedback: input.text } : {}),
+    })
+  }
+
+  /** Show or hide a resource from searchers (draft/publish workflow). */
+  async setResourceHidden(tenant: TenantConfig, id: string, hidden: boolean): Promise<void> {
+    await this.client(tenant).patchJson(`/resource/${id}`, { hidden })
+    this.invalidateCatalogue(tenant.slug)
+  }
+
   /** Type-ahead: entity and title suggestions from the box's suggest index. */
   async typeahead(
     tenant: TenantConfig,
@@ -1002,10 +1061,25 @@ export class AragProvider implements RetrievalProvider {
     // Agentic retrieval upgrades: widen grounding windows around each hit and
     // walk the knowledge graph from entities detected in the query (uses the
     // box's graph extraction agent). Degrades gracefully if unsupported.
-    body.rag_strategies = [
-      { name: 'neighbouring_paragraphs', before: 2, after: 2 },
-      { name: 'graph_beta', hops: 2, agentic_graph_only: true },
-    ]
+    const strategies: Record<string, unknown>[] = opts.depth === 'deep'
+      ? [{ name: 'full_resource' }]
+      : [
+        { name: 'neighbouring_paragraphs', before: 2, after: 2 },
+        { name: 'graph_beta', hops: 2, agentic_graph_only: true },
+      ]
+    if (opts.prequeries && opts.prequeries.length > 0) {
+      strategies.push({
+        name: 'prequeries',
+        queries: opts.prequeries.slice(0, 8).map((q) => ({
+          request: { query: q, features: ['keyword', 'semantic'] },
+          weight: 1,
+        })),
+      })
+    }
+    body.rag_strategies = strategies
+    if (opts.images) {
+      body.rag_images_strategies = [{ name: 'page_image' }, { name: 'tables' }]
+    }
 
     let sources: ScoredResource[] = []
     const contextTexts: string[] = []
@@ -1075,6 +1149,8 @@ export class AragProvider implements RetrievalProvider {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
         const res = await client.postStream('/ask', body, { 'x-show-consumption': 'true' })
+        const learningId = res.headers.get('nuclia-learning-id')
+        if (learningId) yield { type: 'learning', id: learningId }
         for await (const line of ndjson(res)) {
           const item = (line as { item?: { type?: string } & Record<string, unknown> }).item
           if (!item?.type) continue
@@ -1174,10 +1250,11 @@ export class AragProvider implements RetrievalProvider {
         // (graph strategy) is unsupported here - shed it and go again.
         if (
           !emitted && status >= 400 && status < 500 &&
-          (body.rag_strategies || body.search_configuration)
+          (body.rag_strategies || body.search_configuration || body.rag_images_strategies)
         ) {
           delete body.rag_strategies
           delete body.search_configuration
+          delete body.rag_images_strategies
           continue
         }
         const retryable = status === 412 || status >= 500

@@ -15,7 +15,9 @@ primary_region = "syd"
   force_https = true
   auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 0
+  # One machine stays up so scheduled source syncs and saved-search checks run
+  # daily without waiting for a visitor to wake the app.
+  min_machines_running = 1
 
 [mounts]
   source = "rp_data"

@@ -171,6 +171,10 @@ export interface AskRequest {
   context?: { author: 'USER' | 'AGENT'; text: string }[]
   resourceId?: string
   topicIds?: string[]
+  /** 'deep' grounds on the full text of matching resources (self-heal / deep research). */
+  depth?: 'default' | 'deep'
+  /** Sub-questions researched alongside the main query (deep-research mode). */
+  prequeries?: string[]
 }
 
 /**
@@ -301,7 +305,7 @@ export function getAdminRecent(slug: string, passcode: string): Promise<RecentRe
 export function addAdminLink(
   slug: string,
   passcode: string,
-  input: { url: string; title?: string },
+  input: { url: string; title?: string; hidden?: boolean },
 ): Promise<{ id: string }> {
   return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/resources/link`, passcode, {
     method: 'POST',
@@ -550,7 +554,7 @@ export function deleteAgent(
 export async function implementKg(
   slug: string,
   passcode: string,
-  opts: { applyExisting: boolean; includeSummaries: boolean },
+  opts: { applyExisting: boolean; includeSummaries: boolean; includeMemory?: boolean },
   onEvent: (event: KgImplementEvent) => void,
 ): Promise<void> {
   const res = await fetch(`/api/admin/t/${encodeURIComponent(slug)}/kg/implement`, {
@@ -611,14 +615,17 @@ export function getTypeahead(
   return request(`/api/t/${encodeURIComponent(slug)}/typeahead?q=${encodeURIComponent(q)}`)
 }
 
-export function getPrompts(slug: string, passcode: string): Promise<{ ask?: string }> {
+export function getPrompts(
+  slug: string,
+  passcode: string,
+): Promise<{ ask?: string; images?: boolean }> {
   return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/prompts`, passcode)
 }
 
 export function savePrompts(
   slug: string,
   passcode: string,
-  prompts: { ask?: string },
+  prompts: { ask?: string; images?: boolean },
 ): Promise<{ ok: boolean }> {
   return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/prompts`, passcode, {
     method: 'PUT',
@@ -650,4 +657,327 @@ export function getRelationsGraph(slug: string): Promise<{
   edges: { source: string; target: string; label: string }[]
 }> {
   return request(`/api/t/${encodeURIComponent(slug)}/graph/relations`)
+}
+
+// ---------------------------------------------------------------------------
+// Anonymous client identity: research trails and saved searches are stored
+// server-side per browser, keyed by this locally-persisted id.
+// ---------------------------------------------------------------------------
+
+export function clientId(): string {
+  const KEY = 'rp-client-id'
+  let id = localStorage.getItem(KEY)
+  if (!id) {
+    id = crypto.randomUUID().replace(/-/g, '')
+    localStorage.setItem(KEY, id)
+  }
+  return id
+}
+
+async function clientRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: { ...(init?.headers ?? {}), 'x-rp-client': clientId() },
+  })
+  const body: unknown = await res.json().catch(() => null)
+  if (!res.ok) {
+    const message = body && typeof body === 'object' && 'error' in body &&
+        typeof (body as { error: unknown }).error === 'string'
+      ? (body as { error: string }).error
+      : 'Request failed'
+    throw new ApiError(res.status, message)
+  }
+  return body as T
+}
+
+// --- Answer feedback (the platform's learning loop) -------------------------
+
+export function sendAnswerFeedback(
+  slug: string,
+  input: { learningId: string; good: boolean; text?: string },
+): Promise<{ ok: boolean }> {
+  return clientRequest(`/api/t/${encodeURIComponent(slug)}/feedback`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+// --- Multi-document summaries ------------------------------------------------
+
+export function summarizeResources(
+  slug: string,
+  resourceIds: string[],
+  kind: 'simple' | 'extended' = 'simple',
+): Promise<{ summary: string }> {
+  return clientRequest(`/api/t/${encodeURIComponent(slug)}/summarize`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ resourceIds, kind }),
+  })
+}
+
+// --- Deep research: decompose a question into sub-questions ------------------
+
+export function getSubqueries(slug: string, query: string): Promise<{ questions: string[] }> {
+  return clientRequest(`/api/t/${encodeURIComponent(slug)}/subqueries`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ query }),
+  })
+}
+
+// --- Entity dossiers ---------------------------------------------------------
+
+export interface EntityDossier {
+  name: string
+  relations: {
+    nodes: { id: string; group: string; weight: number }[]
+    edges: { source: string; target: string; label: string }[]
+  }
+  resources: SearchResults['resources']
+}
+
+export function getEntityDossier(slug: string, name: string): Promise<EntityDossier> {
+  return clientRequest(
+    `/api/t/${encodeURIComponent(slug)}/entity?name=${encodeURIComponent(name)}`,
+  )
+}
+
+// --- Research-trail sessions (server-synced per browser) ---------------------
+
+export interface StoredSessionMeta {
+  id: string
+  title: string
+  updatedAt: string
+}
+
+export function listServerSessions(slug: string): Promise<StoredSessionMeta[]> {
+  return clientRequest(`/api/t/${encodeURIComponent(slug)}/sessions`)
+}
+
+export function getServerSession<T = unknown>(
+  slug: string,
+  id: string,
+): Promise<{ id: string; title: string; updatedAt: string; messages: T[] }> {
+  return clientRequest(`/api/t/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(id)}`)
+}
+
+export function putServerSession(
+  slug: string,
+  session: { id: string; title: string; updatedAt: string; messages: unknown[] },
+): Promise<{ ok: boolean }> {
+  return clientRequest(
+    `/api/t/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(session.id)}`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(session),
+    },
+  )
+}
+
+export function deleteServerSession(slug: string, id: string): Promise<{ ok: boolean }> {
+  return clientRequest(`/api/t/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+}
+
+// --- Saved searches / watches ------------------------------------------------
+
+export interface SavedWatch {
+  id: string
+  query: string
+  createdAt: string
+  lastRun: string | null
+  changed: boolean
+}
+
+export function listWatches(slug: string): Promise<SavedWatch[]> {
+  return clientRequest(`/api/t/${encodeURIComponent(slug)}/watches`)
+}
+
+export function addWatch(slug: string, query: string): Promise<SavedWatch> {
+  return clientRequest(`/api/t/${encodeURIComponent(slug)}/watches`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ query }),
+  })
+}
+
+export function markWatchSeen(slug: string, id: string): Promise<{ ok: boolean }> {
+  return clientRequest(
+    `/api/t/${encodeURIComponent(slug)}/watches/${encodeURIComponent(id)}/seen`,
+    { method: 'POST' },
+  )
+}
+
+export function deleteWatch(slug: string, id: string): Promise<{ ok: boolean }> {
+  return clientRequest(`/api/t/${encodeURIComponent(slug)}/watches/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+}
+
+// --- Federated estate ask ----------------------------------------------------
+
+/** One event from the estate-wide ask stream; slug null marks the final event. */
+export interface EstateEvent {
+  slug: string | null
+  event: AskEvent | { type: 'estate-done' }
+}
+
+export async function streamEstateAsk(
+  query: string,
+  onEvent: (event: EstateEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch('/api/ask-estate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ query }),
+    signal,
+  })
+  if (!res.ok || !res.body) {
+    throw new ApiError(res.status, res.statusText || 'The answer service is unavailable')
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const emit = (frame: string) => {
+    const line = frame.trim()
+    if (!line) return
+    const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
+    onEvent(JSON.parse(data) as EstateEvent)
+  }
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) emit(frame)
+  }
+  emit(buffer)
+}
+
+// --- Admin: ask insights -----------------------------------------------------
+
+export interface AskInsightRow {
+  ts: string
+  question: string
+  answered: boolean
+  citations: number
+  durationSec: number | null
+  answerRelevance: number | null
+  groundedness: number | null
+  contextRelevance: number | null
+}
+
+export interface InsightsSummary {
+  totalAsks: number
+  answered: number
+  unanswered: number
+  avgGroundedness: number | null
+  avgAnswerRelevance: number | null
+  topQuestions: { question: string; count: number }[]
+  gaps: { question: string; ts: string; reason: string }[]
+  recent: AskInsightRow[]
+}
+
+export function getInsights(slug: string, passcode: string): Promise<InsightsSummary> {
+  return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/insights`, passcode)
+}
+
+// --- Admin: hidden-resource curation -----------------------------------------
+
+export function setResourceHidden(
+  slug: string,
+  passcode: string,
+  resourceId: string,
+  hidden: boolean,
+): Promise<{ ok: boolean }> {
+  return adminRequest(
+    `/api/admin/t/${encodeURIComponent(slug)}/resources/${encodeURIComponent(resourceId)}/hidden`,
+    passcode,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ hidden }),
+    },
+  )
+}
+
+// --- Admin: source registry and syncs ----------------------------------------
+
+export interface PortalSource {
+  id: string
+  url: string
+  addedAt: string
+  lastSync: string | null
+  lastAdded: number
+  auto: boolean
+}
+
+export function getSources(slug: string, passcode: string): Promise<PortalSource[]> {
+  return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/sources`, passcode)
+}
+
+export function addSource(
+  slug: string,
+  passcode: string,
+  url: string,
+): Promise<PortalSource> {
+  return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/sources`, passcode, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ url }),
+  })
+}
+
+export function deleteSource(
+  slug: string,
+  passcode: string,
+  id: string,
+): Promise<{ ok: boolean }> {
+  return adminRequest(
+    `/api/admin/t/${encodeURIComponent(slug)}/sources/${encodeURIComponent(id)}`,
+    passcode,
+    { method: 'DELETE' },
+  )
+}
+
+export type SourceSyncEvent =
+  | { type: 'item'; label: string }
+  | { type: 'done'; added: number }
+  | { type: 'error'; message: string }
+
+export async function syncSource(
+  slug: string,
+  passcode: string,
+  id: string,
+  onEvent: (event: SourceSyncEvent) => void,
+): Promise<void> {
+  const res = await fetch(
+    `/api/admin/t/${encodeURIComponent(slug)}/sources/${encodeURIComponent(id)}/sync`,
+    { method: 'POST', headers: { 'x-admin-passcode': passcode } },
+  )
+  if (!res.ok || !res.body) throw new ApiError(res.status, 'The sync failed to start')
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const emit = (frame: string) => {
+    const line = frame.trim()
+    if (!line) return
+    const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
+    onEvent(JSON.parse(data) as SourceSyncEvent)
+  }
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) emit(frame)
+  }
+  emit(buffer)
 }

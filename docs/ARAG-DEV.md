@@ -60,6 +60,28 @@ search configurations are all configurable objects ON the KB, viewable in the ad
   whitespace runs** - normalize before rendering or raw `##`/`|` leaks on screen and position-based
   citation highlighting breaks.
 
+- **Multi-doc summaries:** `POST /kb/{id}/summarize` `{resources: [uids] (REQUIRED), summary_kind:
+  'simple'|'extended', user_prompt?}` - verified 2xx; response has a combined `summary` plus
+  per-resource summaries. Missing uids are silently ignored.
+- **Prequeries (deep research):** `rag_strategies: [{name:'prequeries', queries:[{request:
+  {query, features:['keyword','semantic']}, weight: 1}], ...}]` - max 10 queries, each `request`
+  is a full FindRequest. `full_resource` and `page_image`/`tables` (under `rag_images_strategies`)
+  are the other verified strategy names.
+- **Rephrase:** `POST /kb/{id}/predict/rephrase` `{question, user_id}` works with the SA token BUT
+  **appends a single status digit** (`0`/`1`) to the rephrased text - strip a trailing `[01]`.
+- **Answer feedback:** `POST /kb/{id}/feedback` `{ident, good, task:'CHAT', feedback?}` where
+  `ident` is the `Nuclia-Learning-Id` **response header** of the original `/ask` - capture it at
+  stream time or it is gone.
+- **Hidden resources:** `PATCH /resource/{id}` `{hidden:true}` 422s until the KB-level feature is
+  on, and there is NO regional endpoint to enable it. The account-scoped Zone API
+  `PATCH /account/{acct}/kb/{kbid}` `{hidden_resources_enabled:true}` (NUA key) accepts it even
+  though the field is undocumented on that endpoint - verified live. `/catalog` returns hidden
+  resources unless you pass `hidden=false`; `/find`/`/ask` exclude them by default.
+- **Memory DA task:** `POST {dp}/task/start` `{name:'memory', parameters:{name, on:1, operations:
+  [{memory:{ident, prompt?, rules?}}], llm:{model}}, apply, enabled}` - verified 200.
+- **Activity endpoints (`/kb/{id}/activity/*`) are 403 to SA tokens** (dashboard-user auth only).
+  Ask analytics must be logged app-side at the proxy - which sees every ask anyway.
+
 ## Known platform bugs - DO NOT burn cycles rediscovering these
 - **DA-Generator JSON output (`json:true` / `kv_schema_id`) is BROKEN** - 422s even on Progress's
   own example, even schema-free. It is the ingest-time DA task path only. Workarounds: a plain-text

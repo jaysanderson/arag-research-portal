@@ -225,6 +225,7 @@ export function AddContent({
 
   const [url, setUrl] = useState('')
   const [linkTitle, setLinkTitle] = useState('')
+  const [linkDraft, setLinkDraft] = useState(false)
   const [textTitle, setTextTitle] = useState('')
   const [textBody, setTextBody] = useState('')
 
@@ -274,12 +275,20 @@ export function AddContent({
   const onSubmitLink = async (event: FormEvent) => {
     event.preventDefault()
     const ok = await run(
-      () => addAdminLink(slug, passcode, { url, title: linkTitle.trim() || undefined }),
-      'Link added - it will appear below once processed.',
+      () =>
+        addAdminLink(slug, passcode, {
+          url,
+          title: linkTitle.trim() || undefined,
+          hidden: linkDraft || undefined,
+        }),
+      linkDraft
+        ? 'Link added as a draft - publish it from Recent additions once processed.'
+        : 'Link added - it will appear below once processed.',
     )
     if (ok) {
       setUrl('')
       setLinkTitle('')
+      setLinkDraft(false)
     }
   }
 
@@ -391,6 +400,14 @@ export function AddContent({
                     autoComplete='off'
                   />
                 </div>
+                <label className='flex items-center gap-2 text-sm text-ink-2'>
+                  <input
+                    type='checkbox'
+                    checked={linkDraft}
+                    onChange={(e) => setLinkDraft(e.target.checked)}
+                  />
+                  Ingest as draft (hidden until published)
+                </label>
                 <button type='submit' disabled={busy} className='rp-btn rp-btn-primary'>
                   {busy ? 'Adding…' : 'Add link'}
                 </button>

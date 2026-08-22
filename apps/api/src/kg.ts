@@ -191,7 +191,7 @@ export async function* implementKgStrategy(
   management: AragProvider,
   config: TenantConfig,
   proposal: KgProposal,
-  opts: { applyExisting: boolean; includeSummaries: boolean },
+  opts: { applyExisting: boolean; includeSummaries: boolean; includeMemory?: boolean },
 ): AsyncGenerator<KgImplementEvent> {
   yield { type: 'stage', label: 'Resolving the box generative model' }
   const model = await management.generativeModel(config)
@@ -352,6 +352,22 @@ export async function* implementKgStrategy(
         destination: 'pagesummary',
       },
     }])
+  }
+
+  if (opts.includeMemory) {
+    const memoryTitle = `memory-${slugify(config.slug)}`
+    if (existingByTitle.has(memoryTitle)) {
+      agents += 1
+      yield { type: 'item', label: 'Conversation memory agent already registered - keeping it' }
+    } else {
+      yield* tryStart('Conversation memory', 'memory', memoryTitle, [{
+        memory: {
+          ident: `memory-${slugify(config.slug)}`,
+          prompt:
+            'Remember the research topics, entities and preferences this user has shown interest in, and use them to sharpen future answers.',
+        },
+      }])
+    }
   }
 
   if (agents === 0) {

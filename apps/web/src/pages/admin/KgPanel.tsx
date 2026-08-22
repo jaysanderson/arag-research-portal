@@ -44,6 +44,7 @@ export function KgPanel(
   const [proposal, setProposal] = useState<KgProposal | null>(null)
   const [applyExisting, setApplyExisting] = useState(true)
   const [includeSummaries, setIncludeSummaries] = useState(true)
+  const [includeMemory, setIncludeMemory] = useState(false)
   const [implementing, setImplementing] = useState(false)
   const [log, setLog] = useState<KgImplementEvent[]>([])
   const [message, setMessage] = useState<Message | null>(null)
@@ -75,18 +76,23 @@ export function KgPanel(
     setLog([])
     setMessage(null)
     try {
-      await implementKg(slug, passcode, { applyExisting, includeSummaries }, (event) => {
-        setLog((prev) => [...prev, event])
-        if (event.type === 'done') {
-          setMessage({
-            tone: 'ok',
-            text: `Strategy implemented - ${event.agents} ${
-              event.agents === 1 ? 'agent' : 'agents'
-            } installed on the box.`,
-          })
-        }
-        if (event.type === 'error') setMessage({ tone: 'error', text: event.message })
-      })
+      await implementKg(
+        slug,
+        passcode,
+        { applyExisting, includeSummaries, includeMemory },
+        (event) => {
+          setLog((prev) => [...prev, event])
+          if (event.type === 'done') {
+            setMessage({
+              tone: 'ok',
+              text: `Strategy implemented - ${event.agents} ${
+                event.agents === 1 ? 'agent' : 'agents'
+              } installed on the box.`,
+            })
+          }
+          if (event.type === 'error') setMessage({ tone: 'error', text: event.message })
+        },
+      )
       await queryClient.invalidateQueries({ queryKey: ['kb-agents', slug] })
     } catch (err) {
       setMessage({
@@ -155,7 +161,19 @@ export function KgPanel(
               />
               Generate page summaries
             </label>
+            <label className='flex items-center gap-2 text-sm text-ink-2'>
+              <input
+                type='checkbox'
+                checked={includeMemory}
+                onChange={(e) => setIncludeMemory(e.target.checked)}
+              />
+              Conversation memory agent
+            </label>
           </div>
+          <p className='text-xs text-ink-3'>
+            Conversation memory agent: remembers each user's research interests across conversations
+            and sharpens future answers.
+          </p>
 
           <button
             type='button'

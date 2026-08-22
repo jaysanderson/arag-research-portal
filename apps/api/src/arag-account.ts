@@ -15,9 +15,10 @@ async function accountApi<T = unknown>(
   zone: string,
   path: string,
   body?: unknown,
+  method?: string,
 ): Promise<{ status: number; json: T | null; text: string }> {
   const res = await fetch(`${regionalBase(zone)}${path}`, {
-    method: body === undefined ? 'GET' : 'POST',
+    method: method ?? (body === undefined ? 'GET' : 'POST'),
     headers: {
       'content-type': 'application/json',
       'x-nuclia-nuakey': `Bearer ${process.env.ARAG_NUA_KEY}`,
@@ -97,4 +98,25 @@ export async function createKnowledgeBox(
   }
 
   return { baseUrl: `${regionalBase(zone)}/kb/${kbId}`, token: key.json.token, kbId }
+}
+
+/**
+ * Switch on the box's hidden-resources feature (a KB-level setting, only
+ * writable with the account key). Undocumented on the account PATCH but
+ * verified live - the config change shows in GET /kb/{kbid} afterwards.
+ */
+export async function enableHiddenResources(zone: string, kbId: string): Promise<void> {
+  const account = process.env.ARAG_ACCOUNT
+  if (!accountOpsAvailable() || !account) {
+    throw new Error('Hidden resources need the account key configured on this server')
+  }
+  const res = await accountApi(
+    zone,
+    `/account/${account}/kb/${kbId}`,
+    { hidden_resources_enabled: true },
+    'PATCH',
+  )
+  if (res.status >= 400) {
+    throw new Error(`The platform refused to enable hidden resources (${res.status})`)
+  }
 }

@@ -16,6 +16,11 @@ import {
 } from '@research-portal/core'
 import type { RetrievalProvider } from '@research-portal/retrieval'
 import { buildApp } from './app.ts'
+import { TenantStore } from './tenants.ts'
+
+// Hermetic tenant store - tests must never read the repo's live data/tenants.json.
+const freshTenants = () =>
+  new TenantStore({ TENANTS_PATH: `${Deno.makeTempDirSync()}/tenants.json` })
 import { BindingStore } from './bindings.ts'
 
 // ---------------------------------------------------------------------------
@@ -108,7 +113,7 @@ class StubProvider implements RetrievalProvider {
 }
 
 function makeApp() {
-  return buildApp({ provider: new StubProvider() })
+  return buildApp({ provider: new StubProvider(), tenants: freshTenants() })
 }
 
 describe('GET /api/tenants', () => {
@@ -190,14 +195,22 @@ describe('admin', () => {
   const passcode = 'test-passcode'
 
   it('rejects admin calls without the passcode', async () => {
-    const app = buildApp({ provider: new StubProvider(), adminPasscode: passcode })
+    const app = buildApp({
+      provider: new StubProvider(),
+      tenants: freshTenants(),
+      adminPasscode: passcode,
+    })
     const response = await app.request('/api/admin/overview')
 
     expect(response.status).toBe(401)
   })
 
   it('returns a schema-valid overview with the passcode', async () => {
-    const app = buildApp({ provider: new StubProvider(), adminPasscode: passcode })
+    const app = buildApp({
+      provider: new StubProvider(),
+      tenants: freshTenants(),
+      adminPasscode: passcode,
+    })
     const response = await app.request('/api/admin/overview', {
       headers: { 'x-admin-passcode': passcode },
     })
@@ -223,7 +236,12 @@ describe('admin', () => {
     })
     expect(bindings.status('frdc').status).toBe('connected')
 
-    const app = buildApp({ provider: new StubProvider(), bindings, adminPasscode: passcode })
+    const app = buildApp({
+      provider: new StubProvider(),
+      tenants: freshTenants(),
+      bindings,
+      adminPasscode: passcode,
+    })
     const response = await app.request('/api/admin/t/frdc/knowledge-box', {
       method: 'DELETE',
       headers: { 'x-admin-passcode': passcode },

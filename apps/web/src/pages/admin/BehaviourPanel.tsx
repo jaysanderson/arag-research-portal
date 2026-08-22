@@ -10,6 +10,7 @@ import { errorMessage, type Message } from './shared.ts'
  */
 function AskPromptEditor({ slug, passcode }: { slug: string; passcode: string }) {
   const [value, setValue] = useState('')
+  const [images, setImages] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<Message | null>(null)
@@ -22,6 +23,7 @@ function AskPromptEditor({ slug, passcode }: { slug: string; passcode: string })
   useEffect(() => {
     if (data && !loaded) {
       setValue(data.ask ?? '')
+      setImages(data.images ?? false)
       setLoaded(true)
     }
   }, [data, loaded])
@@ -30,7 +32,7 @@ function AskPromptEditor({ slug, passcode }: { slug: string; passcode: string })
     setBusy(true)
     setMessage(null)
     try {
-      await savePrompts(slug, passcode, { ask: value.trim() || undefined })
+      await savePrompts(slug, passcode, { ask: value.trim() || undefined, images })
       setMessage({ tone: 'ok', text: 'Saved - the new prompt applies to the next answer.' })
     } catch (err) {
       setMessage({ tone: 'error', text: errorMessage(err, 'Could not save the prompt.') })
@@ -52,6 +54,18 @@ function AskPromptEditor({ slug, passcode }: { slug: string; passcode: string })
         onChange={(e) => setValue(e.target.value)}
         placeholder='Leave empty to use the default analyst prompt.'
       />
+      <label className='mt-3 flex items-center gap-2 text-sm text-ink-2'>
+        <input
+          type='checkbox'
+          checked={images}
+          onChange={(e) => setImages(e.target.checked)}
+        />
+        Ground answers on page and table images
+      </label>
+      <p className='mt-1 text-xs text-ink-3'>
+        Uses visual content (page images, tables) as extra context when answering - useful for
+        PDF-heavy corpora.
+      </p>
       <div className='mt-3 flex items-center gap-3'>
         <button
           type='button'

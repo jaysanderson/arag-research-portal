@@ -7,16 +7,27 @@ import { AddContent } from './admin/AddContent.tsx'
 import { AnalysePanel } from './admin/AnalysePanel.tsx'
 import { AppearancePanel } from './admin/AppearancePanel.tsx'
 import { BehaviourPanel } from './admin/BehaviourPanel.tsx'
+import { InsightsPanel } from './admin/InsightsPanel.tsx'
 import { KgPanel } from './admin/KgPanel.tsx'
 import { RecentList } from './admin/RecentList.tsx'
 import { RenamePortal } from './admin/RenamePortal.tsx'
+import { SourcesPanel } from './admin/SourcesPanel.tsx'
 import { StatTiles } from './admin/StatTiles.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
-type TabId = 'overview' | 'content' | 'taxonomy' | 'graph' | 'appearance' | 'behaviour' | 'details'
+type TabId =
+  | 'overview'
+  | 'insights'
+  | 'content'
+  | 'taxonomy'
+  | 'graph'
+  | 'appearance'
+  | 'behaviour'
+  | 'details'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
+  { id: 'insights', label: 'Insights' },
   { id: 'content', label: 'Content' },
   { id: 'taxonomy', label: 'Taxonomy' },
   { id: 'graph', label: 'Knowledge graph' },
@@ -218,13 +229,13 @@ export function ManagePage() {
                 </div>
               )}
 
-              {tab === 'content' && (
+              {tab === 'insights' && (
                 <div className='rp-card p-5'>
                   {reachable
-                    ? <AddContent slug={slug} passcode={passcode} onAdded={onContentAdded} />
+                    ? <InsightsPanel slug={slug} passcode={passcode} />
                     : (
                       <p className='text-sm text-ink-3'>
-                        Connect a knowledge box to add content.{' '}
+                        Connect a knowledge box to see insights.{' '}
                         <Link
                           to='/admin'
                           className='font-medium text-ink-2 hover:text-[var(--rp-ink)]'
@@ -233,6 +244,27 @@ export function ManagePage() {
                         </Link>
                       </p>
                     )}
+                </div>
+              )}
+
+              {tab === 'content' && (
+                <div className='space-y-4'>
+                  <div className='rp-card p-5'>
+                    {reachable
+                      ? <AddContent slug={slug} passcode={passcode} onAdded={onContentAdded} />
+                      : (
+                        <p className='text-sm text-ink-3'>
+                          Connect a knowledge box to add content.{' '}
+                          <Link
+                            to='/admin'
+                            className='font-medium text-ink-2 hover:text-[var(--rp-ink)]'
+                          >
+                            Go to connections
+                          </Link>
+                        </p>
+                      )}
+                  </div>
+                  {reachable && <SourcesPanel slug={slug} passcode={passcode} />}
                 </div>
               )}
 

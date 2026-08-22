@@ -9,7 +9,17 @@ import {
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import type { AskEvent, Citation, ScoredResource } from '@research-portal/core'
-import { getSuggestedQuestions, streamAsk } from '../api/client.ts'
+import {
+  addWatch,
+  deleteServerSession,
+  getServerSession,
+  getSubqueries,
+  getSuggestedQuestions,
+  listServerSessions,
+  putServerSession,
+  sendAnswerFeedback,
+  streamAsk,
+} from '../api/client.ts'
 import { citationHref, ContextJourney } from '../components/AnswerStream.tsx'
 import { type QualityScores, TrustSignals } from '../components/QualityGauge.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
@@ -33,6 +43,20 @@ type ChatMessage = {
   quality?: QualityScores
   error?: string
   pending?: boolean
+  /** How the platform interpreted/rephrased the question (first turn only). */
+  interpretedQuery?: string
+  /** Platform learning id for this answer - target for feedback. */
+  learningId?: string
+  feedbackGood?: boolean
+  feedbackSubmitted?: boolean
+  /** Sub-questions the platform researched alongside this (deep research mode). */
+  subqueries?: string[]
+  /** Set once the self-heal "re-answer deeply" suggestion has been actioned. */
+  healDismissed?: boolean
+  /** Marks an answer produced by re-asking a thinly-grounded answer deeply. */
+  deepBadge?: boolean
+  /** True when this answer already used full-document (deep) grounding. */
+  wasDeep?: boolean
 }
 
 type ChatSession = {
@@ -90,6 +114,20 @@ function migrateMessage(raw: unknown): ChatMessage {
     quality: migrateQuality(message?.quality),
     error: typeof message?.error === 'string' ? message.error : undefined,
     pending: false,
+    interpretedQuery: typeof message?.interpretedQuery === 'string'
+      ? message.interpretedQuery
+      : undefined,
+    learningId: typeof message?.learningId === 'string' ? message.learningId : undefined,
+    feedbackGood: typeof message?.feedbackGood === 'boolean' ? message.feedbackGood : undefined,
+    feedbackSubmitted: typeof message?.feedbackSubmitted === 'boolean'
+      ? message.feedbackSubmitted
+      : undefined,
+    subqueries: Array.isArray(message?.subqueries)
+      ? message.subqueries.filter((item): item is string => typeof item === 'string')
+      : undefined,
+    healDismissed: typeof message?.healDismissed === 'boolean' ? message.healDismissed : undefined,
+    deepBadge: typeof message?.deepBadge === 'boolean' ? message.deepBadge : undefined,
+    wasDeep: typeof message?.wasDeep === 'boolean' ? message.wasDeep : undefined,
   }
 }
 
@@ -263,11 +301,13 @@ function SessionList({
   activeSessionId,
   onSelect,
   onNew,
+  onDelete,
 }: {
   sessions: ChatSession[]
   activeSessionId: string | null
   onSelect: (id: string) => void
   onNew: () => void
+  onDelete: (id: string) => void
 }) {
   return (
     <div className='flex h-full flex-col'>
@@ -285,25 +325,39 @@ function SessionList({
           : sessions.map((session) => {
             const isActive = session.id === activeSessionId
             return (
-              <button
-                key={session.id}
-                type='button'
-                onClick={() => onSelect(session.id)}
-                aria-current={isActive ? 'true' : undefined}
-                className={`w-full rounded-[var(--rp-radius)] px-3 py-2.5 text-left transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
-                  isActive ? 'bg-surface shadow-sm' : 'hover:bg-[var(--rp-surface-2)]'
-                }`}
-                style={{ outlineColor: 'var(--rp-accent)' }}
-              >
-                <p className='rp-clamp-2 text-sm font-medium text-ink'>
-                  {sessionTitle(session)}
-                </p>
-                <p className='mt-0.5 text-xs text-ink-3'>
-                  {session.messages.length} {session.messages.length === 1 ? 'message' : 'messages'}
-                  {' · '}
-                  {relativeAge(session.updatedAt)}
-                </p>
-              </button>
+              <div key={session.id} className='group relative'>
+                <button
+                  type='button'
+                  onClick={() => onSelect(session.id)}
+                  aria-current={isActive ? 'true' : undefined}
+                  className={`w-full rounded-[var(--rp-radius)] px-3 py-2.5 pr-8 text-left transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                    isActive ? 'bg-surface shadow-sm' : 'hover:bg-[var(--rp-surface-2)]'
+                  }`}
+                  style={{ outlineColor: 'var(--rp-accent)' }}
+                >
+                  <p className='rp-clamp-2 text-sm font-medium text-ink'>
+                    {sessionTitle(session)}
+                  </p>
+                  <p className='mt-0.5 text-xs text-ink-3'>
+                    {session.messages.length}{' '}
+                    {session.messages.length === 1 ? 'message' : 'messages'}
+                    {' · '}
+                    {relativeAge(session.updatedAt)}
+                  </p>
+                </button>
+                <button
+                  type='button'
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onDelete(session.id)
+                  }}
+                  aria-label={`Delete "${sessionTitle(session)}"`}
+                  title='Delete session'
+                  className='rp-focus absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-[6px] text-ink-3 opacity-0 transition-opacity duration-150 hover:bg-[var(--rp-surface-2)] hover:text-[var(--rp-bad-ink)] group-hover:opacity-100 focus-visible:opacity-100'
+                >
+                  &times;
+                </button>
+              </div>
             )
           })}
       </nav>
@@ -317,13 +371,164 @@ function SessionList({
 
 function UserBubble({ message }: { message: ChatMessage }) {
   return (
-    <div className='flex justify-end'>
+    <div className='flex flex-col items-end gap-1.5'>
       <div
         className='max-w-[85%] rounded-[calc(var(--rp-radius)+4px)] rounded-tr-sm px-4 py-3 text-sm leading-relaxed text-ink sm:max-w-[70%]'
         style={{ backgroundColor: 'color-mix(in srgb, var(--rp-accent) 14%, var(--rp-surface))' }}
       >
         {message.text}
       </div>
+      {message.subqueries && message.subqueries.length > 0
+        ? (
+          <div className='flex max-w-[85%] flex-wrap justify-end gap-1.5 sm:max-w-[70%]'>
+            {message.subqueries.map((subquery, index) => (
+              <span key={index} className='rp-chip text-[11px]'>{subquery}</span>
+            ))}
+          </div>
+        )
+        : null}
+    </div>
+  )
+}
+
+/**
+ * Small ghost thumbs-up/thumbs-down pair for the platform's learning loop.
+ * Hidden entirely when the message has no `learningId` (nothing to attach
+ * feedback to). Once either button is used the row collapses to a quiet
+ * "thanks" line; a negative rating additionally offers a one-line detail
+ * field that re-posts the same feedback with free text attached.
+ */
+function FeedbackControl({
+  message,
+  onFeedback,
+}: {
+  message: ChatMessage
+  onFeedback: (good: boolean, text?: string) => Promise<boolean>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [detail, setDetail] = useState('')
+  const [detailSent, setDetailSent] = useState(false)
+
+  if (!message.learningId) return null
+
+  async function handleRate(good: boolean) {
+    setError(null)
+    setBusy(true)
+    const ok = await onFeedback(good)
+    setBusy(false)
+    if (!ok) setError('Could not send feedback - try again.')
+  }
+
+  async function handleDetailSend() {
+    if (detail.trim().length === 0) return
+    setError(null)
+    setBusy(true)
+    const ok = await onFeedback(false, detail.trim())
+    setBusy(false)
+    if (ok) setDetailSent(true)
+    else setError('Could not send feedback - try again.')
+  }
+
+  if (message.feedbackSubmitted) {
+    return (
+      <div className='flex flex-col items-start gap-1.5'>
+        <p className='text-xs text-ink-3'>Thanks - feedback sent to the platform.</p>
+        {message.feedbackGood === false && !detailSent
+          ? (
+            <div className='flex items-center gap-1.5'>
+              <input
+                type='text'
+                value={detail}
+                onChange={(event) => setDetail(event.target.value)}
+                placeholder='What was wrong? (optional)'
+                disabled={busy}
+                className='rp-input h-7 w-48 text-xs'
+              />
+              <button
+                type='button'
+                onClick={handleDetailSend}
+                disabled={busy || detail.trim().length === 0}
+                className='rp-btn rp-btn-ghost h-7 px-2 text-xs'
+              >
+                Send
+              </button>
+            </div>
+          )
+          : null}
+        {error ? <p className='text-xs text-[var(--rp-bad-ink)]'>{error}</p> : null}
+      </div>
+    )
+  }
+
+  return (
+    <div className='flex items-center gap-1'>
+      <button
+        type='button'
+        onClick={() => handleRate(true)}
+        disabled={busy}
+        aria-label='Helpful answer'
+        title='Helpful answer'
+        className='rp-btn rp-btn-ghost h-7 px-2 text-xs'
+      >
+        Helpful
+      </button>
+      <button
+        type='button'
+        onClick={() => handleRate(false)}
+        disabled={busy}
+        aria-label='Not a helpful answer'
+        title='Not a helpful answer'
+        className='rp-btn rp-btn-ghost h-7 px-2 text-xs'
+      >
+        Not helpful
+      </button>
+      {error ? <p className='text-xs text-[var(--rp-bad-ink)]'>{error}</p> : null}
+    </div>
+  )
+}
+
+/**
+ * Saves the question behind an answer as a watch so the tenant sees a
+ * "changed" badge in Search when new results turn up for it later. Purely
+ * local UI state - a page reload simply lets the user watch it again.
+ */
+function WatchControl({ question, slug }: { question: string; slug: string }) {
+  const [status, setStatus] = useState<'idle' | 'busy' | 'done' | 'error'>('idle')
+
+  if (question.trim().length === 0) return null
+
+  async function handleWatch() {
+    setStatus('busy')
+    try {
+      await addWatch(slug, question)
+      setStatus('done')
+    } catch {
+      setStatus('error')
+    }
+  }
+
+  if (status === 'done') {
+    return (
+      <p className='text-xs text-ink-3'>
+        Watching - you will see a change badge in Search when results change.
+      </p>
+    )
+  }
+
+  return (
+    <div className='flex items-center gap-1.5'>
+      <button
+        type='button'
+        onClick={handleWatch}
+        disabled={status === 'busy'}
+        className='rp-btn rp-btn-ghost h-7 px-2 text-xs'
+      >
+        {status === 'busy' ? 'Watching…' : 'Watch this question'}
+      </button>
+      {status === 'error'
+        ? <p className='text-xs text-[var(--rp-bad-ink)]'>Could not save the watch - try again.</p>
+        : null}
     </div>
   )
 }
@@ -334,12 +539,16 @@ function AssistantCard({
   question,
   activeStage,
   onRetry,
+  onFeedback,
+  onReanswerDeeply,
 }: {
   message: ChatMessage
   slug: string
   question: string
   activeStage: string | null
   onRetry: () => void
+  onFeedback: (good: boolean, text?: string) => Promise<boolean>
+  onReanswerDeeply: () => void
 }) {
   if (message.error) {
     return (
@@ -356,8 +565,31 @@ function AssistantCard({
     )
   }
 
+  // Only offer the deep re-answer when the original ask was not already deep.
+  const isThinlyGrounded = !message.pending && !message.healDismissed && !message.wasDeep &&
+    !message.deepBadge &&
+    message.quality?.groundedness !== null && message.quality?.groundedness !== undefined &&
+    message.quality.groundedness <= 2
+
   return (
     <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-5 shadow-sm'>
+      {message.deepBadge || message.interpretedQuery
+        ? (
+          <div className='mb-2 flex flex-wrap items-center gap-2'>
+            {message.deepBadge
+              ? <span className='rp-badge rp-badge-quiet'>Deep re-answer</span>
+              : null}
+            {message.interpretedQuery
+              ? (
+                <p className='text-xs text-ink-3'>
+                  Interpreted as &ldquo;{message.interpretedQuery}&rdquo;
+                </p>
+              )
+              : null}
+          </div>
+        )
+        : null}
+
       {message.pending && activeStage
         ? (
           <p className='mb-2 flex items-center gap-2 text-xs font-medium text-ink-3'>
@@ -420,10 +652,22 @@ function AssistantCard({
         )
         : null}
 
-      {message.quality
+      {isThinlyGrounded
         ? (
-          <div className='mt-3'>
-            <TrustSignals quality={message.quality} />
+          <div
+            className='mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[var(--rp-radius)] border p-3'
+            style={{ borderColor: 'var(--rp-warn-line)', background: 'var(--rp-warn-bg)' }}
+          >
+            <p className='text-xs text-[var(--rp-warn-ink)]'>
+              This answer is thinly grounded - re-answer with full-document context?
+            </p>
+            <button
+              type='button'
+              onClick={onReanswerDeeply}
+              className='rp-btn rp-btn-outline h-7 shrink-0 px-2 text-xs'
+            >
+              Re-answer deeply
+            </button>
           </div>
         )
         : null}
@@ -436,6 +680,18 @@ function AssistantCard({
         )
         : null}
 
+      {!message.pending && (message.quality || message.learningId || question.trim().length > 0)
+        ? (
+          <div className='mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3'>
+            {message.quality ? <TrustSignals quality={message.quality} /> : <span />}
+            <div className='flex flex-wrap items-center gap-3'>
+              <FeedbackControl message={message} onFeedback={onFeedback} />
+              <WatchControl question={question} slug={slug} />
+            </div>
+          </div>
+        )
+        : null}
+
       {!message.pending && message.sources.length > 0
         ? (
           <div className='mt-4 border-t border-line pt-3'>
@@ -445,6 +701,103 @@ function AssistantCard({
         : null}
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Export - a standalone Word-compatible .doc of the current research trail.
+// Mirrors the export idiom in GeneratePage.tsx (a self-contained HTML shell
+// with the Word-namespaced <head>), rebuilt locally here since GeneratePage
+// doesn't export its helpers.
+// ---------------------------------------------------------------------------
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function slugOrDate(title: string): string {
+  const slug = title
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-+|-+$)/g, '')
+  return slug.length > 0 ? slug.slice(0, 60) : new Date().toISOString().slice(0, 10)
+}
+
+function formatScore(score: number | null | undefined): string {
+  return score === null || score === undefined ? 'n/a' : `${score}/5`
+}
+
+/**
+ * Renders the research trail as clean semantic HTML: one heading per
+ * question, the answer text below it, a bracketed citation list of source
+ * titles, and the REMi quality line when the platform scored the answer.
+ */
+function sessionToWordHtml(portalName: string, title: string, messages: ChatMessage[]): string {
+  const dateLine = new Date().toLocaleDateString('en-AU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+
+  const turnsHtml = messages
+    .map((message) => {
+      if (message.author === 'USER') {
+        return `<h2>${escapeHtml(message.text)}</h2>`
+      }
+      if (message.error) {
+        return `<p><em>Answer unavailable - ${escapeHtml(message.error)}</em></p>`
+      }
+      const answerHtml = message.text
+        .split(/\n{2,}/)
+        .filter((block) => block.trim().length > 0)
+        .map((block) => `<p>${escapeHtml(block.trim())}</p>`)
+        .join('')
+      const citationsHtml = message.citations.length > 0
+        ? `<p>[${message.citations.map((citation) => escapeHtml(citation.title)).join('; ')}]</p>`
+        : ''
+      const qualityHtml = message.quality
+        ? `<p><em>Answer relevance ${
+          formatScore(message.quality.answerRelevance)
+        } &middot; Groundedness ${
+          formatScore(message.quality.groundedness)
+        } &middot; Context relevance ${formatScore(message.quality.contextRelevance)}</em></p>`
+        : ''
+      return `${answerHtml}${citationsHtml}${qualityHtml}`
+    })
+    .join('')
+
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(title)}</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+<w:DoNotOptimizeForBrowser/>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; line-height: 1.5; }
+h1, h2 { font-family: Arial, Helvetica, sans-serif; color: #111111; }
+h1 { font-size: 20pt; margin-bottom: 4pt; }
+h2 { font-size: 13pt; margin-top: 18pt; margin-bottom: 6pt; }
+p { margin: 6pt 0; font-size: 11pt; }
+</style>
+</head>
+<body>
+<h1>${escapeHtml(portalName)}</h1>
+<p>${escapeHtml(title)} &middot; ${escapeHtml(dateLine)}</p>
+${turnsHtml}
+</body>
+</html>`
 }
 
 // ---------------------------------------------------------------------------
@@ -462,24 +815,104 @@ export function AssistantPage() {
   const [isStreaming, setIsStreaming] = useState(false)
   const [activeStageLabel, setActiveStageLabel] = useState<string | null>(null)
   const [showSidebar, setShowSidebar] = useState(false)
+  const [deepResearch, setDeepResearch] = useState(false)
 
   const abortRef = useRef<AbortController | null>(null)
   const threadEndRef = useRef<HTMLDivElement | null>(null)
   // Guards the `?ask=` handoff from Explore against a double-send (React 18
   // Strict Mode replays effects) and resets whenever the tenant changes.
   const askHandledRef = useRef(false)
+  // Debounced per-session background sync to the server, keyed by session id.
+  const syncTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   const { data: suggestions } = useQuery({
     queryKey: ['suggested-questions', config.slug],
     queryFn: () => getSuggestedQuestions(config.slug),
   })
 
-  // Re-load sessions if the tenant slug changes.
+  /**
+   * Fire-and-forget push of one session to the server, debounced so a burst
+   * of edits (streaming deltas, renames) collapses into a single request.
+   * Failures are silent - offline / server-sync-unavailable simply means the
+   * localStorage copy (already saved by `persist`) stays the source of truth.
+   */
+  function scheduleServerSync(session: ChatSession) {
+    const timers = syncTimersRef.current
+    const existing = timers.get(session.id)
+    if (existing) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      timers.delete(session.id)
+      void putServerSession(config.slug, {
+        id: session.id,
+        title: sessionTitle(session),
+        updatedAt: new Date(session.updatedAt).toISOString(),
+        messages: session.messages,
+      }).catch(() => {
+        // Offline or server sync unavailable - the local session already
+        // persisted, so the research trail still works fully offline.
+      })
+    }, 1500)
+    timers.set(session.id, timer)
+  }
+
+  // Re-load sessions if the tenant slug changes, then merge in any
+  // server-side sessions this browser doesn't have locally yet (or that are
+  // newer on the server) - background, silent-fail so offline use is
+  // unaffected.
   useEffect(() => {
-    setSessions(loadSessions(config.slug))
+    const localSessions = loadSessions(config.slug)
+    setSessions(localSessions)
     setActiveSessionId(null)
     setMessages([])
     askHandledRef.current = false
+
+    for (const timer of syncTimersRef.current.values()) clearTimeout(timer)
+    syncTimersRef.current.clear()
+
+    let cancelled = false
+    async function syncFromServer() {
+      try {
+        const remoteMetas = await listServerSessions(config.slug)
+        if (cancelled) return
+        const toFetch = remoteMetas.filter((meta) => {
+          const local = localSessions.find((session) => session.id === meta.id)
+          return !local || Date.parse(meta.updatedAt) > local.updatedAt
+        })
+        if (toFetch.length === 0) return
+        const fetched = await Promise.all(
+          toFetch.map((meta) =>
+            getServerSession<ChatMessage>(config.slug, meta.id).catch(() => null)
+          ),
+        )
+        if (cancelled) return
+        setSessions((prev) => {
+          const byId = new Map(prev.map((session) => [session.id, session]))
+          for (const remote of fetched) {
+            if (!remote) continue
+            const updatedAt = Date.parse(remote.updatedAt) || Date.now()
+            const existing = byId.get(remote.id)
+            if (existing && existing.updatedAt >= updatedAt) continue
+            byId.set(remote.id, {
+              id: remote.id,
+              createdAt: existing?.createdAt ?? updatedAt,
+              updatedAt,
+              messages: remote.messages.map(migrateMessage),
+            })
+          }
+          const merged = [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+            .slice(0, SESSION_CAP)
+          saveSessions(config.slug, merged)
+          return merged
+        })
+      } catch {
+        // Offline or server sync unavailable - local sessions still work.
+      }
+    }
+    void syncFromServer()
+
+    return () => {
+      cancelled = true
+    }
   }, [config.slug])
 
   useEffect(() => {
@@ -502,7 +935,7 @@ export function AssistantPage() {
       },
       { replace: true },
     )
-    send(ask)
+    void send(ask)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, isStreaming])
 
@@ -516,6 +949,7 @@ export function AssistantPage() {
       const rest = prev.filter((session) => session.id !== sessionId)
       const next = [updatedSession, ...rest].slice(0, SESSION_CAP)
       saveSessions(config.slug, next)
+      scheduleServerSync(updatedSession)
       return next
     })
   }
@@ -526,6 +960,26 @@ export function AssistantPage() {
     setShowSidebar(false)
   }
 
+  function deleteSession(id: string) {
+    setSessions((prev) => {
+      const next = prev.filter((session) => session.id !== id)
+      saveSessions(config.slug, next)
+      return next
+    })
+    const timer = syncTimersRef.current.get(id)
+    if (timer) {
+      clearTimeout(timer)
+      syncTimersRef.current.delete(id)
+    }
+    void deleteServerSession(config.slug, id).catch(() => {
+      // Offline or server sync unavailable - it's already gone locally.
+    })
+    if (activeSessionId === id) {
+      setActiveSessionId(null)
+      setMessages([])
+    }
+  }
+
   function selectSession(id: string) {
     const session = sessions.find((item) => item.id === id)
     if (!session) return
@@ -534,7 +988,12 @@ export function AssistantPage() {
     setShowSidebar(false)
   }
 
-  async function runAsk(query: string, baseMessages: ChatMessage[], sessionId: string) {
+  async function runAsk(
+    query: string,
+    baseMessages: ChatMessage[],
+    sessionId: string,
+    options?: { depth?: 'default' | 'deep'; prequeries?: string[]; deepBadge?: boolean },
+  ) {
     const assistantId = makeId()
     // baseMessages ends with the question being asked (as a USER message) - the
     // request sends that as `query`, so prior turns exclude it here.
@@ -545,7 +1004,16 @@ export function AssistantPage() {
 
     let working: ChatMessage[] = [
       ...baseMessages,
-      { id: assistantId, author: 'AGENT', text: '', citations: [], sources: [], pending: true },
+      {
+        id: assistantId,
+        author: 'AGENT',
+        text: '',
+        citations: [],
+        sources: [],
+        pending: true,
+        deepBadge: options?.deepBadge,
+        wasDeep: options?.depth === 'deep',
+      },
     ]
     setMessages(working)
     setIsStreaming(true)
@@ -562,7 +1030,7 @@ export function AssistantPage() {
     try {
       await streamAsk(
         config.slug,
-        { query, context: contextTurns },
+        { query, context: contextTurns, depth: options?.depth, prequeries: options?.prequeries },
         (event: AskEvent) => {
           switch (event.type) {
             case 'stage':
@@ -582,6 +1050,12 @@ export function AssistantPage() {
                   ? message
                   : { ...message, citations: [...message.citations, event.citation] }
               )
+              break
+            case 'learning':
+              update((message) => ({ ...message, learningId: event.id }))
+              break
+            case 'interpreted':
+              update((message) => ({ ...message, interpretedQuery: event.query }))
               break
             case 'usage':
               update((message) => ({
@@ -639,7 +1113,7 @@ export function AssistantPage() {
     }
   }
 
-  function send(query: string) {
+  async function send(query: string) {
     const trimmed = query.trim()
     if (trimmed.length === 0 || isStreaming) return
 
@@ -653,10 +1127,34 @@ export function AssistantPage() {
       citations: [],
       sources: [],
     }
-    const baseMessages = [...messages, userMessage]
+    let baseMessages = [...messages, userMessage]
     setMessages(baseMessages)
     setDraft('')
-    void runAsk(trimmed, baseMessages, sessionId)
+
+    if (deepResearch) {
+      // Map the research space first: a few seconds of structured generation
+      // that returns the sub-questions to research alongside the main one.
+      // An empty result or a failed call just falls through to a normal deep
+      // ask (depth only, no prequeries) - deep research never blocks on this.
+      setIsStreaming(true)
+      setActiveStageLabel('Mapping the research space…')
+      let subqueries: string[] = []
+      try {
+        const result = await getSubqueries(config.slug, trimmed)
+        subqueries = Array.isArray(result.questions) ? result.questions : []
+      } catch {
+        subqueries = []
+      }
+      if (subqueries.length > 0) {
+        baseMessages = baseMessages.map((message) =>
+          message.id === userMessage.id ? { ...message, subqueries } : message
+        )
+        setMessages(baseMessages)
+      }
+      void runAsk(trimmed, baseMessages, sessionId, { depth: 'deep', prequeries: subqueries })
+    } else {
+      void runAsk(trimmed, baseMessages, sessionId)
+    }
   }
 
   function retry(forMessageId: string) {
@@ -672,19 +1170,83 @@ export function AssistantPage() {
     void runAsk(userMessage.text, baseMessages, sessionId)
   }
 
+  /**
+   * Self-heal: re-asks the same question as a new turn with `depth: 'deep'`
+   * grounding, badged so it's clear it's a deliberate deep re-answer. Marks
+   * the thinly-grounded original so its suggestion bar doesn't offer again.
+   */
+  function reanswerDeeply(question: string, forMessageId: string) {
+    if (isStreaming) return
+    const marked = messages.map((message) =>
+      message.id === forMessageId ? { ...message, healDismissed: true } : message
+    )
+    const userMessage: ChatMessage = {
+      id: makeId(),
+      author: 'USER',
+      text: question,
+      citations: [],
+      sources: [],
+    }
+    const baseMessages = [...marked, userMessage]
+    const sessionId = activeSessionId ?? makeId()
+    if (!activeSessionId) setActiveSessionId(sessionId)
+    setMessages(baseMessages)
+    void runAsk(question, baseMessages, sessionId, { depth: 'deep', deepBadge: true })
+  }
+
+  /**
+   * Posts feedback for the platform's learning loop and, on success, marks
+   * the message so the UI collapses to a quiet "thanks" state. Returns
+   * whether it succeeded so the (per-message) control can show its own
+   * unobtrusive error text on failure without crashing anything.
+   */
+  async function sendFeedback(messageId: string, good: boolean, text?: string): Promise<boolean> {
+    const message = messages.find((item) => item.id === messageId)
+    const sessionId = activeSessionId
+    if (!message?.learningId || !sessionId) return false
+    try {
+      await sendAnswerFeedback(config.slug, { learningId: message.learningId, good, text })
+      setMessages((prev) => {
+        const next = prev.map((item) =>
+          item.id === messageId ? { ...item, feedbackGood: good, feedbackSubmitted: true } : item
+        )
+        persist(next, sessionId)
+        return next
+      })
+      return true
+    } catch {
+      return false
+    }
+  }
+
   function stop() {
     abortRef.current?.abort()
   }
 
+  /** Downloads the current research trail as a Word-compatible .doc. */
+  function exportSession() {
+    const title = sessionTitle({ id: '', createdAt: 0, updatedAt: 0, messages })
+    const html = sessionToWordHtml(config.branding.productName, title, messages)
+    const blob = new Blob(['﻿', html], { type: 'application/msword' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${slugOrDate(title)}.doc`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    send(draft)
+    void send(draft)
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      send(draft)
+      void send(draft)
     }
   }
 
@@ -714,6 +1276,7 @@ export function AssistantPage() {
           activeSessionId={activeSessionId}
           onSelect={selectSession}
           onNew={startNewSession}
+          onDelete={deleteSession}
         />
       </aside>
 
@@ -732,6 +1295,7 @@ export function AssistantPage() {
                 activeSessionId={activeSessionId}
                 onSelect={selectSession}
                 onNew={startNewSession}
+                onDelete={deleteSession}
               />
             </div>
           </div>
@@ -739,6 +1303,23 @@ export function AssistantPage() {
         : null}
 
       <div className='flex min-w-0 flex-1 flex-col'>
+        {!isEmpty
+          ? (
+            <div className='mb-2 flex shrink-0 items-center justify-between gap-2'>
+              <p className='rp-clamp-1 text-sm font-medium text-ink-2'>
+                {sessionTitle({ id: '', createdAt: 0, updatedAt: 0, messages })}
+              </p>
+              <button
+                type='button'
+                onClick={exportSession}
+                className='rp-btn rp-btn-ghost h-7 shrink-0 px-2 text-xs'
+              >
+                Export
+              </button>
+            </div>
+          )
+          : null}
+
         <section
           aria-label='Conversation'
           className='flex-1 space-y-4 overflow-y-auto pb-4'
@@ -762,7 +1343,7 @@ export function AssistantPage() {
                         <button
                           key={question.id}
                           type='button'
-                          onClick={() => send(question.text)}
+                          onClick={() => void send(question.text)}
                           className='rp-chip h-9 sm:h-7'
                         >
                           {question.text}
@@ -787,14 +1368,52 @@ export function AssistantPage() {
                         : ''}
                       activeStage={index === messages.length - 1 ? activeStageLabel : null}
                       onRetry={() => retry(message.id)}
+                      onFeedback={(good, text) => sendFeedback(message.id, good, text)}
+                      onReanswerDeeply={() =>
+                        reanswerDeeply(
+                          messages[index - 1]?.author === 'USER'
+                            ? messages[index - 1]?.text ?? ''
+                            : '',
+                          message.id,
+                        )}
                     />
                   )
               )
             )}
+          {isStreaming && activeStageLabel && messages[messages.length - 1]?.author === 'USER'
+            ? (
+              <div className='flex items-center gap-2 rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface px-4 py-3 text-xs font-medium text-ink-3 shadow-sm'>
+                <span
+                  className='h-1.5 w-1.5 animate-pulse rounded-full'
+                  style={{ backgroundColor: 'var(--rp-accent)' }}
+                  aria-hidden='true'
+                />
+                {activeStageLabel}
+              </div>
+            )
+            : null}
           <div ref={threadEndRef} />
         </section>
 
         <form onSubmit={handleSubmit} className='mt-2 shrink-0'>
+          <div className='mb-1.5 flex flex-wrap items-center gap-2 px-1'>
+            <button
+              type='button'
+              onClick={() => setDeepResearch((prev) => !prev)}
+              disabled={isStreaming}
+              aria-pressed={deepResearch}
+              className={`rp-chip h-9 sm:h-7 ${deepResearch ? 'rp-chip-active' : ''}`}
+            >
+              Deep research
+            </button>
+            {deepResearch
+              ? (
+                <span className='text-xs text-ink-3'>
+                  Maps sub-questions before answering - slower, more thorough.
+                </span>
+              )
+              : null}
+          </div>
           <div className='flex items-end gap-2 rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-2 shadow-sm'>
             <label htmlFor='assistant-composer' className='sr-only'>
               Ask a question

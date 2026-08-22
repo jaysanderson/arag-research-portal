@@ -5,6 +5,7 @@ import { buildApp } from './app.ts'
 import { BindingStore } from './bindings.ts'
 import { TenantStore } from './tenants.ts'
 import { loadRootEnv } from './load-env.ts'
+import { startScheduler } from './scheduler.ts'
 
 loadRootEnv()
 
@@ -25,6 +26,8 @@ const app = buildApp({
   adminPrefill: process.env.ADMIN_PASSCODE_PREFILL,
   invalidate: (slug) => provider.invalidate(slug),
 })
+
+startScheduler(provider, tenants)
 
 // Serve the built SPA (deno task build:web) alongside the API - one origin, no proxy.
 app.use('*', serveStatic({ root: './apps/web/dist' }))
