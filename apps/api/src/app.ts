@@ -343,7 +343,10 @@ export function buildApp(opts: BuildAppOptions): Hono {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     if (!opts.management) return c.json({ nodes: [], edges: [] })
-    return c.json(await opts.management.relationsGraph(config))
+    const entity = c.req.query('entity')?.trim()
+    return c.json(
+      await opts.management.relationsGraph(config, entity ? { entity, topK: 150 } : {}),
+    )
   })
 
   app.get('/api/t/:slug/entities', async (c) => {

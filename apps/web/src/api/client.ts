@@ -685,11 +685,14 @@ export function ensureSearchConfigs(
   )
 }
 
-export function getRelationsGraph(slug: string): Promise<{
+export interface RelationsGraph {
   nodes: { id: string; group: string; weight: number }[]
   edges: { source: string; target: string; label: string }[]
-}> {
-  return request(`/api/t/${encodeURIComponent(slug)}/graph/relations`)
+}
+
+export function getRelationsGraph(slug: string, entity?: string): Promise<RelationsGraph> {
+  const suffix = entity ? `?entity=${encodeURIComponent(entity)}` : ''
+  return request(`/api/t/${encodeURIComponent(slug)}/graph/relations${suffix}`)
 }
 
 // ---------------------------------------------------------------------------

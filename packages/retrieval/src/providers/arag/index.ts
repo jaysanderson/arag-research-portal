@@ -720,18 +720,30 @@ export class AragProvider implements RetrievalProvider {
   }
 
   /** The REAL extracted knowledge graph: entity-relation-entity paths. */
-  async relationsGraph(tenant: TenantConfig): Promise<{
+  async relationsGraph(
+    tenant: TenantConfig,
+    opts: { entity?: string; topK?: number } = {},
+  ): Promise<{
     nodes: { id: string; group: string; weight: number }[]
     edges: { source: string; target: string; label: string }[]
   }> {
     try {
+      // With an entity, ask the platform for just that node's neighbourhood
+      // (either direction); otherwise pull the corpus-wide relation set.
+      const query = opts.entity
+        ? {
+          prop: 'path',
+          source: { value: opts.entity, match: 'exact' },
+          undirected: true,
+        }
+        : { prop: 'path' }
       const raw = await this.client(tenant).postJson<{
         paths?: {
           source?: { value?: string; group?: string }
           relation?: { label?: string }
           destination?: { value?: string; group?: string }
         }[]
-      }>('/graph', { query: { prop: 'path' }, top_k: 200 })
+      }>('/graph', { query, top_k: opts.topK ?? 400 })
       const weight = new Map<string, { group: string; weight: number }>()
       const edges: { source: string; target: string; label: string }[] = []
       const seenEdge = new Set<string>()
@@ -761,7 +773,7 @@ export class AragProvider implements RetrievalProvider {
       const nodes = [...weight.entries()]
         .map(([id, v]) => ({ id, group: v.group, weight: v.weight }))
         .sort((a, b) => b.weight - a.weight)
-        .slice(0, 80)
+        .slice(0, 120)
       const keep = new Set(nodes.map((n) => n.id))
       return { nodes, edges: edges.filter((e) => keep.has(e.source) && keep.has(e.target)) }
     } catch {

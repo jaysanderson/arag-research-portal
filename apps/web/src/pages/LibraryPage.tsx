@@ -1,7 +1,7 @@
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { createPortal } from 'react-dom'
-import { Link, useOutletContext } from 'react-router-dom'
+import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
 import type { CatalogItem } from '@research-portal/core'
 import { getCatalog, getFacets, summarizeResources } from '../api/client.ts'
 import { ResourceThumb } from '../components/ResourceThumb.tsx'
@@ -341,7 +341,11 @@ export function LibraryPage() {
   const [queryDraft, setQueryDraft] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [sort, setSort] = useState<SortValue>('newest')
-  const [selectedTopics, setSelectedTopics] = useState<string[]>([])
+  const [searchParams] = useSearchParams()
+  const [selectedTopics, setSelectedTopics] = useState<string[]>(() => {
+    const fromUrl = searchParams.get('topic')
+    return fromUrl ? [fromUrl] : []
+  })
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [accumulated, setAccumulated] = useState<CatalogItem[]>([])
