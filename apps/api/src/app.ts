@@ -20,7 +20,13 @@ import { implementKgStrategy, KgProposalStore, proposeKgStrategy } from './kg.ts
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import process from 'node:process'
 import { discoverLinks } from './crawl.ts'
-import { InsightsStore, SessionsStore, SourceStore, WatchStore } from './stores.ts'
+import {
+  InsightsStore,
+  InvestigationStore,
+  SessionsStore,
+  SourceStore,
+  WatchStore,
+} from './stores.ts'
 import { syncSource } from './scheduler.ts'
 
 const searchQuerySchema = z.object({ q: z.string().min(1) })
@@ -66,6 +72,74 @@ const sessionPutSchema = z.object({
 const watchBodySchema = z.object({ query: z.string().min(2).max(500) })
 const sourceBodySchema = z.object({ url: z.string().url(), auto: z.boolean().optional() })
 const hiddenBodySchema = z.object({ hidden: z.boolean() })
+const investigationCreateSchema = z.object({
+  name: z.string().min(1).max(160),
+  question: z.string().max(500).optional(),
+})
+const investigationPatchSchema = z.object({
+  name: z.string().min(1).max(160).optional(),
+  question: z.string().max(500).optional(),
+  notes: z.string().max(20000).optional(),
+  status: z.enum(['active', 'closed']).optional(),
+})
+const verdictEnum = z.enum(['supports', 'partial', 'not-relevant', 'contradicts'])
+const evidenceCreateSchema = z.object({
+  passage: z.string().min(1).max(8000),
+  resourceId: z.string().min(1).max(64),
+  resourceTitle: z.string().min(1).max(300),
+  score: z.number().min(0).max(1).nullable().optional(),
+  question: z.string().max(500).optional(),
+  verdict: verdictEnum.nullable().optional(),
+  aiRelevance: z.string().max(2000).nullable().optional(),
+  note: z.string().max(4000).optional(),
+  tags: z.string().max(40).array().max(10).optional(),
+})
+const evidencePatchSchema = z.object({
+  verdict: verdictEnum.nullable().optional(),
+  note: z.string().max(4000).optional(),
+  tags: z.string().max(40).array().max(10).optional(),
+})
+const artefactCreateSchema = z.object({
+  kind: z.string().min(1).max(40),
+  title: z.string().min(1).max(200),
+  data: z.unknown(),
+})
+const verdictsBodySchema = z.object({
+  question: z.string().min(3).max(1000),
+  sources: z.object({
+    id: z.string().min(1),
+    title: z.string().min(1).max(300),
+    passage: z.string().min(1).max(4000),
+  }).array().min(1).max(12),
+})
+
+const VERDICTS_SCHEMA = {
+  name: 'source_verdicts',
+  description: 'Per-source relevance verdicts for a research question',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      verdicts: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            id: { type: 'string' },
+            verdict: {
+              type: 'string',
+              enum: ['supports', 'partial', 'not-relevant', 'contradicts'],
+            },
+            relevance: { type: 'string' },
+          },
+          required: ['id', 'verdict', 'relevance'],
+        },
+      },
+    },
+    required: ['verdicts'],
+  },
+}
 
 const SUBQUERIES_SCHEMA = {
   name: 'research_subquestions',
@@ -143,6 +217,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
   const sessions = new SessionsStore()
   const watches = new WatchStore()
   const sources = new SourceStore()
+  const investigations = new InvestigationStore()
   const clientId = (c: Context): string => c.req.header('x-rp-client') ?? 'anonymous'
   const app = new Hono()
 
@@ -610,6 +685,140 @@ export function buildApp(opts: BuildAppOptions): Hono {
     })
   })
 
+  // --- Investigations: the research workspace, per anonymous client --------
+
+  app.get('/api/t/:slug/investigations', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    return c.json(investigations.list(config.slug, clientId(c)))
+  })
+
+  app.post('/api/t/:slug/investigations', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const parsed = investigationCreateSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    if (investigations.list(config.slug, clientId(c)).length >= 100) {
+      return c.json({ error: 'too_many_investigations' }, 429)
+    }
+    return c.json(investigations.create(config.slug, clientId(c), parsed.data))
+  })
+
+  app.get('/api/t/:slug/investigations/:id', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const investigation = investigations.get(config.slug, clientId(c), c.req.param('id'))
+    return investigation ? c.json(investigation) : c.json({ error: 'not_found' }, 404)
+  })
+
+  app.patch('/api/t/:slug/investigations/:id', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const parsed = investigationPatchSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    const updated = investigations.update(config.slug, clientId(c), c.req.param('id'), parsed.data)
+    return updated ? c.json(updated) : c.json({ error: 'not_found' }, 404)
+  })
+
+  app.delete('/api/t/:slug/investigations/:id', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    investigations.remove(config.slug, clientId(c), c.req.param('id'))
+    return c.json({ ok: true })
+  })
+
+  app.post('/api/t/:slug/investigations/:id/evidence', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const parsed = evidenceCreateSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    const item = investigations.addEvidence(config.slug, clientId(c), c.req.param('id'), {
+      passage: parsed.data.passage,
+      resourceId: parsed.data.resourceId,
+      resourceTitle: parsed.data.resourceTitle,
+      score: parsed.data.score ?? null,
+      question: parsed.data.question ?? '',
+      verdict: parsed.data.verdict ?? null,
+      aiRelevance: parsed.data.aiRelevance ?? null,
+      note: parsed.data.note ?? '',
+      tags: parsed.data.tags ?? [],
+    })
+    return item ? c.json(item) : c.json({ error: 'not_found' }, 404)
+  })
+
+  app.patch('/api/t/:slug/investigations/:id/evidence/:eid', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const parsed = evidencePatchSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    const ok = investigations.updateEvidence(
+      config.slug,
+      clientId(c),
+      c.req.param('id'),
+      c.req.param('eid'),
+      parsed.data,
+    )
+    return ok ? c.json({ ok: true }) : c.json({ error: 'not_found' }, 404)
+  })
+
+  app.delete('/api/t/:slug/investigations/:id/evidence/:eid', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    investigations.removeEvidence(config.slug, clientId(c), c.req.param('id'), c.req.param('eid'))
+    return c.json({ ok: true })
+  })
+
+  app.post('/api/t/:slug/investigations/:id/artefacts', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const parsed = artefactCreateSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    if (JSON.stringify(parsed.data).length > 512 * 1024) {
+      return c.json({ error: 'artefact_too_large' }, 413)
+    }
+    const artefact = investigations.addArtefact(config.slug, clientId(c), c.req.param('id'), {
+      kind: parsed.data.kind,
+      title: parsed.data.title,
+      data: parsed.data.data,
+    })
+    return artefact ? c.json(artefact) : c.json({ error: 'not_found' }, 404)
+  })
+
+  // Per-source relevance verdicts for an answer's sources - one structured
+  // generation covering all passages, so triage is a single scan.
+  app.post('/api/t/:slug/verdicts', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
+    const parsed = verdictsBodySchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    const { question, sources } = parsed.data
+    const prompt = [
+      `Research question: ${question}`,
+      '',
+      'For each source passage below, judge how it bears on the question.',
+      "verdict: 'supports' (directly supports an answer), 'partial' (relevant background but not direct evidence), 'not-relevant', or 'contradicts'.",
+      'relevance: one plain sentence saying what the passage does or does not establish for this question.',
+      '',
+      ...sources.map((s) => `Source id=${s.id} (${s.title}):\n${s.passage}`),
+    ].join('\n')
+    try {
+      const result = await opts.management.askStructured(config, VERDICTS_SCHEMA, prompt)
+      const raw = (result.object as { verdicts?: unknown }).verdicts
+      const verdicts = Array.isArray(raw)
+        ? raw.filter((v): v is { id: string; verdict: string; relevance: string } =>
+          typeof v === 'object' && v !== null &&
+          typeof (v as { id?: unknown }).id === 'string' &&
+          typeof (v as { verdict?: unknown }).verdict === 'string' &&
+          typeof (v as { relevance?: unknown }).relevance === 'string'
+        )
+        : []
+      return c.json({ verdicts })
+    } catch {
+      return c.json({ verdicts: [] })
+    }
+  })
+
   // Convenience: which passcode to prefill on the admin login (pre-release
   // only; set ADMIN_PASSCODE_PREFILL empty to turn the prefill off).
   app.get('/api/admin-prefill', (c) => c.json({ passcode: opts.adminPrefill ?? '' }))
@@ -982,6 +1191,14 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (!id) return c.json({ error: 'invalid_request' }, 400)
     await management!.createLabelset(config, { id, ...parsed.data })
     return c.json({ ok: true, id })
+  })
+
+  app.get('/api/admin/t/:slug/corpus-health', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailable = requireManagement(c)
+    if (unavailable) return unavailable
+    return c.json(await management!.corpusHealth(config))
   })
 
   app.get('/api/admin/t/:slug/insights', (c) => {

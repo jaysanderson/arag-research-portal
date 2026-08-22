@@ -1021,3 +1021,204 @@ export async function syncSource(
   }
   emit(buffer)
 }
+
+// --- Investigations: the research workspace ----------------------------------
+
+export type EvidenceVerdict = 'supports' | 'partial' | 'not-relevant' | 'contradicts'
+
+export interface EvidenceItem {
+  id: string
+  passage: string
+  resourceId: string
+  resourceTitle: string
+  score: number | null
+  question: string
+  verdict: EvidenceVerdict | null
+  aiRelevance: string | null
+  note: string
+  tags: string[]
+  createdAt: string
+}
+
+export interface InvestigationArtefact {
+  id: string
+  kind: string
+  title: string
+  data: unknown
+  createdAt: string
+}
+
+export interface InvestigationMeta {
+  id: string
+  name: string
+  question: string
+  status: 'active' | 'closed'
+  updatedAt: string
+  evidenceCount: number
+}
+
+export interface Investigation {
+  id: string
+  name: string
+  question: string
+  notes: string
+  status: 'active' | 'closed'
+  createdAt: string
+  updatedAt: string
+  evidence: EvidenceItem[]
+  artefacts: InvestigationArtefact[]
+}
+
+export function listInvestigations(slug: string): Promise<InvestigationMeta[]> {
+  return clientRequest(`/api/t/${encodeURIComponent(slug)}/investigations`)
+}
+
+export function createInvestigation(
+  slug: string,
+  input: { name: string; question?: string },
+): Promise<Investigation> {
+  return clientRequest(`/api/t/${encodeURIComponent(slug)}/investigations`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+export function getInvestigation(slug: string, id: string): Promise<Investigation> {
+  return clientRequest(
+    `/api/t/${encodeURIComponent(slug)}/investigations/${encodeURIComponent(id)}`,
+  )
+}
+
+export function updateInvestigation(
+  slug: string,
+  id: string,
+  patch: { name?: string; question?: string; notes?: string; status?: 'active' | 'closed' },
+): Promise<Investigation> {
+  return clientRequest(
+    `/api/t/${encodeURIComponent(slug)}/investigations/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    },
+  )
+}
+
+export function deleteInvestigation(slug: string, id: string): Promise<{ ok: boolean }> {
+  return clientRequest(
+    `/api/t/${encodeURIComponent(slug)}/investigations/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export interface NewEvidence {
+  passage: string
+  resourceId: string
+  resourceTitle: string
+  score?: number | null
+  question?: string
+  verdict?: EvidenceVerdict | null
+  aiRelevance?: string | null
+  note?: string
+  tags?: string[]
+}
+
+export function addEvidence(
+  slug: string,
+  investigationId: string,
+  input: NewEvidence,
+): Promise<EvidenceItem> {
+  return clientRequest(
+    `/api/t/${encodeURIComponent(slug)}/investigations/${
+      encodeURIComponent(investigationId)
+    }/evidence`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+  )
+}
+
+export function updateEvidence(
+  slug: string,
+  investigationId: string,
+  evidenceId: string,
+  patch: { verdict?: EvidenceVerdict | null; note?: string; tags?: string[] },
+): Promise<{ ok: boolean }> {
+  return clientRequest(
+    `/api/t/${encodeURIComponent(slug)}/investigations/${
+      encodeURIComponent(investigationId)
+    }/evidence/${encodeURIComponent(evidenceId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    },
+  )
+}
+
+export function deleteEvidence(
+  slug: string,
+  investigationId: string,
+  evidenceId: string,
+): Promise<{ ok: boolean }> {
+  return clientRequest(
+    `/api/t/${encodeURIComponent(slug)}/investigations/${
+      encodeURIComponent(investigationId)
+    }/evidence/${encodeURIComponent(evidenceId)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export function saveArtefact(
+  slug: string,
+  investigationId: string,
+  input: { kind: string; title: string; data: unknown },
+): Promise<InvestigationArtefact> {
+  return clientRequest(
+    `/api/t/${encodeURIComponent(slug)}/investigations/${
+      encodeURIComponent(investigationId)
+    }/artefacts`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+  )
+}
+
+// --- Per-source relevance verdicts -------------------------------------------
+
+export interface SourceVerdict {
+  id: string
+  verdict: string
+  relevance: string
+}
+
+export function getSourceVerdicts(
+  slug: string,
+  question: string,
+  sources: { id: string; title: string; passage: string }[],
+): Promise<{ verdicts: SourceVerdict[] }> {
+  return clientRequest(`/api/t/${encodeURIComponent(slug)}/verdicts`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ question, sources: sources.slice(0, 12) }),
+  })
+}
+
+// --- Admin: corpus health -----------------------------------------------------
+
+export interface CorpusHealthRow {
+  id: string
+  title: string
+  words: number
+  status: 'ok' | 'thin' | 'challenge'
+  hidden: boolean
+}
+
+export function getCorpusHealth(slug: string, passcode: string): Promise<CorpusHealthRow[]> {
+  return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/corpus-health`, passcode)
+}

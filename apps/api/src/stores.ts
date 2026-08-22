@@ -295,3 +295,193 @@ export class SourceStore {
     writeJson(this.pathFor(slug), this.list(slug).filter((s) => s.id !== id))
   }
 }
+
+// --- Investigations: the research workspace -----------------------------------
+
+export interface EvidenceItem {
+  id: string
+  passage: string
+  resourceId: string
+  resourceTitle: string
+  /** Calibrated retrieval score at capture time, when known. */
+  score: number | null
+  /** The question this passage was retrieved for. */
+  question: string
+  verdict: 'supports' | 'partial' | 'not-relevant' | 'contradicts' | null
+  /** The AI's one-line relevance judgement at capture time. */
+  aiRelevance: string | null
+  note: string
+  tags: string[]
+  createdAt: string
+}
+
+export interface InvestigationArtefact {
+  id: string
+  kind: string
+  title: string
+  data: unknown
+  createdAt: string
+}
+
+export interface Investigation {
+  id: string
+  name: string
+  question: string
+  notes: string
+  status: 'active' | 'closed'
+  createdAt: string
+  updatedAt: string
+  evidence: EvidenceItem[]
+  artefacts: InvestigationArtefact[]
+}
+
+export class InvestigationStore {
+  private dirFor(slug: string, clientId: string): string {
+    return join(DATA_DIR, 'investigations', safeSegment(slug), safeSegment(clientId))
+  }
+
+  private pathFor(slug: string, clientId: string, id: string): string {
+    return join(this.dirFor(slug, clientId), `${safeSegment(id)}.json`)
+  }
+
+  list(slug: string, clientId: string): {
+    id: string
+    name: string
+    question: string
+    status: 'active' | 'closed'
+    updatedAt: string
+    evidenceCount: number
+  }[] {
+    try {
+      return readdirSync(this.dirFor(slug, clientId))
+        .filter((f) => f.endsWith('.json'))
+        .map((f) => readJson<Investigation | null>(join(this.dirFor(slug, clientId), f), null))
+        .filter((i): i is Investigation => i !== null)
+        .map((i) => ({
+          id: i.id,
+          name: i.name,
+          question: i.question,
+          status: i.status,
+          updatedAt: i.updatedAt,
+          evidenceCount: i.evidence.length,
+        }))
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    } catch {
+      return []
+    }
+  }
+
+  get(slug: string, clientId: string, id: string): Investigation | null {
+    return readJson<Investigation | null>(this.pathFor(slug, clientId, id), null)
+  }
+
+  create(
+    slug: string,
+    clientId: string,
+    input: { name: string; question?: string },
+  ): Investigation {
+    const now = new Date().toISOString()
+    const investigation: Investigation = {
+      id: crypto.randomUUID().replace(/-/g, '').slice(0, 16),
+      name: input.name,
+      question: input.question ?? '',
+      notes: '',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+      evidence: [],
+      artefacts: [],
+    }
+    writeJson(this.pathFor(slug, clientId, investigation.id), investigation)
+    return investigation
+  }
+
+  update(
+    slug: string,
+    clientId: string,
+    id: string,
+    patch: Partial<Pick<Investigation, 'name' | 'question' | 'notes' | 'status'>>,
+  ): Investigation | null {
+    const current = this.get(slug, clientId, id)
+    if (!current) return null
+    const next = { ...current, ...patch, updatedAt: new Date().toISOString() }
+    writeJson(this.pathFor(slug, clientId, id), next)
+    return next
+  }
+
+  remove(slug: string, clientId: string, id: string): void {
+    try {
+      rmSync(this.pathFor(slug, clientId, id))
+    } catch {
+      // already gone
+    }
+  }
+
+  addEvidence(
+    slug: string,
+    clientId: string,
+    id: string,
+    input: Omit<EvidenceItem, 'id' | 'createdAt'>,
+  ): EvidenceItem | null {
+    const current = this.get(slug, clientId, id)
+    if (!current || current.evidence.length >= 500) return null
+    const item: EvidenceItem = {
+      ...input,
+      id: crypto.randomUUID().replace(/-/g, '').slice(0, 12),
+      createdAt: new Date().toISOString(),
+    }
+    // The same passage saved twice for the same question is one item.
+    const duplicate = current.evidence.find(
+      (e) => e.resourceId === item.resourceId && e.passage === item.passage,
+    )
+    if (duplicate) return duplicate
+    current.evidence.push(item)
+    current.updatedAt = item.createdAt
+    writeJson(this.pathFor(slug, clientId, id), current)
+    return item
+  }
+
+  updateEvidence(
+    slug: string,
+    clientId: string,
+    id: string,
+    evidenceId: string,
+    patch: Partial<Pick<EvidenceItem, 'verdict' | 'note' | 'tags'>>,
+  ): boolean {
+    const current = this.get(slug, clientId, id)
+    if (!current) return false
+    const index = current.evidence.findIndex((e) => e.id === evidenceId)
+    if (index < 0) return false
+    current.evidence[index] = { ...current.evidence[index] as EvidenceItem, ...patch }
+    current.updatedAt = new Date().toISOString()
+    writeJson(this.pathFor(slug, clientId, id), current)
+    return true
+  }
+
+  removeEvidence(slug: string, clientId: string, id: string, evidenceId: string): void {
+    const current = this.get(slug, clientId, id)
+    if (!current) return
+    current.evidence = current.evidence.filter((e) => e.id !== evidenceId)
+    current.updatedAt = new Date().toISOString()
+    writeJson(this.pathFor(slug, clientId, id), current)
+  }
+
+  addArtefact(
+    slug: string,
+    clientId: string,
+    id: string,
+    input: { kind: string; title: string; data: unknown },
+  ): InvestigationArtefact | null {
+    const current = this.get(slug, clientId, id)
+    if (!current || current.artefacts.length >= 100) return null
+    const artefact: InvestigationArtefact = {
+      ...input,
+      id: crypto.randomUUID().replace(/-/g, '').slice(0, 12),
+      createdAt: new Date().toISOString(),
+    }
+    current.artefacts.push(artefact)
+    current.updatedAt = artefact.createdAt
+    writeJson(this.pathFor(slug, clientId, id), current)
+    return artefact
+  }
+}

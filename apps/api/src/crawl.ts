@@ -93,3 +93,68 @@ export async function discoverLinks(
   }
   return { source: isXml ? 'sitemap' : 'page', count: links.length, links }
 }
+
+// ---------------------------------------------------------------------------
+// Main-content extraction and ingestion quality gate. Web pages carry nav,
+// footer and cookie chrome that pollutes passage matching, and bot-challenge
+// pages must never enter the corpus at all.
+// ---------------------------------------------------------------------------
+
+const CHALLENGE_SIGNATURES =
+  /(cloudflare|enable javascript and cookies|just a moment|performing security verification|ray id|checking your browser|access denied|error 40[34]|attention required)/i
+
+/** True when extracted text looks like a bot wall or error page, not content. */
+export function looksLikeChallengePage(text: string): boolean {
+  return CHALLENGE_SIGNATURES.test(text.slice(0, 2500))
+}
+
+const STRIP_TAGS =
+  /<(script|style|nav|header|footer|aside|form|noscript|svg|iframe)\b[\s\S]*?<\/\1>/gi
+const STRIP_BY_ROLE =
+  /<[^>]+(?:role=["'](?:navigation|banner|contentinfo|search)["']|class=["'][^"']*(?:cookie|breadcrumb|menu|nav-|footer|header|sidebar|social|share|subscribe)[^"']*["'])[^>]*>[\s\S]*?<\/[^>]+>/gi
+
+/**
+ * Readability-style main-content extraction: prefer <main>/<article>, strip
+ * chrome elements, convert headings and paragraphs to markdown-ish text.
+ * Returns null when no meaningful body content survives.
+ */
+export function extractMainContent(html: string): { title: string; body: string } | null {
+  const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)
+  const rawTitle = (titleMatch?.[1] ?? '').replace(/\s+/g, ' ').trim()
+  const title = rawTitle.split(/\s*[|\u2013\u2014-]\s+/)[0]?.trim() || rawTitle
+
+  const mainMatch = /<main\b[^>]*>([\s\S]*?)<\/main>/i.exec(html) ??
+    /<article\b[^>]*>([\s\S]*?)<\/article>/i.exec(html)
+  let scope = mainMatch?.[1] ?? html
+  scope = scope.replace(STRIP_TAGS, ' ')
+  scope = scope.replace(STRIP_BY_ROLE, ' ')
+
+  const blocks: string[] = []
+  const blockRe = /<(h1|h2|h3|h4|p|li|td|th|blockquote|figcaption)\b[^>]*>([\s\S]*?)<\/\1>/gi
+  let match: RegExpExecArray | null
+  while ((match = blockRe.exec(scope)) !== null) {
+    const tag = (match[1] ?? '').toLowerCase()
+    const text = (match[2] ?? '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&#?\w+;/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (text.length < 3) continue
+    if (tag.startsWith('h')) blocks.push(`\n${'#'.repeat(Number(tag[1]))} ${text}\n`)
+    else if (tag === 'li') blocks.push(`- ${text}`)
+    else blocks.push(text)
+  }
+  // Collapse duplicate blocks (repeated nav items that escaped stripping).
+  const seen = new Set<string>()
+  const unique = blocks.filter((b) => {
+    const key = b.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  const body = unique.join('\n\n').trim()
+  const words = body.split(/\s+/).length
+  if (words < 80 || looksLikeChallengePage(body)) return null
+  return { title: title || 'Untitled page', body }
+}

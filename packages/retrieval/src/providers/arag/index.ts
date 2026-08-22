@@ -224,6 +224,7 @@ export class AragProvider implements RetrievalProvider {
       slug?: string
       topicId?: string
       extraMetadata?: Record<string, unknown>
+      originUrl?: string
     },
   ): Promise<{ id: string }> {
     const body: Record<string, unknown> = {
@@ -231,6 +232,7 @@ export class AragProvider implements RetrievalProvider {
       icon: 'text/plain',
       texts: { body: { body: input.body, format: input.format ?? 'MARKDOWN' } },
     }
+    if (input.originUrl) body.origin = { url: input.originUrl }
     if (input.slug) body.slug = input.slug
     if (input.topicId) {
       body.usermetadata = { classifications: [{ labelset: 'topic', label: input.topicId }] }
@@ -327,9 +329,11 @@ export class AragProvider implements RetrievalProvider {
       features,
       page_size: opts.pageSize ?? 20,
       show: ['basic', 'origin'],
-      // Central retrieval settings live on the box; explicit params override.
-      search_configuration: 'portal-search',
     }
+    // The named search configuration's own features override the request's,
+    // which would make the mode switch inert - only attach it for the
+    // default hybrid mode.
+    if (mode === 'hybrid') body.search_configuration = 'portal-search'
     const filters = (opts.topicIds ?? []).map((t) => `/classification.labels/topic/${t}`)
     if (filters.length > 0) body.filters = filters
     type FindResponse = {
@@ -388,10 +392,13 @@ export class AragProvider implements RetrievalProvider {
       seenSignatures.add(signature)
       return true
     })
-    const maxScore = Math.max(...deduped.map((s) => s.best), 1e-9)
+    // Calibrated relevance, comparable across queries: semantic scores are
+    // already 0-1; BM25 scores (>1) are squashed logistically. Never
+    // normalised to the top hit - a weak best match must LOOK weak.
+    const calibrate = (s: number): number => s <= 1 ? Math.max(0, Math.min(1, s)) : s / (s + 2)
     const resources: ScoredResource[] = deduped.map(({ id, raw, best, passage }) => ({
       ...(byId.get(id) ?? this.toSummary(id, raw)),
-      relevance: Math.max(0, Math.min(1, best / maxScore)),
+      relevance: Math.round(calibrate(best) * 100) / 100,
       citedCount: 0,
       matchedPassage: passage,
     }))
@@ -849,6 +856,70 @@ export class AragProvider implements RetrievalProvider {
     this.invalidateCatalogue(tenant.slug)
   }
 
+  /**
+   * Corpus health: word count and extraction sanity for every resource, so
+   * bot-challenge pages and empty extractions surface in Manage instead of
+   * being cited as sources.
+   */
+  async corpusHealth(tenant: TenantConfig): Promise<{
+    id: string
+    title: string
+    words: number
+    status: 'ok' | 'thin' | 'challenge'
+    hidden: boolean
+  }[]> {
+    const client = this.client(tenant)
+    const catalog = await client.getJson<{
+      resources?: Record<string, RawResource & { hidden?: boolean }>
+    }>('/catalog?page_number=0&page_size=100&show=basic')
+    const CHALLENGE =
+      /(cloudflare|enable javascript and cookies|just a moment|performing security verification|ray id|checking your browser)/i
+    const entries = Object.entries(catalog.resources ?? {})
+    const results = await Promise.all(entries.map(async ([id, meta]) => {
+      try {
+        const full = await client.getJson<{
+          title?: string
+          data?: Record<
+            string,
+            Record<string, { extracted?: { text?: { text?: string } } }>
+          >
+        }>(`/resource/${id}?show=extracted&extracted=text&show=basic`)
+        const texts: string[] = []
+        for (const fieldType of Object.values(full.data ?? {})) {
+          for (const field of Object.values(fieldType ?? {})) {
+            const text = field.extracted?.text?.text
+            if (text) texts.push(text)
+          }
+        }
+        const body = texts.join(' ')
+        const words = body.trim() ? body.trim().split(/\s+/).length : 0
+        const status = CHALLENGE.test(body.slice(0, 2500))
+          ? 'challenge' as const
+          : words < 120
+          ? 'thin' as const
+          : 'ok' as const
+        return {
+          id,
+          title: full.title ?? meta.title ?? id,
+          words,
+          status,
+          hidden: meta.hidden ?? false,
+        }
+      } catch {
+        return {
+          id,
+          title: meta.title ?? id,
+          words: 0,
+          status: 'thin' as const,
+          hidden: meta.hidden ?? false,
+        }
+      }
+    }))
+    return results.sort((a, b) =>
+      (a.status === 'ok' ? 1 : 0) - (b.status === 'ok' ? 1 : 0) || b.words - a.words
+    )
+  }
+
   /** Type-ahead: entity and title suggestions from the box's suggest index. */
   async typeahead(
     tenant: TenantConfig,
@@ -1098,7 +1169,10 @@ export class AragProvider implements RetrievalProvider {
             'question using the provided context. Synthesise across sources even when the context ' +
             'is partial - surface what IS known and be specific. Never reply that there is not ' +
             'enough data, and never refuse, when any relevant context is present. Write clear, ' +
-            'well-structured prose with Markdown, in Australian English.',
+            'well-structured prose with Markdown, in Australian English. Cite evidence at claim ' +
+            'level: after each factual claim, add a bracketed citation number like [1] matching ' +
+            'the order sources first appear in your answer. If a statement is your inference ' +
+            'rather than something the context states, mark it (inference).',
       },
     }
     if (opts.context && opts.context.length > 0) {

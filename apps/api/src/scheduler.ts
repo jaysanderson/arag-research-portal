@@ -1,6 +1,6 @@
 import type { TenantConfig } from '@research-portal/core'
 import type { AragProvider } from '@research-portal/retrieval'
-import { discoverLinks } from './crawl.ts'
+import { discoverLinks, extractMainContent, looksLikeChallengePage } from './crawl.ts'
 import { type Source, SourceStore, WatchStore } from './stores.ts'
 import type { TenantStore } from './tenants.ts'
 
@@ -33,15 +33,49 @@ export async function syncSource(
       (freshAll.length > fresh.length ? ` (ingesting ${fresh.length} this run)` : ''),
   )
   let added = 0
+  let rejected = 0
   for (const url of fresh) {
     try {
-      await management.createLink(config, { url })
+      // Fetch and clean the page ourselves so the index holds body content,
+      // not nav chrome - and so bot walls never enter the corpus.
+      let ingested = false
+      try {
+        const res = await fetch(url, {
+          headers: { 'user-agent': 'Mozilla/5.0 (research-portal-ingest)' },
+          signal: AbortSignal.timeout(25_000),
+        })
+        if (res.ok && (res.headers.get('content-type') ?? '').includes('html')) {
+          const html = await res.text()
+          const cleaned = extractMainContent(html)
+          if (cleaned) {
+            await management.createText(config, {
+              title: cleaned.title,
+              body: cleaned.body,
+              format: 'MARKDOWN',
+              originUrl: url,
+            })
+            ingested = true
+          } else if (looksLikeChallengePage(html)) {
+            rejected += 1
+            known.add(url)
+            continue
+          }
+        }
+      } catch {
+        // fall through to the platform crawler
+      }
+      if (!ingested) {
+        await management.createLink(config, { url })
+      }
       known.add(url)
       added += 1
       if (added % 5 === 0) await emit(`Ingested ${added} of ${fresh.length} new pages…`)
     } catch {
       await emit(`Skipped ${url} - the platform rejected it`)
     }
+  }
+  if (rejected > 0) {
+    await emit(`Rejected ${rejected} bot-challenge or empty ${rejected === 1 ? 'page' : 'pages'}`)
   }
   sources.update(config.slug, source.id, {
     lastSync: new Date().toISOString(),
