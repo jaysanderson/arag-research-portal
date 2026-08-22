@@ -888,7 +888,14 @@ export class AragProvider implements RetrievalProvider {
             'well-structured prose with Markdown, in Australian English.',
       },
     }
-    if (opts.context && opts.context.length > 0) body.context = opts.context
+    if (opts.context && opts.context.length > 0) {
+      // The app models turns as USER/AGENT; this deployment's /ask context
+      // enum is NUCLIA | USER (422 otherwise) - translate at the boundary.
+      body.context = opts.context.map((turn) => ({
+        author: turn.author === 'AGENT' ? 'NUCLIA' : 'USER',
+        text: turn.text,
+      }))
+    }
     if (opts.resourceId) body.resource_filters = [opts.resourceId]
     if (opts.topicIds && opts.topicIds.length > 0) {
       body.filters = opts.topicIds.map((t) => `/classification.labels/topic/${t}`)

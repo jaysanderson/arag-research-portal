@@ -48,8 +48,41 @@ const KG_SCHEMA = {
           required: ['label', 'description'],
         },
       },
+      examples: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            text: { type: 'string' },
+            entities: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: { name: { type: 'string' }, label: { type: 'string' } },
+                required: ['name', 'label'],
+              },
+            },
+            relations: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  source: { type: 'string' },
+                  target: { type: 'string' },
+                  label: { type: 'string' },
+                },
+                required: ['source', 'target', 'label'],
+              },
+            },
+          },
+          required: ['text', 'entities', 'relations'],
+        },
+      },
     },
-    required: ['rationale', 'entityTypes', 'resourceLabels', 'chunkLabels'],
+    required: ['rationale', 'entityTypes', 'resourceLabels', 'chunkLabels', 'examples'],
   },
 }
 
@@ -102,11 +135,56 @@ export async function proposeKgStrategy(
     `species, programs, regions, technologies - whatever fits THIS corpus); (2) 4 to 8 ` +
     `resource-level labels (whole-document classifications) with descriptions; (3) 4 to 8 ` +
     `chunk-level labels (classifying individual passages, e.g. finding, recommendation, ` +
-    `statistic, definition, methodology) with descriptions; (4) a two-sentence rationale ` +
-    `explaining the strategy in Australian English. Labels in Title Case, no punctuation in ` +
-    `labels.`
+    `statistic, definition, methodology) with descriptions; (4) at least SIX few-shot NER ` +
+    `examples drawn from this corpus: each has 'text' (one or two real-sounding sentences from ` +
+    `the domain), 'entities' (2 to 4 mentions, each {name, label} using ONLY your entity type ` +
+    `labels), and 'relations' (1 to 3 {source, target, label} where source and target are ` +
+    `entity names from that example's entities list and label is a short verb phrase like ` +
+    `'funds', 'affects', 'located in', 'assesses') - these teach the extraction agent how ` +
+    `entities RELATE; (5) a two-sentence rationale explaining the strategy in Australian ` +
+    `English. Labels in Title Case, no punctuation in labels.`
   const { object } = await management.askStructured(config, KG_SCHEMA, prompt)
-  return KgProposalSchema.parse(object)
+  const proposal = KgProposalSchema.parse(object)
+  // Keep only structurally sound examples: entity labels must come from the
+  // defined types and every relation endpoint must be a listed entity.
+  const typeLabels = new Set(proposal.entityTypes.map((e) => e.label))
+  const validate = (examples: KgProposal['examples']): KgProposal['examples'] =>
+    examples
+      .map((example) => {
+        const entities = example.entities.filter((e) => typeLabels.has(e.label))
+        const names = new Set(entities.map((e) => e.name))
+        const relations = example.relations.filter(
+          (r) => names.has(r.source) && names.has(r.target),
+        )
+        return { ...example, entities, relations }
+      })
+      .filter((example) =>
+        example.text.trim() && example.entities.length >= 2 && example.relations.length >= 1
+      )
+  proposal.examples = validate(proposal.examples)
+  // The graph agent needs at least six few-shot examples to learn relations -
+  // top up with a second, examples-only generation pass when short.
+  if (proposal.examples.length < 6) {
+    const topUpPrompt =
+      `Write ${8 - proposal.examples.length} few-shot NER training examples for this corpus. ` +
+      `Entity types (use ONLY these labels): ${
+        proposal.entityTypes.map((e) => `${e.label} (${e.description})`).join('; ')
+      }. Each example: 'text' - one or two realistic domain sentences; 'entities' - 2 to 4 ` +
+      `{name, label} mentions from the text; 'relations' - 1 to 3 {source, target, label} ` +
+      `where source and target are names from the entities list and label is a short verb ` +
+      `phrase. Return rationale as 'top-up' and entityTypes, resourceLabels and chunkLabels ` +
+      `as empty arrays - only the examples matter in this pass.`
+    try {
+      const { object: extra } = await management.askStructured(config, KG_SCHEMA, topUpPrompt)
+      const parsed = KgProposalSchema.safeParse(extra)
+      if (parsed.success) {
+        proposal.examples = [...proposal.examples, ...validate(parsed.data.examples)].slice(0, 10)
+      }
+    } catch {
+      // keep what we have
+    }
+  }
+  return proposal
 }
 
 export async function* implementKgStrategy(
@@ -153,6 +231,8 @@ export async function* implementKgStrategy(
 
   yield { type: 'stage', label: 'Registering agents on the knowledge box' }
   let agents = 0
+  const existing = await management.listAgents(config).catch(() => [])
+  const existingByTitle = new Map(existing.map((a) => [a.title, a]))
   const tryStart = async function* (
     label: string,
     task: string,
@@ -195,35 +275,68 @@ export async function* implementKgStrategy(
     }
   }
 
-  yield* tryStart('Knowledge graph', 'llm-graph', `kg-${slugify(config.slug)}`, [{
+  const kgTitle = `kg-${slugify(config.slug)}`
+  const previousGraph = existingByTitle.get(kgTitle)
+  if (previousGraph) {
+    try {
+      await management.deleteAgent(config, previousGraph.id)
+      yield { type: 'item', label: 'Replacing the existing knowledge graph agent' }
+    } catch {
+      // fall through and let the start attempt speak for itself
+    }
+  }
+  if (proposal.examples.length > 0) {
+    yield {
+      type: 'item',
+      label: `Teaching the graph agent with ${proposal.examples.length} NER examples`,
+    }
+  }
+  yield* tryStart('Knowledge graph', 'llm-graph', kgTitle, [{
     graph: {
       ident: 'kg1',
       entity_defs: proposal.entityTypes.map((e) => ({
         label: e.label,
         description: e.description,
       })),
-    },
-  }])
-  yield* tryStart('Document labeller', 'labeler', `labels-${slugify(config.slug)}`, [{
-    label: {
-      ident: 'kgl1',
-      labels: proposal.resourceLabels.map((l) => ({
-        label: l.label,
-        description: l.description,
+      examples: proposal.examples.map((example) => ({
+        text: example.text,
+        entities: example.entities,
+        relations: example.relations,
       })),
     },
   }])
-  yield* tryStart('Passage labeller', 'labeler', `chunks-${slugify(config.slug)}`, [{
-    label: {
-      ident: 'kgl2',
-      labels: proposal.chunkLabels.map((l) => ({
-        label: l.label,
-        description: l.description,
-      })),
-    },
-  }])
-  if (opts.includeSummaries) {
-    yield* tryStart('Page summary generator', 'ask', `summaries-${slugify(config.slug)}`, [{
+  const labelsTitle = `labels-${slugify(config.slug)}`
+  if (existingByTitle.has(labelsTitle)) {
+    agents += 1
+    yield { type: 'item', label: 'Document labeller already registered - keeping it' }
+  } else {yield* tryStart('Document labeller', 'labeler', labelsTitle, [{
+      label: {
+        ident: 'kgl1',
+        labels: proposal.resourceLabels.map((l) => ({
+          label: l.label,
+          description: l.description,
+        })),
+      },
+    }])}
+  const chunksTitle = `chunks-${slugify(config.slug)}`
+  if (existingByTitle.has(chunksTitle)) {
+    agents += 1
+    yield { type: 'item', label: 'Passage labeller already registered - keeping it' }
+  } else {yield* tryStart('Passage labeller', 'labeler', chunksTitle, [{
+      label: {
+        ident: 'kgl2',
+        labels: proposal.chunkLabels.map((l) => ({
+          label: l.label,
+          description: l.description,
+        })),
+      },
+    }])}
+  const summariesTitle = `summaries-${slugify(config.slug)}`
+  if (opts.includeSummaries && existingByTitle.has(summariesTitle)) {
+    agents += 1
+    yield { type: 'item', label: 'Page summary generator already registered - keeping it' }
+  } else if (opts.includeSummaries) {
+    yield* tryStart('Page summary generator', 'ask', summariesTitle, [{
       ask: {
         question:
           'Write a three sentence, plain-language summary of this resource for a research portal card. Australian English.',

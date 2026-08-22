@@ -254,6 +254,17 @@ export const KgProposalSchema = z.object({
   entityTypes: z.object({ label: z.string(), description: z.string() }).array(),
   resourceLabels: z.object({ label: z.string(), description: z.string() }).array(),
   chunkLabels: z.object({ label: z.string(), description: z.string() }).array(),
+  /** Few-shot NER examples so the graph agent learns entity RELATIONS too. */
+  examples: z
+    .object({
+      text: z.string(),
+      entities: z.object({ name: z.string(), label: z.string() }).array(),
+      relations: z
+        .object({ source: z.string(), target: z.string(), label: z.string() })
+        .array(),
+    })
+    .array()
+    .default([]),
 })
 
 export const KgImplementEventSchema = z.discriminatedUnion('type', [
