@@ -331,6 +331,15 @@ export async function* implementKgStrategy(
         })),
       },
     }])}
+  const questionsTitle = `questions-${slugify(config.slug)}`
+  if (existingByTitle.has(questionsTitle)) {
+    agents += 1
+    yield { type: 'item', label: 'Question generator already registered - keeping it' }
+  } else {
+    yield* tryStart('Question generator', 'synthetic-questions', questionsTitle, [{
+      qa: { max_questions: 3 },
+    }])
+  }
   const summariesTitle = `summaries-${slugify(config.slug)}`
   if (opts.includeSummaries && existingByTitle.has(summariesTitle)) {
     agents += 1

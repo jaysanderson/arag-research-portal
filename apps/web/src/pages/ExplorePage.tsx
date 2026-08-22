@@ -65,9 +65,13 @@ function HeroBackdrop({ imageUrl }: { imageUrl?: string }) {
 
 function Hero({
   config,
+  onAsk,
   onSearch,
 }: {
   config: TenantConfig
+  /** The hero's own question path: submitting or picking a suggestion. */
+  onAsk: (text: string) => void
+  /** Resource-title picks only - those are a destination, not a question. */
   onSearch: (text: string) => void
 }) {
   const [query, setQuery] = useState('')
@@ -92,7 +96,7 @@ function Hero({
     const trimmed = query.trim()
     if (trimmed.length === 0) return
     typeahead.close()
-    onSearch(trimmed)
+    onAsk(trimmed)
   }
 
   return (
@@ -157,7 +161,7 @@ function Hero({
                 <button
                   key={question.id}
                   type='button'
-                  onClick={() => onSearch(question.text)}
+                  onClick={() => onAsk(question.text)}
                   className='rp-focus-inverse rounded-[6px] bg-white/12 px-3 py-1.5 text-sm text-white ring-1 ring-inset ring-white/25 backdrop-blur-sm transition-colors duration-150 hover:bg-white/25'
                 >
                   {question.text}
@@ -328,11 +332,19 @@ export function ExplorePage() {
     [navigate],
   )
 
+  // The hero asks rather than searches - Search no longer answers questions,
+  // so a question the reader types (or picks from the suggestions) goes
+  // straight to the assistant with the question pre-filled and auto-sent.
+  const ask = useCallback(
+    (text: string) => navigate(`/t/${config.slug}/assistant?ask=${encodeURIComponent(text)}`),
+    [navigate, config.slug],
+  )
+
   const hasRows = resourcesByTopic.size > 0
 
   return (
     <main>
-      <Hero config={config} onSearch={search} />
+      <Hero config={config} onAsk={ask} onSearch={search} />
 
       {isCountersLoading
         ? <StatsStripSkeleton />

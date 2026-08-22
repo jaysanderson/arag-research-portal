@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { AskEvent, AskStage, Citation, ScoredResource } from '@research-portal/core'
 import { getSuggestedQuestions, streamAsk } from '../api/client.ts'
 import { citationHref, ContextJourney } from '../components/AnswerStream.tsx'
+import { type QualityScores, TrustSignals } from '../components/QualityGauge.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
 // ---------------------------------------------------------------------------
@@ -21,6 +22,7 @@ type Trace = {
   sourceCount: number
   tokens: { input: number; output: number } | null
   seconds: number | null
+  quality: QualityScores | null
   when: number
 }
 
@@ -62,6 +64,14 @@ function relativeAge(timestamp: number): string {
   if (hours < 24) return `${hours}h ago`
   const days = Math.round(hours / 24)
   return `${days}d ago`
+}
+
+/** REMi trio for the trace table: relevance / groundedness / context, dash for a null metric. */
+function formatQuality(quality: QualityScores): string {
+  const score = (value: number | null) => value === null ? '-' : value.toFixed(1)
+  return `${score(quality.answerRelevance)} / ${score(quality.groundedness)} / ${
+    score(quality.contextRelevance)
+  }`
 }
 
 const STAGES: { key: AskStage; label: string }[] = [
@@ -167,6 +177,7 @@ function PipelineRail({
   statuses,
   sources,
   usage,
+  quality,
 }: {
   statuses: StageStatuses
   sources: ScoredResource[]
@@ -176,6 +187,7 @@ function PipelineRail({
     firstChunkSec?: number
     totalSec?: number
   } | null
+  quality: QualityScores | null
 }) {
   return (
     <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-5 shadow-sm'>
@@ -275,6 +287,14 @@ function PipelineRail({
                     </dl>
                   )
                   : null}
+
+                {stage.key === 'generating' && quality
+                  ? (
+                    <div className='mt-2.5'>
+                      <TrustSignals quality={quality} />
+                    </div>
+                  )
+                  : null}
               </div>
             </li>
           )
@@ -307,6 +327,7 @@ export function AgenticPage() {
       totalSec?: number
     } | null
   >(null)
+  const [quality, setQuality] = useState<QualityScores | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [traces, setTraces] = useState<Trace[]>(() => loadTraces(config.slug))
 
@@ -334,6 +355,7 @@ export function AgenticPage() {
     setCitations([])
     setSources([])
     setUsage(null)
+    setQuality(null)
     setErrorMessage(null)
     setStageStatuses(IDLE_STAGES)
     startedAtRef.current = Date.now()
@@ -344,6 +366,7 @@ export function AgenticPage() {
     let finalAnswer = ''
     let finalSourceCount = 0
     let finalUsage: { inputTokens: number; outputTokens: number; totalSec?: number } | null = null
+    let finalQuality: QualityScores | null = null
 
     try {
       await streamAsk(
@@ -385,6 +408,14 @@ export function AgenticPage() {
                 totalSec: event.totalSec,
               })
               break
+            case 'quality':
+              finalQuality = {
+                answerRelevance: event.answerRelevance,
+                groundedness: event.groundedness,
+                contextRelevance: event.contextRelevance,
+              }
+              setQuality(finalQuality)
+              break
             case 'done':
               break
             case 'error':
@@ -418,6 +449,7 @@ export function AgenticPage() {
           sourceCount: finalSourceCount,
           tokens: usage ? { input: usage.inputTokens, output: usage.outputTokens } : null,
           seconds: usage?.totalSec ?? elapsed,
+          quality: finalQuality,
           when: Date.now(),
         }
         setTraces((prev) => {
@@ -587,7 +619,12 @@ export function AgenticPage() {
             </section>
 
             <aside aria-label='Retrieval pipeline'>
-              <PipelineRail statuses={stageStatuses} sources={sources} usage={usage} />
+              <PipelineRail
+                statuses={stageStatuses}
+                sources={sources}
+                usage={usage}
+                quality={quality}
+              />
             </aside>
           </div>
         )
@@ -608,6 +645,7 @@ export function AgenticPage() {
                     <th scope='col' className='px-4 py-2.5 font-medium'>Question</th>
                     <th scope='col' className='px-4 py-2.5 font-medium'>Sources</th>
                     <th scope='col' className='px-4 py-2.5 font-medium'>Tokens</th>
+                    <th scope='col' className='px-4 py-2.5 font-medium'>Quality</th>
                     <th scope='col' className='px-4 py-2.5 font-medium'>Time</th>
                     <th scope='col' className='px-4 py-2.5 font-medium'>When</th>
                   </tr>
@@ -630,6 +668,12 @@ export function AgenticPage() {
                       <td className='px-4 py-2.5 text-ink-2'>{trace.sourceCount}</td>
                       <td className='px-4 py-2.5 text-ink-2'>
                         {trace.tokens ? `${trace.tokens.input} / ${trace.tokens.output}` : 'n/a'}
+                      </td>
+                      <td
+                        className='px-4 py-2.5 text-ink-2 tabular-nums'
+                        title='Relevance / groundedness / context'
+                      >
+                        {trace.quality ? formatQuality(trace.quality) : 'n/a'}
                       </td>
                       <td className='px-4 py-2.5 text-ink-2'>
                         {trace.seconds !== null ? `${trace.seconds.toFixed(1)}s` : 'n/a'}

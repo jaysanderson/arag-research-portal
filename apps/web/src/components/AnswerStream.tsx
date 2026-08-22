@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import type { AskEvent, Citation, ScoredResource } from '@research-portal/core'
 import { type AskRequest, streamAsk } from '../api/client.ts'
 import { AnswerJourney } from './AnswerJourney.tsx'
+import { type QualityScores, TrustSignals } from './QualityGauge.tsx'
 
 type Status = 'idle' | 'streaming' | 'done' | 'error'
 type UsageEvent = Extract<AskEvent, { type: 'usage' }>
@@ -188,6 +189,7 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
   const [sources, setSources] = useState<ScoredResource[]>([])
   const [citations, setCitations] = useState<Citation[]>([])
   const [usage, setUsage] = useState<UsageEvent | null>(null)
+  const [quality, setQuality] = useState<QualityScores | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -206,6 +208,7 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
       setSources([])
       setCitations([])
       setUsage(null)
+      setQuality(null)
       setErrorMessage(null)
       return
     }
@@ -217,6 +220,7 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
     setSources([])
     setCitations([])
     setUsage(null)
+    setQuality(null)
     setErrorMessage(null)
 
     streamAsk(slug, request, (event: AskEvent) => {
@@ -232,6 +236,13 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
           break
         case 'usage':
           setUsage(event)
+          break
+        case 'quality':
+          setQuality({
+            answerRelevance: event.answerRelevance,
+            groundedness: event.groundedness,
+            contextRelevance: event.contextRelevance,
+          })
           break
         case 'done':
           setStatus('done')
@@ -367,6 +378,14 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
             {usage.inputTokens.toLocaleString()} in / {usage.outputTokens.toLocaleString()}{' '}
             out tokens{usage.totalSec !== undefined ? ` - ${usage.totalSec.toFixed(1)} s` : ''}
           </p>
+        )
+        : null}
+
+      {quality
+        ? (
+          <div className='mt-2'>
+            <TrustSignals quality={quality} />
+          </div>
         )
         : null}
 

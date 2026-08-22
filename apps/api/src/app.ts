@@ -270,6 +270,13 @@ export function buildApp(opts: BuildAppOptions): Hono {
     return c.json(await opts.management.typeahead(config, q))
   })
 
+  app.get('/api/t/:slug/graph/relations', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    if (!opts.management) return c.json({ nodes: [], edges: [] })
+    return c.json(await opts.management.relationsGraph(config))
+  })
+
   app.get('/api/t/:slug/entities', async (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)

@@ -418,6 +418,17 @@ body {
   --rp-bad-bg: #fff1f2;
   --rp-bad-ink: #be123c;
   --rp-bad-line: #fecdd3;
+
+  /* Categorical palette for entity/group colouring (e.g. the entity graph) -
+   * six accent-ish hues, picked to skip the ok/bad greens and reds above so a
+   * category swatch never reads as a status. Fixed dual-mode hex, not a
+   * generated hue - a name hashes onto one of these six deterministically. */
+  --rp-cat-1: #2a78d6;
+  --rp-cat-2: #eb6834;
+  --rp-cat-3: #1baf7a;
+  --rp-cat-4: #eda100;
+  --rp-cat-5: #e87ba4;
+  --rp-cat-6: #4a3aa7;
   color-scheme: light;
 }
 
@@ -442,6 +453,12 @@ html[data-theme='dark'] {
   --rp-bad-bg: rgba(244, 63, 94, 0.12);
   --rp-bad-ink: #fb7185;
   --rp-bad-line: rgba(244, 63, 94, 0.35);
+  --rp-cat-1: #3987e5;
+  --rp-cat-2: #d95926;
+  --rp-cat-3: #199e70;
+  --rp-cat-4: #c98500;
+  --rp-cat-5: #d55181;
+  --rp-cat-6: #9085e9;
   --rp-ring: 0 0 0 2px var(--rp-surface), 0 0 0 4px var(--rp-accent);
   --rp-shadow-sm: 0 1px 1px rgba(0, 0, 0, 0.3), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
   --rp-shadow-md: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 26px -14px rgba(0, 0, 0, 0.6);

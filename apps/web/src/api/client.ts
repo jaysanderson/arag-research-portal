@@ -644,3 +644,10 @@ export function ensureSearchConfigs(
     { method: 'POST' },
   )
 }
+
+export function getRelationsGraph(slug: string): Promise<{
+  nodes: { id: string; group: string; weight: number }[]
+  edges: { source: string; target: string; label: string }[]
+}> {
+  return request(`/api/t/${encodeURIComponent(slug)}/graph/relations`)
+}

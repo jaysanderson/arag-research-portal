@@ -6,11 +6,12 @@ import {
   useRef,
   useState,
 } from 'react'
-import { Link, useOutletContext } from 'react-router-dom'
+import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import type { AskEvent, Citation, ScoredResource } from '@research-portal/core'
 import { getSuggestedQuestions, streamAsk } from '../api/client.ts'
 import { citationHref, ContextJourney } from '../components/AnswerStream.tsx'
+import { type QualityScores, TrustSignals } from '../components/QualityGauge.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
 // ---------------------------------------------------------------------------
@@ -29,6 +30,7 @@ type ChatMessage = {
     firstChunkSec?: number
     totalSec?: number
   }
+  quality?: QualityScores
   error?: string
   pending?: boolean
 }
@@ -47,10 +49,34 @@ function storageKey(slug: string): string {
 }
 
 /**
+ * Defensively parses a legacy/malformed `quality` field: older sessions were
+ * saved before `quality` existed on `ChatMessage` at all, so anything that
+ * isn't a well-shaped `{ number|null, number|null, number|null }` object
+ * falls back to `undefined` rather than throwing or leaving bad data around
+ * for `TrustSignals` to trip over.
+ */
+function migrateQuality(raw: unknown): QualityScores | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const value = raw as Partial<QualityScores>
+  const isScoreOrNull = (v: unknown): v is number | null => v === null || typeof v === 'number'
+  if (
+    !isScoreOrNull(value.answerRelevance) || !isScoreOrNull(value.groundedness) ||
+    !isScoreOrNull(value.contextRelevance)
+  ) {
+    return undefined
+  }
+  return {
+    answerRelevance: value.answerRelevance,
+    groundedness: value.groundedness,
+    contextRelevance: value.contextRelevance,
+  }
+}
+
+/**
  * Defensively rebuilds a message from localStorage: older sessions were
- * saved before `sources` existed on `ChatMessage`, so any missing/malformed
- * field falls back to an empty array rather than throwing or leaving
- * `undefined` around for later code to trip over.
+ * saved before `sources` (and later `quality`) existed on `ChatMessage`, so
+ * any missing/malformed field falls back to an empty array/undefined rather
+ * than throwing or leaving bad data around for later code to trip over.
  */
 function migrateMessage(raw: unknown): ChatMessage {
   const message = raw as Partial<ChatMessage> | null | undefined
@@ -61,6 +87,7 @@ function migrateMessage(raw: unknown): ChatMessage {
     citations: Array.isArray(message?.citations) ? message.citations : [],
     sources: Array.isArray(message?.sources) ? message.sources : [],
     usage: message?.usage,
+    quality: migrateQuality(message?.quality),
     error: typeof message?.error === 'string' ? message.error : undefined,
     pending: false,
   }
@@ -293,7 +320,7 @@ function UserBubble({ message }: { message: ChatMessage }) {
     <div className='flex justify-end'>
       <div
         className='max-w-[85%] rounded-[calc(var(--rp-radius)+4px)] rounded-tr-sm px-4 py-3 text-sm leading-relaxed text-ink sm:max-w-[70%]'
-        style={{ backgroundColor: 'color-mix(in srgb, var(--rp-accent) 14%, white)' }}
+        style={{ backgroundColor: 'color-mix(in srgb, var(--rp-accent) 14%, var(--rp-surface))' }}
       >
         {message.text}
       </div>
@@ -393,6 +420,14 @@ function AssistantCard({
         )
         : null}
 
+      {message.quality
+        ? (
+          <div className='mt-3'>
+            <TrustSignals quality={message.quality} />
+          </div>
+        )
+        : null}
+
       {message.usage
         ? (
           <p className='mt-3 text-xs text-ink-3'>
@@ -418,6 +453,7 @@ function AssistantCard({
 
 export function AssistantPage() {
   const { config } = useOutletContext<TenantOutletContext>()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions(config.slug))
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
@@ -429,6 +465,9 @@ export function AssistantPage() {
 
   const abortRef = useRef<AbortController | null>(null)
   const threadEndRef = useRef<HTMLDivElement | null>(null)
+  // Guards the `?ask=` handoff from Explore against a double-send (React 18
+  // Strict Mode replays effects) and resets whenever the tenant changes.
+  const askHandledRef = useRef(false)
 
   const { data: suggestions } = useQuery({
     queryKey: ['suggested-questions', config.slug],
@@ -440,11 +479,32 @@ export function AssistantPage() {
     setSessions(loadSessions(config.slug))
     setActiveSessionId(null)
     setMessages([])
+    askHandledRef.current = false
   }, [config.slug])
 
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages])
+
+  // Explore's hero hands a question off here via `?ask=`. Consume it once:
+  // strip the param from the URL and auto-send it as a new message, but
+  // never while a stream is already running - the effect simply retries on
+  // the next isStreaming change since the ref isn't set until it succeeds.
+  useEffect(() => {
+    const ask = searchParams.get('ask')
+    if (!ask || ask.trim().length === 0 || askHandledRef.current || isStreaming) return
+    askHandledRef.current = true
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('ask')
+        return next
+      },
+      { replace: true },
+    )
+    send(ask)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, isStreaming])
 
   function persist(nextMessages: ChatMessage[], sessionId: string) {
     setSessions((prev) => {
@@ -531,6 +591,16 @@ export function AssistantPage() {
                   outputTokens: event.outputTokens,
                   firstChunkSec: event.firstChunkSec,
                   totalSec: event.totalSec,
+                },
+              }))
+              break
+            case 'quality':
+              update((message) => ({
+                ...message,
+                quality: {
+                  answerRelevance: event.answerRelevance,
+                  groundedness: event.groundedness,
+                  contextRelevance: event.contextRelevance,
                 },
               }))
               break

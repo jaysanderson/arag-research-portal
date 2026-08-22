@@ -298,6 +298,13 @@ export const AskEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('delta'), text: z.string() }),
   z.object({ type: z.literal('citation'), citation: CitationSchema }),
   z.object({
+    type: z.literal('quality'),
+    /** REMi scores, 0 to 5. Null when a metric could not be computed. */
+    answerRelevance: z.number().nullable(),
+    groundedness: z.number().nullable(),
+    contextRelevance: z.number().nullable(),
+  }),
+  z.object({
     type: z.literal('usage'),
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),

@@ -325,21 +325,35 @@ export class AragProvider implements RetrievalProvider {
       features,
       page_size: opts.pageSize ?? 20,
       show: ['basic', 'origin'],
+      // Central retrieval settings live on the box; explicit params override.
+      search_configuration: 'portal-search',
     }
     const filters = (opts.topicIds ?? []).map((t) => `/classification.labels/topic/${t}`)
     if (filters.length > 0) body.filters = filters
+    type FindResponse = {
+      resources?: Record<
+        string,
+        RawResource & {
+          fields?: Record<
+            string,
+            { paragraphs?: Record<string, { score?: number; text?: string }> }
+          >
+        }
+      >
+    }
+    const findWithFallback = async (): Promise<FindResponse> => {
+      try {
+        return await client.postJson<FindResponse>('/find', body)
+      } catch (err) {
+        if (err instanceof AragApiError && err.status >= 400 && err.status < 500) {
+          delete body.search_configuration
+          return await client.postJson<FindResponse>('/find', body)
+        }
+        throw err
+      }
+    }
     const [found, all] = await Promise.all([
-      client.postJson<{
-        resources?: Record<
-          string,
-          RawResource & {
-            fields?: Record<
-              string,
-              { paragraphs?: Record<string, { score?: number; text?: string }> }
-            >
-          }
-        >
-      }>('/find', body),
+      findWithFallback(),
       this.listResources(tenant),
     ])
     const byId = new Map(all.map((r) => [r.id, r]))
@@ -641,6 +655,90 @@ export class AragProvider implements RetrievalProvider {
     })
   }
 
+  /** REMi answer-quality scores (0-5) for a generated answer. */
+  async remi(
+    tenant: TenantConfig,
+    input: { question: string; answer: string; contexts: string[] },
+  ): Promise<
+    { answerRelevance: number | null; groundedness: number | null; contextRelevance: number | null }
+  > {
+    const raw = await this.client(tenant).postJson<{
+      answer_relevance?: { score?: number } | null
+      context_relevance?: (number | null)[] | null
+      groundedness?: (number | null)[] | null
+    }>('/predict/remi', {
+      user_id: 'research-portal',
+      question: input.question,
+      answer: input.answer,
+      contexts: input.contexts.slice(0, 20).map((c) => c.slice(0, 2000)),
+    })
+    const clean = (values?: (number | null)[] | null): number[] =>
+      (values ?? []).filter((v): v is number => typeof v === 'number')
+    // Context expansion pads retrieval with neighbouring/graph paragraphs, so
+    // averages over ALL contexts under-report. Groundedness asks "is the
+    // answer supported by the retrieved material" - the best supporting
+    // context answers that (max). Context relevance reports the top five.
+    const grounded = clean(raw.groundedness)
+    const relevant = clean(raw.context_relevance).sort((a, b) => b - a).slice(0, 5)
+    return {
+      answerRelevance: raw.answer_relevance?.score ?? null,
+      groundedness: grounded.length ? Math.max(...grounded) : null,
+      contextRelevance: relevant.length
+        ? Math.round((relevant.reduce((a, b) => a + b, 0) / relevant.length) * 10) / 10
+        : null,
+    }
+  }
+
+  /** The REAL extracted knowledge graph: entity-relation-entity paths. */
+  async relationsGraph(tenant: TenantConfig): Promise<{
+    nodes: { id: string; group: string; weight: number }[]
+    edges: { source: string; target: string; label: string }[]
+  }> {
+    try {
+      const raw = await this.client(tenant).postJson<{
+        paths?: {
+          source?: { value?: string; group?: string }
+          relation?: { label?: string }
+          destination?: { value?: string; group?: string }
+        }[]
+      }>('/graph', { query: { prop: 'path' }, top_k: 200 })
+      const weight = new Map<string, { group: string; weight: number }>()
+      const edges: { source: string; target: string; label: string }[] = []
+      const seenEdge = new Set<string>()
+      for (const path of raw.paths ?? []) {
+        const s = path.source?.value
+        const d = path.destination?.value
+        if (!s || !d || s === d) continue
+        const sg = path.source?.group ?? ''
+        const dg = path.destination?.group ?? ''
+        // Entity-entity relations only: skip built-in NER groups, label
+        // assignment paths (topic/... targets) and raw resource-id nodes.
+        if (/^[A-Z0-9_]+$/.test(sg) || /^[A-Z0-9_]+$/.test(dg)) continue
+        if (s.includes('/') || d.includes('/')) continue
+        if (/^[0-9a-f]{32}$/.test(s) || /^[0-9a-f]{32}$/.test(d)) continue
+        const label = path.relation?.label ?? 'related to'
+        const key = `${s}|${label}|${d}`
+        if (seenEdge.has(key)) continue
+        seenEdge.add(key)
+        edges.push({ source: s, target: d, label })
+        for (const [value, group] of [[s, sg], [d, dg]] as const) {
+          const entry = weight.get(value) ?? { group, weight: 0 }
+          entry.weight += 1
+          if (group) entry.group = group
+          weight.set(value, entry)
+        }
+      }
+      const nodes = [...weight.entries()]
+        .map(([id, v]) => ({ id, group: v.group, weight: v.weight }))
+        .sort((a, b) => b.weight - a.weight)
+        .slice(0, 80)
+      const keep = new Set(nodes.map((n) => n.id))
+      return { nodes, edges: edges.filter((e) => keep.has(e.source) && keep.has(e.target)) }
+    } catch {
+      return { nodes: [], edges: [] }
+    }
+  }
+
   /** Type-ahead: entity and title suggestions from the box's suggest index. */
   async typeahead(
     tenant: TenantConfig,
@@ -877,6 +975,7 @@ export class AragProvider implements RetrievalProvider {
       features: ['keyword', 'semantic'],
       citations: true,
       show: ['basic', 'origin'],
+      search_configuration: 'portal-ask',
       // Nuclia's default RAG prompt answers "Not enough data to answer this."
       // as a guardrail even when relevant sources were retrieved - override it.
       prompt: {
@@ -900,8 +999,19 @@ export class AragProvider implements RetrievalProvider {
     if (opts.topicIds && opts.topicIds.length > 0) {
       body.filters = opts.topicIds.map((t) => `/classification.labels/topic/${t}`)
     }
+    // Agentic retrieval upgrades: widen grounding windows around each hit and
+    // walk the knowledge graph from entities detected in the query (uses the
+    // box's graph extraction agent). Degrades gracefully if unsupported.
+    body.rag_strategies = [
+      { name: 'neighbouring_paragraphs', before: 2, after: 2 },
+      { name: 'graph_beta', hops: 2, agentic_graph_only: true },
+    ]
 
     let sources: ScoredResource[] = []
+    const contextTexts: string[] = []
+    let fullAnswer = ''
+    const REFUSAL = 'not enough data to answer this.'
+    let refusalPossible = true
     let generating = false
     let emitted = false
     let citationIndex = 0
@@ -923,6 +1033,7 @@ export class AragProvider implements RetrievalProvider {
         let passage: string | undefined
         for (const field of Object.values(raw.fields ?? {})) {
           for (const paragraph of Object.values(field.paragraphs ?? {})) {
+            if (paragraph.text) contextTexts.push(paragraph.text)
             if ((paragraph.score ?? 0) >= best) {
               best = paragraph.score ?? 0
               passage = paragraph.text ?? passage
@@ -982,6 +1093,20 @@ export class AragProvider implements RetrievalProvider {
               yield { type: 'stage', stage: 'retrieval', status: 'completed' }
               yield { type: 'stage', stage: 'generating', status: 'started' }
             }
+            fullAnswer += item.text
+            // Hold back the platform's bare guardrail refusal: buffer while
+            // the answer is still a prefix of it, and swap in honest guidance
+            // if that is all the model produced.
+            if (refusalPossible) {
+              const lowered = fullAnswer.trim().toLowerCase()
+              if (REFUSAL.startsWith(lowered) || lowered.startsWith(REFUSAL)) {
+                continue
+              }
+              refusalPossible = false
+              emitted = true
+              yield { type: 'delta', text: fullAnswer }
+              continue
+            }
             emitted = true
             yield { type: 'delta', text: item.text }
           } else if (item.type === 'citations' && item.citations) {
@@ -1009,13 +1134,52 @@ export class AragProvider implements RetrievalProvider {
             return
           }
         }
+        if (refusalPossible && fullAnswer.trim()) {
+          // The model produced only the guardrail sentence - replace it with
+          // guidance the reader can act on.
+          fullAnswer = ''
+          yield {
+            type: 'delta',
+            text: 'The knowledge box does not hold enough relevant material to answer this ' +
+              'confidently. Try rephrasing the question, narrowing it to a topic, or browsing ' +
+              'the Library to see what the corpus covers.',
+          }
+        }
         yield { type: 'stage', stage: 'generating', status: 'completed' }
         yield { type: 'stage', stage: 'validating', status: 'started' }
+        // REMi trust signal: score the finished answer against the full
+        // retrieved context. Best effort with a hard time cap - the answer is
+        // never held hostage by the scorer.
+        if (fullAnswer.trim() && contextTexts.length > 0) {
+          try {
+            const quality = await Promise.race([
+              this.remi(tenant, {
+                question: query,
+                answer: fullAnswer,
+                contexts: contextTexts,
+              }),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000)),
+            ])
+            if (quality) yield { type: 'quality', ...quality }
+          } catch {
+            // scoring unavailable - skip silently
+          }
+        }
         yield { type: 'stage', stage: 'validating', status: 'completed' }
         yield { type: 'done' }
         return
       } catch (err) {
         const status = err instanceof AragApiError ? err.status : 0
+        // A 4xx before any output usually means an optional capability
+        // (graph strategy) is unsupported here - shed it and go again.
+        if (
+          !emitted && status >= 400 && status < 500 &&
+          (body.rag_strategies || body.search_configuration)
+        ) {
+          delete body.rag_strategies
+          delete body.search_configuration
+          continue
+        }
         const retryable = status === 412 || status >= 500
         if (!emitted && retryable && attempt < MAX_ATTEMPTS) {
           await new Promise((resolve) => setTimeout(resolve, 700 * attempt))
