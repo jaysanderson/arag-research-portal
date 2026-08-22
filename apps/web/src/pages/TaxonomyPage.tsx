@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useOutletContext } from 'react-router-dom'
 import type { Labelset } from '@research-portal/core'
 import { createAdminLabelset, getFacets, getLabelsets } from '../api/client.ts'
+import { prettyLabel } from '../components/ui.tsx'
 import { ErrorCard, Skeleton } from '../components/ui.tsx'
 import { MessagePanel } from './admin/MessagePanel.tsx'
 import { errorMessage, inputClass, type Message } from './admin/shared.ts'
@@ -11,16 +12,20 @@ import type { TenantOutletContext } from './TenantLayout.tsx'
 function LabelsetCard({
   labelset,
   counts,
+  organisation,
 }: {
   labelset: Labelset
   counts: Record<string, number>
+  organisation: string
 }) {
   const sorted = [...labelset.labels].sort((a, b) => (counts[b] ?? 0) - (counts[a] ?? 0))
 
   return (
     <div className='rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface p-6 shadow-sm'>
       <div className='flex items-baseline justify-between gap-3'>
-        <h2 className='text-lg font-semibold tracking-tight text-ink'>{labelset.title}</h2>
+        <h2 className='text-lg font-semibold tracking-tight text-ink'>
+          {prettyLabel(labelset.title, organisation)}
+        </h2>
         <span className='shrink-0 text-xs font-medium uppercase tracking-wide text-ink-3'>
           {labelset.labels.length} {labelset.labels.length === 1 ? 'value' : 'values'}
         </span>
@@ -40,7 +45,7 @@ function LabelsetCard({
                   key={label}
                   className={`rp-chip ${count > 0 ? 'text-ink' : 'text-ink-3'}`}
                 >
-                  {label}
+                  {prettyLabel(label, organisation)}
                   <span className='text-ink-3'>
                     {count}
                   </span>
@@ -269,7 +274,12 @@ export function TaxonomyPage() {
       {labelsets && (
         <div className='mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2'>
           {labelsets.map((ls) => (
-            <LabelsetCard key={ls.id} labelset={ls} counts={facets?.[ls.id] ?? {}} />
+            <LabelsetCard
+              key={ls.id}
+              labelset={ls}
+              counts={facets?.[ls.id] ?? {}}
+              organisation={config.branding.organisation}
+            />
           ))}
           <AddLabelsetCard slug={slug} onAdded={refreshAll} />
         </div>

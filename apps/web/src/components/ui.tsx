@@ -97,3 +97,22 @@ export function hueFromId(id: string): number {
   }
   return hash % 360
 }
+
+/**
+ * Human title for a platform label that may be stored as a slug
+ * ("grdc-network" -> "GRDC Network"). Real display titles pass through
+ * untouched; the organisation name supplies the acronym to uppercase.
+ */
+export function prettyLabel(label: string, organisation?: string): string {
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(label)) return label
+  const acronym = (organisation ?? '')
+    .split(/\s+/)
+    .filter((w) => /^[A-Z]/.test(w))
+    .map((w) => w[0])
+    .join('')
+    .toLowerCase()
+  return label
+    .split('-')
+    .map((w) => (w === acronym ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ')
+}

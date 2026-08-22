@@ -493,19 +493,29 @@ export class AragProvider implements RetrievalProvider {
       this.facets(tenant, [primary]),
       this.labelsets(tenant).catch(() => []),
     ])
-    // Facet keys are label slugs - show the labelset's display title instead.
+    // Facet keys are label slugs. Some labelsets store real display titles
+    // ("Investment Strategy"), others store the slug itself - only a mapping
+    // that genuinely differs is a display title.
     const displayTitle = new Map<string, string>()
     for (const ls of labelsets) {
       for (const label of ls.labels) {
-        displayTitle.set(
-          label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
-          label,
-        )
+        const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+        if (label !== slug) displayTitle.set(slug, label)
       }
     }
+    // The organisation's acronym ("GRDC" from "Grains Research and
+    // Development Corporation") should stay uppercase in fallback titles.
+    const acronym = tenant.branding.organisation
+      .split(/\s+/)
+      .filter((w) => /^[A-Z]/.test(w))
+      .map((w) => w[0])
+      .join('')
+      .toLowerCase()
     const pretty = (slug: string) =>
       displayTitle.get(slug) ??
-        slug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+        slug.split('-').map((w) =>
+          w === acronym ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)
+        ).join(' ')
     const primaryCounts = primaryCountsAll[primary] ?? {}
     const primaries = Object.entries(primaryCounts)
       .sort((a, b) => b[1] - a[1])
