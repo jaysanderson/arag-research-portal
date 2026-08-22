@@ -807,15 +807,22 @@ export class AragProvider implements RetrievalProvider {
     edges: { source: string; target: string; label: string }[]
   }> {
     try {
-      // With an entity, ask the platform for just that node's neighbourhood
-      // (either direction); otherwise pull the corpus-wide relation set.
+      // Only agent-extracted relations - the built-in NER pipeline floods the
+      // path index (PERSON/DATE/LOC) and would drown the curated graph. With
+      // an entity, scope to that node's neighbourhood in either direction.
+      const generated = { prop: 'generated', by: 'data-augmentation' }
       const query = opts.entity
         ? {
-          prop: 'path',
-          source: { value: opts.entity, match: 'exact' },
-          undirected: true,
+          and: [
+            {
+              prop: 'path',
+              source: { value: opts.entity, match: 'exact' },
+              undirected: true,
+            },
+            generated,
+          ],
         }
-        : { prop: 'path' }
+        : generated
       const raw = await this.client(tenant).postJson<{
         paths?: {
           source?: { value?: string; group?: string }
