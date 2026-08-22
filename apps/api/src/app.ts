@@ -536,8 +536,12 @@ export function buildApp(opts: BuildAppOptions): Hono {
         return chain
       }
       await Promise.all(targets.map(async (config) => {
+        const record = { citations: 0, groundedness: null as number | null, failed: false }
         try {
           for await (const event of provider.ask(config, parsed.data.query, {})) {
+            if (event.type === 'citation') record.citations += 1
+            if (event.type === 'quality') record.groundedness = event.groundedness
+            if (event.type === 'error') record.failed = true
             if (
               event.type === 'delta' || event.type === 'done' || event.type === 'sources' ||
               event.type === 'quality' || event.type === 'error'
@@ -546,10 +550,26 @@ export function buildApp(opts: BuildAppOptions): Hono {
             }
           }
         } catch (err) {
+          record.failed = true
           await write(config.slug, {
             type: 'error',
             message: err instanceof Error ? err.message : 'unknown_error',
           })
+        }
+        try {
+          // Estate asks count in each portal's insights too - same signal.
+          insights.record(config.slug, {
+            ts: new Date().toISOString(),
+            question: parsed.data.query.slice(0, 500),
+            answered: !record.failed && record.citations > 0,
+            citations: record.citations,
+            durationSec: null,
+            answerRelevance: null,
+            groundedness: record.groundedness,
+            contextRelevance: null,
+          })
+        } catch {
+          // best-effort
         }
       }))
       await chain
