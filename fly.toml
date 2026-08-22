@@ -8,6 +8,7 @@ primary_region = "syd"
   BINDINGS_PATH = "/app/data/bindings.json"
   TENANTS_PATH = "/app/data/tenants.json"
   KG_PROPOSALS_PATH = "/app/data/kg-proposals.json"
+  BRANDING_PATH = "/app/data/branding"
 
 [http_service]
   internal_port = 8787

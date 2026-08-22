@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react'
 import type { ResourceType } from '@research-portal/core'
 
-/** A pulsing placeholder block used across loading states. */
+/**
+ * A placeholder block used across loading states. A travelling shimmer rather
+ * than a flat pulse, so a page of skeletons reads as one loading surface.
+ */
 export function Skeleton({ className = '' }: { className?: string }) {
-  return (
-    <div className={`animate-pulse rounded-lg bg-neutral-200 ${className}`} aria-hidden='true' />
-  )
+  return <div className={`rp-shimmer rounded-lg ${className}`} aria-hidden='true' />
 }
 
 const TYPE_LABELS: Record<ResourceType, string> = {
@@ -26,7 +27,7 @@ const TYPE_STYLES: Record<ResourceType, string> = {
 export function TypeBadge({ type }: { type: ResourceType }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-wide ring-1 ring-inset ${
         TYPE_STYLES[type]
       }`}
     >
@@ -44,14 +45,26 @@ export function ErrorCard({
   onRetry: () => void
 }) {
   return (
-    <div className='rounded-2xl border border-neutral-200 bg-white p-6 text-center shadow-sm'>
-      <p className='text-sm font-medium text-neutral-900'>Something went wrong</p>
-      <p className='mt-1 text-sm text-neutral-500'>{message}</p>
+    <div className='rp-shadow-sm rounded-2xl border border-neutral-200/80 bg-white p-6 text-center'>
+      <span
+        aria-hidden='true'
+        className='mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-rose-50 text-rose-600'
+      >
+        <svg viewBox='0 0 20 20' fill='currentColor' className='h-4 w-4'>
+          <path
+            fillRule='evenodd'
+            d='M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.63-1.516 2.63H3.72c-1.347 0-2.189-1.463-1.515-2.63zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 8a1 1 0 100-2 1 1 0 000 2z'
+            clipRule='evenodd'
+          />
+        </svg>
+      </span>
+      <p className='mt-3 text-sm font-semibold text-neutral-900'>Something went wrong</p>
+      <p className='mt-1 text-sm leading-relaxed text-neutral-500'>{message}</p>
       <button
         type='button'
         onClick={onRetry}
-        className='mt-4 inline-flex items-center rounded-full px-4 py-2 text-sm font-medium text-white transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-        style={{ backgroundColor: 'var(--rp-primary)', outlineColor: 'var(--rp-accent)' }}
+        className='rp-focus mt-4 inline-flex items-center rounded-full px-4 py-2 text-sm font-medium text-white transition-transform duration-150 hover:-translate-y-px'
+        style={{ backgroundColor: 'var(--rp-primary)' }}
       >
         Try again
       </button>
@@ -65,8 +78,14 @@ export function EmptyState(
 ) {
   return (
     <div className='rounded-2xl border border-dashed border-neutral-300 bg-white/60 p-8 text-center'>
-      <p className='text-sm font-medium text-neutral-900'>{title}</p>
-      {description ? <p className='mt-1 text-sm text-neutral-500'>{description}</p> : null}
+      <p className='text-sm font-semibold text-neutral-900'>{title}</p>
+      {description
+        ? (
+          <p className='mx-auto mt-1 max-w-md text-sm leading-relaxed text-neutral-500'>
+            {description}
+          </p>
+        )
+        : null}
       {children ? <div className='mt-4'>{children}</div> : null}
     </div>
   )

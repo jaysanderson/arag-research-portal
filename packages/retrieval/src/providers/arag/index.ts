@@ -757,6 +757,28 @@ export class AragProvider implements RetrievalProvider {
     }
   }
 
+  /** Stream the platform-generated thumbnail for a resource, if any. */
+  async thumbnailResponse(tenant: TenantConfig, id: string): Promise<Response | null> {
+    const client = this.client(tenant)
+    let raw: { thumbnail?: string }
+    try {
+      raw = await client.getJson<{ thumbnail?: string }>(`/resource/${id}?show=basic`)
+    } catch {
+      return null
+    }
+    const thumb = raw.thumbnail
+    if (!thumb) return null
+    // The platform returns a path like /kb/<id>/resource/<rid>/... - strip the
+    // kb prefix since our client base already ends at /kb/<id>.
+    const path = thumb.replace(/^\/kb\/[^/]+/, '')
+    if (!path.startsWith('/')) return null
+    try {
+      return await client.fileResponse(path)
+    } catch {
+      return null
+    }
+  }
+
   /** Proxy a stored file field (range-aware) for inline rendering. */
   fileStream(tenant: TenantConfig, id: string, fieldId: string, range?: string) {
     return this.client(tenant).fileResponse(

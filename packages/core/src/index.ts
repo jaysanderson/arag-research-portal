@@ -16,6 +16,10 @@ export const BrandingSchema = z.object({
     heroFrom: z.string(),
     heroTo: z.string(),
   }),
+  /** Served when an administrator uploaded a logo for this portal. */
+  logoUrl: z.string().optional(),
+  /** Served when an administrator uploaded a hero image for this portal. */
+  heroImageUrl: z.string().optional(),
 })
 
 export const TopicSchema = z.object({

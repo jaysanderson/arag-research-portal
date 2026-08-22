@@ -4,6 +4,7 @@ import { Link, useOutletContext, useParams, useSearchParams } from 'react-router
 import type { ResourceContent } from '@research-portal/core'
 import { ApiError, getResource, getResourceContent, resourceFileUrl } from '../api/client.ts'
 import { AnswerStream } from '../components/AnswerStream.tsx'
+import { ResourceThumb } from '../components/ResourceThumb.tsx'
 import { ErrorCard, Skeleton, TypeBadge } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
@@ -526,58 +527,68 @@ export function ResourceDetailPage() {
           ? (
             <>
               <article className='rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'>
-                <div className='flex flex-wrap items-center justify-between gap-3'>
-                  <TypeBadge type={resource.type} />
-                  {resource.published
-                    ? (
-                      <span className='text-xs font-medium text-neutral-400'>
-                        Published {formatDate(resource.published)}
-                      </span>
-                    )
-                    : null}
-                </div>
-
-                <h1 className='mt-3 text-2xl font-semibold tracking-tight text-neutral-900'>
-                  {resource.title}
-                </h1>
-                <p className='mt-2 text-sm leading-relaxed text-neutral-600'>{resource.summary}</p>
-
-                {resource.topicIds.length > 0
-                  ? (
-                    <div className='mt-4 flex flex-wrap gap-1.5'>
-                      {resource.topicIds.map((topicId) => {
-                        const label = topicLabel(topicId)
-                        if (!label) return null
-                        return (
-                          <span
-                            key={topicId}
-                            className='inline-flex items-center rounded-full bg-neutral-100 px-2.5 py-0.5 text-xs text-neutral-600'
-                          >
-                            {label}
+                <div className='flex items-start justify-between gap-6'>
+                  <div className='min-w-0 flex-1'>
+                    <div className='flex flex-wrap items-center justify-between gap-3'>
+                      <TypeBadge type={resource.type} />
+                      {resource.published
+                        ? (
+                          <span className='text-xs font-medium text-neutral-400'>
+                            Published {formatDate(resource.published)}
                           </span>
                         )
-                      })}
+                        : null}
                     </div>
-                  )
-                  : null}
 
-                {resource.keyFacts.length > 0
-                  ? (
-                    <div className='mt-6'>
-                      <p className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>
-                        Key facts
-                      </p>
-                      <ol className='mt-2 space-y-1.5'>
-                        {resource.keyFacts.map((fact, index) => (
-                          <li key={index} className='flex gap-2 text-sm text-neutral-700'>
-                            <span className='font-medium text-neutral-400'>{index + 1}.</span>
-                            <span>{fact}</span>
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-                  )
-                  : null}
+                    <h1 className='mt-3 text-2xl font-semibold tracking-tight text-neutral-900'>
+                      {resource.title}
+                    </h1>
+                    <p className='mt-2 text-sm leading-relaxed text-neutral-600'>
+                      {resource.summary}
+                    </p>
+
+                    {resource.topicIds.length > 0
+                      ? (
+                        <div className='mt-4 flex flex-wrap gap-1.5'>
+                          {resource.topicIds.map((topicId) => {
+                            const label = topicLabel(topicId)
+                            if (!label) return null
+                            return (
+                              <span
+                                key={topicId}
+                                className='inline-flex items-center rounded-full bg-neutral-100 px-2.5 py-0.5 text-xs text-neutral-600'
+                              >
+                                {label}
+                              </span>
+                            )
+                          })}
+                        </div>
+                      )
+                      : null}
+
+                    {resource.keyFacts.length > 0
+                      ? (
+                        <div className='mt-6'>
+                          <p className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>
+                            Key facts
+                          </p>
+                          <ol className='mt-2 space-y-1.5'>
+                            {resource.keyFacts.map((fact, index) => (
+                              <li key={index} className='flex gap-2 text-sm text-neutral-700'>
+                                <span className='font-medium text-neutral-400'>{index + 1}.</span>
+                                <span>{fact}</span>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      )
+                      : null}
+                  </div>
+
+                  <div className='hidden h-24 w-36 shrink-0 overflow-hidden rounded-xl sm:block'>
+                    <ResourceThumb slug={config.slug} id={resource.id} type={resource.type} />
+                  </div>
+                </div>
               </article>
 
               {contentLoading ? <BodySkeleton /> : null}

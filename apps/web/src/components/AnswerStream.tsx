@@ -1,7 +1,8 @@
-import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { AskEvent, Citation, ScoredResource } from '@research-portal/core'
 import { type AskRequest, streamAsk } from '../api/client.ts'
+import { AnswerJourney } from './AnswerJourney.tsx'
 
 type Status = 'idle' | 'streaming' | 'done' | 'error'
 type UsageEvent = Extract<AskEvent, { type: 'usage' }>
@@ -106,153 +107,70 @@ function useExistingResultIds(ids: string[]): Set<string> {
   return existing
 }
 
-function RelevanceMeter({ relevance, label }: { relevance: number; label: string }) {
-  const percent = Math.round(relevance * 100)
-  return (
-    <div className='flex items-center gap-2'>
-      <div
-        className='h-1.5 w-24 overflow-hidden rounded-full bg-neutral-200'
-        role='progressbar'
-        aria-valuenow={percent}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={`Relevance of ${label}`}
-      >
-        <div
-          className='h-full rounded-full'
-          style={{ width: `${percent}%`, backgroundColor: 'var(--rp-accent)' }}
-        />
-      </div>
-      <span className='text-xs font-medium text-neutral-500'>{percent}% relevant</span>
-    </div>
-  )
-}
-
 export interface ContextJourneyProps {
   slug: string
   sources: ScoredResource[]
+  /**
+   * The question the answer was built from. Shown on the journey's opening
+   * screen and used to ask each source how it relates. Optional so existing
+   * callers keep working; the walk still runs without it.
+   */
+  query?: string
 }
 
 /**
- * "Journey through the context" - a subtle toggle that expands a stepper
- * over the sources behind an answer: a step counter, previous/next controls,
- * and the current source's title (deep-linked), relevance and matched
- * passage. Left/right arrow keys step through sources while the panel has
- * focus. Standalone and reusable so Search/Ask, the assistant and the
- * agentic pipeline can all show the same walk.
+ * "Journey through the context" - the quiet trigger that opens the cinematic
+ * walk through the sources behind an answer. Standalone and reusable so
+ * Search/Ask, the assistant and the agentic pipeline all offer the same
+ * experience from the same one-line call.
  */
-export function ContextJourney({ slug, sources }: ContextJourneyProps) {
+export function ContextJourney({ slug, sources, query = '' }: ContextJourneyProps) {
   const [isOpen, setIsOpen] = useState(false)
-  const [stepIndex, setStepIndex] = useState(0)
+
+  const citedIds = useMemo(
+    () => sources.filter((source) => source.citedCount > 0).map((source) => source.id),
+    [sources],
+  )
 
   if (sources.length === 0) return null
 
-  const clampedIndex = Math.min(stepIndex, sources.length - 1)
-  const current = sources[clampedIndex]
-
-  function goTo(index: number) {
-    setStepIndex(Math.max(0, Math.min(sources.length - 1, index)))
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === 'ArrowLeft') {
-      event.preventDefault()
-      goTo(clampedIndex - 1)
-    } else if (event.key === 'ArrowRight') {
-      event.preventDefault()
-      goTo(clampedIndex + 1)
-    }
-  }
-
   return (
-    <div>
+    <>
       <button
         type='button'
-        onClick={() => setIsOpen((open) => !open)}
-        aria-expanded={isOpen}
-        className='inline-flex items-center gap-1.5 text-xs font-medium text-neutral-500 transition-colors duration-150 hover:text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-        style={{ outlineColor: 'var(--rp-accent)' }}
+        onClick={() => setIsOpen(true)}
+        aria-haspopup='dialog'
+        className='rp-focus group inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-neutral-600 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900'
       >
         <svg
-          className={`h-3 w-3 shrink-0 transition-transform duration-150 ${
-            isOpen ? 'rotate-90' : ''
-          }`}
-          viewBox='0 0 20 20'
-          fill='currentColor'
+          viewBox='0 0 24 24'
+          fill='none'
+          stroke='currentColor'
+          strokeWidth='1.6'
+          strokeLinecap='round'
+          strokeLinejoin='round'
           aria-hidden='true'
+          className='h-3.5 w-3.5 shrink-0 transition-transform duration-300 group-hover:rotate-45'
+          style={{ color: 'var(--rp-accent)' }}
         >
-          <path
-            fillRule='evenodd'
-            d='M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z'
-            clipRule='evenodd'
-          />
+          <circle cx='12' cy='12' r='9' />
+          <path d='M15.2 8.8l-1.6 4.4-4.4 1.6 1.6-4.4z' />
         </svg>
         Journey through the context
+        <span className='rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] tabular-nums text-neutral-500'>
+          {Math.min(sources.length, 8)}
+        </span>
       </button>
 
-      {isOpen && current
-        ? (
-          <div
-            role='group'
-            aria-label='Journey through the context'
-            tabIndex={0}
-            onKeyDown={handleKeyDown}
-            className='mt-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-4 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-            style={{ outlineColor: 'var(--rp-accent)' }}
-          >
-            <div className='flex items-center justify-between'>
-              <p className='text-xs font-medium text-neutral-500'>
-                Chunk {clampedIndex + 1} of {sources.length}
-              </p>
-              <div className='flex items-center gap-1.5'>
-                <button
-                  type='button'
-                  onClick={() => goTo(clampedIndex - 1)}
-                  disabled={clampedIndex === 0}
-                  aria-label='Previous source'
-                  className='flex h-6 w-6 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-600 transition-colors duration-150 hover:text-neutral-900 disabled:opacity-30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-                  style={{ outlineColor: 'var(--rp-accent)' }}
-                >
-                  &lsaquo;
-                </button>
-                <button
-                  type='button'
-                  onClick={() => goTo(clampedIndex + 1)}
-                  disabled={clampedIndex === sources.length - 1}
-                  aria-label='Next source'
-                  className='flex h-6 w-6 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-600 transition-colors duration-150 hover:text-neutral-900 disabled:opacity-30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
-                  style={{ outlineColor: 'var(--rp-accent)' }}
-                >
-                  &rsaquo;
-                </button>
-              </div>
-            </div>
-
-            <Link
-              to={citationHref(slug, current.id, current.matchedPassage)}
-              className='mt-2 block text-sm font-semibold text-neutral-900 hover:underline'
-            >
-              {current.title}
-            </Link>
-
-            <div className='mt-2'>
-              <RelevanceMeter relevance={current.relevance} label={current.title} />
-            </div>
-
-            {current.matchedPassage
-              ? (
-                <blockquote
-                  className='mt-3 border-l-2 pl-4 text-sm italic leading-relaxed text-neutral-700'
-                  style={{ borderColor: 'var(--rp-accent)' }}
-                >
-                  &ldquo;{current.matchedPassage}&rdquo;
-                </blockquote>
-              )
-              : null}
-          </div>
-        )
-        : null}
-    </div>
+      <AnswerJourney
+        open={isOpen}
+        onClose={() => setIsOpen(false)}
+        slug={slug}
+        query={query}
+        sources={sources}
+        citedIds={citedIds}
+      />
+    </>
   )
 }
 
@@ -261,7 +179,7 @@ export function ContextJourney({ slug, sources }: ContextJourneyProps) {
  * / done / error), a tiny inline markdown renderer, numbered source chips
  * that deep-link into the resource view (with a secondary scroll affordance
  * when a matching result is on the page), a "journey through the context"
- * stepper, and a usage line. Reused by SearchPage (whole-corpus asks) and
+ * trigger, and a usage line. Reused by SearchPage (whole-corpus asks) and
  * ResourceDetailPage (single-document asks via `resourceId`).
  */
 export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
@@ -337,15 +255,21 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
+  /** Sources with live citation counts folded in - what the journey walks. */
+  const citedSources = useMemo(
+    () =>
+      sources.map((resource) => ({
+        ...resource,
+        citedCount: citations.filter((citation) => citation.resourceId === resource.id).length,
+      })),
+    [sources, citations],
+  )
+
   useEffect(() => {
-    if (sources.length === 0) return
-    const merged = sources.map((resource) => ({
-      ...resource,
-      citedCount: citations.filter((citation) => citation.resourceId === resource.id).length,
-    }))
-    onSources?.(merged)
+    if (citedSources.length === 0) return
+    onSources?.(citedSources)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sources, citations])
+  }, [citedSources])
 
   if (status === 'idle') return null
 
@@ -355,19 +279,19 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
   }
 
   return (
-    <div className='rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'>
+    <div className='rp-shadow-md rounded-2xl border border-neutral-900/[0.07] bg-white p-6'>
       <div className='flex items-center gap-2'>
         <span
           className='h-2 w-2 shrink-0 rounded-full'
           style={{ backgroundColor: 'var(--rp-accent)' }}
           aria-hidden='true'
         />
-        <p className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>
+        <p className='rp-eyebrow text-neutral-500'>
           AI answer
         </p>
       </div>
 
-      <div className='mt-3 space-y-3 text-sm text-neutral-800'>
+      <div className='rp-prose mt-3 space-y-3 text-sm text-neutral-800'>
         {text.length > 0
           ? renderAnswerText(text)
           : status === 'streaming'
@@ -448,10 +372,10 @@ export function AnswerStream({ slug, request, onSources }: AnswerStreamProps) {
         )
         : null}
 
-      {status === 'done' && sources.length > 0
+      {status === 'done' && citedSources.length > 0
         ? (
-          <div className='mt-4 border-t border-neutral-100 pt-3'>
-            <ContextJourney slug={slug} sources={sources} />
+          <div className='mt-5 border-t border-neutral-100 pt-4'>
+            <ContextJourney slug={slug} sources={citedSources} query={request.query} />
           </div>
         )
         : null}

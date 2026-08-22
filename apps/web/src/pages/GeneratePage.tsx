@@ -502,6 +502,258 @@ function ArtifactBody({ kind, object }: { kind: GenerateKind; object: unknown })
   }
 }
 
+// ---------------------------------------------------------------------------
+// Export - serialise the current artifact to Word or a print-ready PDF view.
+// One shared HTML serialiser mirrors the renderers above; both export paths
+// build on top of it so the two documents always agree with what's on screen.
+// ---------------------------------------------------------------------------
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/**
+ * Turns a generated artifact into a title plus a body of clean semantic HTML
+ * (headings, paragraphs, tables, lists) - the shared source for both the
+ * Word and PDF exports. All text content is escaped; nothing is interpolated
+ * raw. Falls back to a formatted JSON dump if the object doesn't match the
+ * expected shape for its kind, same as the on-screen renderer.
+ */
+function artifactToHtml(
+  kind: GenerateKind,
+  object: unknown,
+  sourceTitles: string[],
+): { title: string; bodyHtml: string } {
+  let title = KIND_BY_ID.get(kind)?.label ?? 'Artifact'
+  let contentHtml: string
+
+  if (kind === 'comparison' && isComparison(object)) {
+    title = 'Comparison'
+    const headerCells = object.items.map((item) => `<th>${escapeHtml(item.name)}</th>`).join('')
+    const rows = object.dimensions
+      .map((dim) => {
+        const cells = object.items
+          .map((item) => {
+            const rating = item.ratings.find((r) => r.dimension === dim)
+            return `<td>${escapeHtml(rating?.assessment ?? 'Not covered')}</td>`
+          })
+          .join('')
+        return `<tr><th scope="row">${escapeHtml(dim)}</th>${cells}</tr>`
+      })
+      .join('')
+    contentHtml =
+      `<table><thead><tr><th>Dimension</th>${headerCells}</tr></thead><tbody>${rows}</tbody></table>`
+  } else if (kind === 'briefing' && isBriefing(object)) {
+    title = object.title
+    const takeaways = object.key_takeaways.length > 0
+      ? `<h2>Key takeaways</h2><ul>${
+        object.key_takeaways.map((t) => `<li>${escapeHtml(t)}</li>`).join('')
+      }</ul>`
+      : ''
+    const sections = object.sections
+      .map((s) => `<h2>${escapeHtml(s.heading)}</h2><p>${escapeHtml(s.content)}</p>`)
+      .join('')
+    contentHtml = `<p>${escapeHtml(object.executive_summary)}</p>${takeaways}${sections}`
+  } else if (kind === 'timeline' && isTimeline(object)) {
+    title = object.title
+    contentHtml = `<ol>${
+      object.events
+        .map((ev) =>
+          `<li><strong>${escapeHtml(ev.date)}:</strong> ${escapeHtml(ev.title)}<p>${
+            escapeHtml(ev.description)
+          }</p></li>`
+        )
+        .join('')
+    }</ol>`
+  } else if (kind === 'proscons' && isProsCons(object)) {
+    title = object.subject
+    const prosHtml = object.pros
+      .map(
+        (p) => `<li><strong>${escapeHtml(p.point)}</strong><p>${escapeHtml(p.rationale)}</p></li>`,
+      )
+      .join('')
+    const consHtml = object.cons
+      .map(
+        (c) => `<li><strong>${escapeHtml(c.point)}</strong><p>${escapeHtml(c.rationale)}</p></li>`,
+      )
+      .join('')
+    contentHtml = `<h2>Pros</h2><ul>${prosHtml || '<li>None found.</li>'}</ul>` +
+      `<h2>Cons</h2><ul>${consHtml || '<li>None found.</li>'}</ul>`
+  } else if (kind === 'faq' && isFaq(object)) {
+    title = object.title
+    contentHtml = object.entries
+      .map((e) => `<h2>${escapeHtml(e.question)}</h2><p>${escapeHtml(e.answer)}</p>`)
+      .join('')
+  } else if (kind === 'assessment' && isAssessment(object)) {
+    title = 'Assessment'
+    contentHtml = object.questions
+      .map((q, i) => {
+        const options = q.options
+          .map((opt, oi) =>
+            `<li>${escapeHtml(opt)}${oi === q.correct_index ? ' (correct answer)' : ''}</li>`
+          )
+          .join('')
+        const topic = q.topic ? `<p><em>${escapeHtml(q.topic)}</em></p>` : ''
+        return `<h2>${i + 1}. ${
+          escapeHtml(q.question)
+        }</h2>${topic}<ol type="a">${options}</ol><p>${escapeHtml(q.explanation)}</p>`
+      })
+      .join('')
+  } else {
+    contentHtml = `<pre>${escapeHtml(JSON.stringify(object, null, 2))}</pre>`
+  }
+
+  const sourcesHtml =
+    `<h2>Grounded in ${sourceTitles.length} ${
+      sourceTitles.length === 1 ? 'source' : 'sources'
+    }</h2>` +
+    (sourceTitles.length > 0
+      ? `<ul>${sourceTitles.map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ul>`
+      : '<p>No sources.</p>')
+
+  return { title, bodyHtml: `${contentHtml}${sourcesHtml}` }
+}
+
+/** Word-compatible HTML document shell - opens cleanly as a .doc in Word. */
+function wordDocumentHtml(title: string, bodyHtml: string): string {
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(title)}</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+<w:DoNotOptimizeForBrowser/>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; line-height: 1.5; }
+h1, h2, h3 { font-family: Arial, Helvetica, sans-serif; color: #111111; }
+h1 { font-size: 22pt; margin-bottom: 12pt; }
+h2 { font-size: 14pt; margin-top: 18pt; margin-bottom: 6pt; }
+table { border-collapse: collapse; width: 100%; margin: 12pt 0; }
+th, td { border: 1px solid #cccccc; padding: 6pt 8pt; text-align: left; font-size: 10pt; }
+th { background: #f2f2f2; }
+ul, ol { margin: 6pt 0; padding-left: 22pt; }
+p { margin: 6pt 0; font-size: 11pt; }
+</style>
+</head>
+<body>
+<h1>${escapeHtml(title)}</h1>
+${bodyHtml}
+</body>
+</html>`
+}
+
+/** Standalone, print-optimised HTML - opened in a new window for the PDF export. */
+function printDocumentHtml(title: string, bodyHtml: string): string {
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(title)}</title>
+<style>
+@page { size: A4; margin: 18mm 16mm; }
+body { font-family: Georgia, 'Times New Roman', serif; color: #111111; background: #ffffff; line-height: 1.5; margin: 0; padding: 24px; }
+h1, h2, h3 { font-family: Arial, Helvetica, sans-serif; color: #0a0a0a; }
+h1 { font-size: 20pt; margin-bottom: 12pt; }
+h2 { font-size: 13pt; margin-top: 16pt; margin-bottom: 6pt; }
+table { border-collapse: collapse; width: 100%; margin: 12pt 0; page-break-inside: avoid; }
+th, td { border: 1px solid #cccccc; padding: 6pt 8pt; text-align: left; font-size: 10pt; vertical-align: top; }
+th { background: #f2f2f2; }
+tr, li { page-break-inside: avoid; }
+ul, ol { margin: 6pt 0; padding-left: 22pt; }
+p { margin: 6pt 0; font-size: 11pt; }
+@media print {
+  body { padding: 0; }
+  a { color: inherit; text-decoration: none; }
+}
+</style>
+</head>
+<body>
+<h1>${escapeHtml(title)}</h1>
+${bodyHtml}
+</body>
+</html>`
+}
+
+/** Filename-safe slug of a title, falling back to today's date when the title is empty. */
+function slugOrDate(title: string): string {
+  const slug = title
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-+|-+$)/g, '')
+  return slug.length > 0 ? slug.slice(0, 60) : new Date().toISOString().slice(0, 10)
+}
+
+function exportToWord(kind: GenerateKind, object: unknown, sourceTitles: string[]) {
+  const { title, bodyHtml } = artifactToHtml(kind, object, sourceTitles)
+  const html = wordDocumentHtml(title, bodyHtml)
+  const blob = new Blob(['﻿', html], { type: 'application/msword' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${kind}-${slugOrDate(title)}.doc`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+/** Opens a print-ready view in a new window and triggers the browser's print dialog.
+ * Returns false when the window could not be opened (popup blocked). */
+function exportToPdf(kind: GenerateKind, object: unknown, sourceTitles: string[]): boolean {
+  const { title, bodyHtml } = artifactToHtml(kind, object, sourceTitles)
+  const html = printDocumentHtml(title, bodyHtml)
+  const win = globalThis.open('', '_blank')
+  if (!win) return false
+  win.document.write(html)
+  win.document.close()
+  win.focus()
+  setTimeout(() => win.print(), 250)
+  return true
+}
+
+function ExportRow(
+  { kind, object, sourceTitles }: { kind: GenerateKind; object: unknown; sourceTitles: string[] },
+) {
+  const [popupBlocked, setPopupBlocked] = useState(false)
+  const disabled = object === undefined || object === null
+
+  return (
+    <div className='mt-4 flex flex-wrap items-center gap-3'>
+      <button
+        type='button'
+        disabled={disabled}
+        onClick={() => exportToWord(kind, object, sourceTitles)}
+        className='inline-flex items-center rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-700 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-60'
+      >
+        Export to Word
+      </button>
+      <button
+        type='button'
+        disabled={disabled}
+        onClick={() => setPopupBlocked(!exportToPdf(kind, object, sourceTitles))}
+        className='inline-flex items-center rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-700 transition-colors duration-150 hover:border-neutral-300 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-60'
+      >
+        Export to PDF
+      </button>
+      {popupBlocked
+        ? <p className='text-sm text-rose-600'>Allow pop-ups to export as PDF.</p>
+        : null}
+    </div>
+  )
+}
+
 const EMPTY_DRAFTS: Record<GenerateKind, string> = {
   comparison: '',
   briefing: '',
@@ -624,6 +876,12 @@ export function GeneratePage() {
             key={resultVersion}
             kind={mutation.data.kind}
             object={mutation.data.object}
+          />
+          <ExportRow
+            key={`export-${resultVersion}`}
+            kind={mutation.data.kind}
+            object={mutation.data.object}
+            sourceTitles={mutation.data.sources.map((s) => s.title)}
           />
           <SourcesRow sources={mutation.data.sources} />
         </div>

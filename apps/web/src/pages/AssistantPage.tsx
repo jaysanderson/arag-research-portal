@@ -305,11 +305,13 @@ function UserBubble({ message }: { message: ChatMessage }) {
 function AssistantCard({
   message,
   slug,
+  question,
   activeStage,
   onRetry,
 }: {
   message: ChatMessage
   slug: string
+  question: string
   activeStage: string | null
   onRetry: () => void
 }) {
@@ -405,7 +407,7 @@ function AssistantCard({
       {!message.pending && message.sources.length > 0
         ? (
           <div className='mt-4 border-t border-neutral-100 pt-3'>
-            <ContextJourney slug={slug} sources={message.sources} />
+            <ContextJourney slug={slug} sources={message.sources} query={question} />
           </div>
         )
         : null}
@@ -715,6 +717,9 @@ export function AssistantPage() {
                       key={message.id}
                       message={message}
                       slug={config.slug}
+                      question={messages[index - 1]?.author === 'USER'
+                        ? messages[index - 1]?.text ?? ''
+                        : ''}
                       activeStage={index === messages.length - 1 ? activeStageLabel : null}
                       onRetry={() => retry(message.id)}
                     />

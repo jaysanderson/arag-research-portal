@@ -1,56 +1,157 @@
 import { type FormEvent, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate, useOutletContext } from 'react-router-dom'
-import type { KbCounters, ResourceSummary } from '@research-portal/core'
+import { Link, useNavigate, useOutletContext } from 'react-router-dom'
+import type { KbCounters, ResourceSummary, TenantConfig } from '@research-portal/core'
 import { getCounters, getResources } from '../api/client.ts'
-import { ErrorCard, hueFromId, Skeleton, TypeBadge } from '../components/ui.tsx'
+import { EmptyState, ErrorCard, Skeleton, TypeBadge } from '../components/ui.tsx'
+import { ResourceThumb } from '../components/ResourceThumb.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
-function ResourceCard({ resource }: { resource: ResourceSummary }) {
-  const hue = hueFromId(resource.id)
+/* -------------------------------------------------------------------------
+ * Hero
+ * ---------------------------------------------------------------------- */
+
+/**
+ * The hero backdrop. With a tenant hero photograph it is a full-bleed cover
+ * image under a duotone wash of the tenant's hero colours; without one it is
+ * the gradient, lifted by a radial bloom and a faint dot grid so it reads as a
+ * designed surface rather than a flat colour field.
+ */
+function HeroBackdrop({ imageUrl }: { imageUrl?: string }) {
+  const [imageFailed, setImageFailed] = useState(false)
+  const showImage = Boolean(imageUrl) && !imageFailed
 
   return (
-    <div className='flex w-64 shrink-0 flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm transition-shadow duration-150 hover:shadow-md'>
+    <div className='absolute inset-0 -z-10 overflow-hidden' aria-hidden='true'>
       <div
-        className='h-32 w-full'
-        style={{ backgroundColor: `hsl(${hue}, 45%, 88%)` }}
-        aria-hidden='true'
+        className='absolute inset-0'
+        style={{ background: 'linear-gradient(135deg, var(--rp-hero-from), var(--rp-hero-to))' }}
       />
-      <div className='flex flex-1 flex-col gap-2 p-4'>
-        <TypeBadge type={resource.type} />
-        <h3 className='rp-clamp-2 text-sm font-semibold leading-snug text-neutral-900'>
-          {resource.title}
-        </h3>
-        <p className='rp-clamp-3 text-sm leading-relaxed text-neutral-500'>{resource.summary}</p>
+      {showImage && imageUrl
+        ? (
+          <>
+            <img
+              src={imageUrl}
+              alt=''
+              onError={() => setImageFailed(true)}
+              className='rp-anim-kenburns absolute inset-0 h-full w-full object-cover'
+            />
+            <div className='rp-hero-duotone absolute inset-0' />
+            <div className='rp-scrim-bottom absolute inset-0' />
+          </>
+        )
+        : (
+          <>
+            <div className='rp-dotgrid absolute inset-0 opacity-70' />
+            <div className='rp-hero-glow absolute inset-0' />
+          </>
+        )}
+    </div>
+  )
+}
+
+function Hero({
+  config,
+  onSearch,
+}: {
+  config: TenantConfig
+  onSearch: (text: string) => void
+}) {
+  const [query, setQuery] = useState('')
+  const suggested = config.suggestedQuestions.slice(0, 4)
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const trimmed = query.trim()
+    if (trimmed.length === 0) return
+    onSearch(trimmed)
+  }
+
+  return (
+    <section className='relative isolate px-6 pb-28 pt-16 sm:pb-32 sm:pt-24'>
+      <HeroBackdrop imageUrl={config.branding.heroImageUrl} />
+
+      <div className='mx-auto max-w-3xl text-center'>
+        <p className='rp-eyebrow rp-anim-rise text-white/70'>{config.branding.organisation}</p>
+
+        <h1 className='rp-display rp-anim-rise rp-delay-1 mt-4 text-4xl text-white sm:text-5xl md:text-[3.5rem]'>
+          What would you like to explore?
+        </h1>
+
+        <p className='rp-anim-rise rp-delay-2 mx-auto mt-4 max-w-xl text-base leading-relaxed text-white/75'>
+          {config.branding.tagline}
+        </p>
+
+        <form onSubmit={handleSubmit} className='rp-anim-rise rp-delay-3 mt-9' role='search'>
+          <label htmlFor='explore-search' className='sr-only'>
+            Search {config.branding.productName}
+          </label>
+          <div className='rp-shadow-xl mx-auto flex max-w-2xl items-center gap-1 rounded-full bg-white p-1.5 pl-4 ring-1 ring-white/40 focus-within:ring-2 focus-within:ring-white'>
+            <svg
+              viewBox='0 0 20 20'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='1.8'
+              strokeLinecap='round'
+              aria-hidden='true'
+              className='h-5 w-5 shrink-0 text-neutral-400'
+            >
+              <circle cx='9' cy='9' r='5.5' />
+              <path d='M13.2 13.2L17 17' />
+            </svg>
+            <input
+              id='explore-search'
+              type='search'
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={config.searchPlaceholder}
+              className='min-w-0 flex-1 rounded-full border-0 bg-transparent px-3 py-2.5 text-[0.95rem] text-neutral-900 placeholder:text-neutral-400 focus:outline-none'
+            />
+            <button
+              type='submit'
+              className='rp-focus shrink-0 rounded-full px-5 py-2.5 text-sm font-semibold text-white transition-transform duration-150 hover:-translate-y-px'
+              style={{ backgroundColor: 'var(--rp-primary)' }}
+            >
+              Search
+            </button>
+          </div>
+        </form>
+
+        {suggested.length > 0
+          ? (
+            <div className='rp-anim-rise rp-delay-4 mt-6 flex flex-wrap justify-center gap-2'>
+              {suggested.map((question) => (
+                <button
+                  key={question.id}
+                  type='button'
+                  onClick={() => onSearch(question.text)}
+                  className='rp-focus-inverse rounded-full bg-white/12 px-4 py-2 text-sm text-white ring-1 ring-inset ring-white/25 backdrop-blur-sm transition-colors duration-150 hover:bg-white/22'
+                >
+                  {question.text}
+                </button>
+              ))}
+            </div>
+          )
+          : null}
       </div>
-    </div>
+    </section>
   )
 }
 
-function HeroSkeleton() {
+/* -------------------------------------------------------------------------
+ * Stats
+ * ---------------------------------------------------------------------- */
+
+function StatTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className='mx-auto flex max-w-xl flex-wrap justify-center gap-2'>
-      <Skeleton className='h-8 w-40 rounded-full' />
-      <Skeleton className='h-8 w-48 rounded-full' />
-      <Skeleton className='h-8 w-36 rounded-full' />
-      <Skeleton className='h-8 w-44 rounded-full' />
+    <div className='rp-glass rp-shadow-md flex flex-col items-center gap-1 rounded-2xl border border-white/60 px-4 py-4 text-center'>
+      <span className='rp-display text-2xl text-neutral-900 sm:text-[1.75rem]'>{value}</span>
+      <span className='rp-eyebrow text-neutral-500'>{label}</span>
     </div>
   )
 }
 
-function StatsStripSkeleton() {
-  return (
-    <div className='mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-10 gap-y-3 px-6 py-6'>
-      {Array.from({ length: 4 }).map((_, index) => (
-        <div key={index} className='flex flex-col items-center gap-1.5'>
-          <Skeleton className='h-6 w-14' />
-          <Skeleton className='h-3 w-20' />
-        </div>
-      ))}
-    </div>
-  )
-}
-
+/** Floating glass tiles that overlap the hero's bottom edge. */
 function StatsStrip({ counters }: { counters: KbCounters }) {
   const stats = [
     { label: 'Resources', value: counters.resources.toLocaleString() },
@@ -63,38 +164,100 @@ function StatsStrip({ counters }: { counters: KbCounters }) {
   ]
 
   return (
-    <div className='mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-10 gap-y-3 px-6 py-6 text-center'>
-      {stats.map((stat) => (
-        <div key={stat.label} className='flex flex-col items-center'>
-          <span className='text-xl font-semibold tracking-tight text-neutral-900'>
-            {stat.value}
-          </span>
-          <span className='text-xs font-medium uppercase tracking-wide text-neutral-500'>
-            {stat.label}
-          </span>
+    <div className='rp-anim-rise rp-delay-4 relative z-10 mx-auto -mt-16 grid max-w-4xl grid-cols-2 gap-3 px-6 sm:-mt-14 sm:grid-cols-4'>
+      {stats.map((stat) => <StatTile key={stat.label} label={stat.label} value={stat.value} />)}
+    </div>
+  )
+}
+
+function StatsStripSkeleton() {
+  return (
+    <div className='relative z-10 mx-auto -mt-16 grid max-w-4xl grid-cols-2 gap-3 px-6 sm:-mt-14 sm:grid-cols-4'>
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div
+          key={index}
+          className='rp-glass rp-shadow-md flex flex-col items-center gap-2 rounded-2xl border border-white/60 px-4 py-5'
+        >
+          <Skeleton className='h-6 w-16' />
+          <Skeleton className='h-2.5 w-20' />
         </div>
       ))}
     </div>
   )
 }
 
+/* -------------------------------------------------------------------------
+ * Topic rows
+ * ---------------------------------------------------------------------- */
+
+function ResourceCard({ slug, resource }: { slug: string; resource: ResourceSummary }) {
+  return (
+    <Link
+      to={`/t/${slug}/library/${resource.id}`}
+      className='rp-lift rp-shadow-sm rp-focus group flex w-60 shrink-0 flex-col overflow-hidden rounded-2xl border border-neutral-900/[0.07] bg-white sm:w-72'
+    >
+      <div className='relative aspect-[16/10] w-full overflow-hidden bg-neutral-100'>
+        <ResourceThumb
+          slug={slug}
+          id={resource.id}
+          type={resource.type}
+          className='rp-zoom'
+        />
+        <span className='absolute left-2.5 top-2.5'>
+          <TypeBadge type={resource.type} />
+        </span>
+      </div>
+      <div className='flex flex-1 flex-col gap-1.5 p-4'>
+        <h3 className='rp-clamp-2 text-[0.9375rem] font-semibold leading-snug tracking-[-0.01em] text-neutral-900'>
+          {resource.title}
+        </h3>
+        <p className='rp-clamp-3 text-sm leading-relaxed text-neutral-500'>{resource.summary}</p>
+      </div>
+    </Link>
+  )
+}
+
+function SectionHeading({ label, count }: { label: string; count: number }) {
+  return (
+    <div className='flex items-baseline gap-2.5'>
+      <h2 className='rp-display text-xl text-neutral-900 sm:text-2xl'>{label}</h2>
+      <span className='rounded-full bg-neutral-900/[0.06] px-2 py-0.5 text-xs font-semibold tabular-nums text-neutral-500'>
+        {count}
+      </span>
+    </div>
+  )
+}
+
 function TopicRowSkeleton() {
   return (
-    <div className='mx-auto max-w-6xl px-6'>
-      <Skeleton className='h-5 w-56' />
+    <div>
+      <Skeleton className='h-6 w-56' />
       <div className='mt-4 flex gap-4'>
-        <Skeleton className='h-48 w-64 shrink-0 rounded-2xl' />
-        <Skeleton className='h-48 w-64 shrink-0 rounded-2xl' />
-        <Skeleton className='h-48 w-64 shrink-0 rounded-2xl' />
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div
+            key={index}
+            className='w-60 shrink-0 overflow-hidden rounded-2xl border border-neutral-900/[0.07] bg-white sm:w-72'
+          >
+            <div className='rp-shimmer aspect-[16/10] w-full' aria-hidden='true' />
+            <div className='space-y-2 p-4'>
+              <Skeleton className='h-4 w-4/5' />
+              <Skeleton className='h-3 w-full' />
+              <Skeleton className='h-3 w-2/3' />
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )
 }
 
+/* -------------------------------------------------------------------------
+ * Page
+ * ---------------------------------------------------------------------- */
+
 export function ExplorePage() {
   const { config } = useOutletContext<TenantOutletContext>()
   const navigate = useNavigate()
-  const [query, setQuery] = useState('')
 
   const {
     data: resources,
@@ -119,8 +282,6 @@ export function ExplorePage() {
     return map
   }, [resources, config.topics])
 
-  const suggested = config.suggestedQuestions.slice(0, 4)
-
   const {
     data: counters,
     isLoading: isCountersLoading,
@@ -130,80 +291,21 @@ export function ExplorePage() {
     queryFn: () => getCounters(config.slug),
   })
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const trimmed = query.trim()
-    if (trimmed.length === 0) return
-    navigate(`search?q=${encodeURIComponent(trimmed)}`)
-  }
+  const search = (text: string) => navigate(`search?q=${encodeURIComponent(text)}`)
+
+  const hasRows = resourcesByTopic.size > 0
 
   return (
     <main>
-      <section
-        className='px-6 py-20 sm:py-28'
-        style={{
-          background: 'linear-gradient(135deg, var(--rp-hero-from), var(--rp-hero-to))',
-        }}
-      >
-        <div className='mx-auto max-w-2xl text-center'>
-          <h1 className='text-3xl font-semibold tracking-tight text-white sm:text-4xl'>
-            What would you like to explore?
-          </h1>
+      <Hero config={config} onSearch={search} />
 
-          <form onSubmit={handleSubmit} className='mt-8' role='search'>
-            <label htmlFor='explore-search' className='sr-only'>
-              Search {config.branding.productName}
-            </label>
-            <div className='flex items-center gap-2 rounded-full bg-white p-2 shadow-lg'>
-              <input
-                id='explore-search'
-                type='search'
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={config.searchPlaceholder}
-                className='min-w-0 flex-1 rounded-full border-0 bg-transparent px-4 py-2.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none'
-              />
-              <button
-                type='submit'
-                className='shrink-0 rounded-full px-5 py-2.5 text-sm font-semibold text-white transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white'
-                style={{ backgroundColor: 'var(--rp-primary)' }}
-              >
-                Search
-              </button>
-            </div>
-          </form>
-
-          {isLoading
-            ? (
-              <div className='mt-6'>
-                <HeroSkeleton />
-              </div>
-            )
-            : suggested.length > 0
-            ? (
-              <div className='mt-6 flex flex-wrap justify-center gap-2'>
-                {suggested.map((question) => (
-                  <button
-                    key={question.id}
-                    type='button'
-                    onClick={() => navigate(`search?q=${encodeURIComponent(question.text)}`)}
-                    className='rounded-full bg-white/15 px-4 py-2 text-sm text-white ring-1 ring-inset ring-white/30 transition-colors duration-150 hover:bg-white/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white'
-                  >
-                    {question.text}
-                  </button>
-                ))}
-              </div>
-            )
-            : null}
-        </div>
-      </section>
-
-      {isCountersLoading ? <StatsStripSkeleton /> : null}
-      {!isCountersLoading && !isCountersError && counters
+      {isCountersLoading
+        ? <StatsStripSkeleton />
+        : !isCountersError && counters
         ? <StatsStrip counters={counters} />
         : null}
 
-      <section className='mx-auto max-w-6xl space-y-10 px-6 py-12'>
+      <section className='mx-auto max-w-6xl space-y-12 px-6 pb-20 pt-14'>
         {isError
           ? (
             <ErrorCard
@@ -215,10 +317,27 @@ export function ExplorePage() {
 
         {isLoading
           ? (
-            <div className='space-y-10'>
+            <>
               <TopicRowSkeleton />
               <TopicRowSkeleton />
-            </div>
+            </>
+          )
+          : null}
+
+        {!isLoading && !isError && !hasRows
+          ? (
+            <EmptyState
+              title='Nothing to browse yet'
+              description='This portal has no resources filed against its topics. Add content in the management screen, or run a corpus analysis to build the taxonomy.'
+            >
+              <Link
+                to={`/t/${config.slug}/library`}
+                className='rp-focus inline-flex items-center rounded-full px-4 py-2 text-sm font-medium text-white'
+                style={{ backgroundColor: 'var(--rp-primary)' }}
+              >
+                Open the library
+              </Link>
+            </EmptyState>
           )
           : null}
 
@@ -229,11 +348,11 @@ export function ExplorePage() {
 
             return (
               <div key={topic.id}>
-                <h2 className='text-lg font-semibold tracking-tight text-neutral-900'>
-                  {topic.label}
-                </h2>
-                <div className='rp-scroll-row mt-4 flex gap-4 overflow-x-auto pb-2'>
-                  {items.map((resource) => <ResourceCard key={resource.id} resource={resource} />)}
+                <SectionHeading label={topic.label} count={items.length} />
+                <div className='rp-scroll-row rp-no-scrollbar -mx-6 mt-4 flex gap-4 overflow-x-auto px-6 pb-4 pt-2'>
+                  {items.map((resource) => (
+                    <ResourceCard key={resource.id} slug={config.slug} resource={resource} />
+                  ))}
                 </div>
               </div>
             )

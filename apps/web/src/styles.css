@@ -1,27 +1,316 @@
 @import 'tailwindcss';
 
+/* ---------------------------------------------------------------------------
+ * Token layer.
+ *
+ * The four --rp-primary / --rp-accent / --rp-hero-from / --rp-hero-to vars stay
+ * the tenant hooks: TenantLayout writes them inline from the tenant config and
+ * everything downstream reads them. Everything below is the fixed house style -
+ * a warm neutral ramp on the #f7f7f5 paper base, layered shadows, a focus ring,
+ * and the motion vocabulary.
+ * ------------------------------------------------------------------------- */
+
 :root {
-  /* Neutral defaults - every tenant layout overrides these inline once its config loads. */
+  /* Tenant hooks - neutral defaults until a tenant config loads. */
   --rp-primary: #27272a;
   --rp-accent: #52525b;
   --rp-hero-from: #3f3f46;
   --rp-hero-to: #18181b;
+
+  /* Warm neutral ramp. Slightly yellow-shifted so it sits on the paper base
+   * without the blue cast of a stock grey scale. */
+  --rp-paper: #f7f7f5;
+  --rp-n-0: #ffffff;
+  --rp-n-25: #fcfcfa;
+  --rp-n-50: #f7f7f5;
+  --rp-n-100: #f0efec;
+  --rp-n-200: #e4e3de;
+  --rp-n-300: #d2d0c9;
+  --rp-n-400: #a8a59d;
+  --rp-n-500: #7d7a72;
+  --rp-n-600: #5b5851;
+  --rp-n-700: #403d37;
+  --rp-n-800: #2a2823;
+  --rp-n-900: #1a1815;
+
+  /* Two-layer shadows: a tight contact shadow plus a soft ambient one. */
+  --rp-shadow-sm: 0 1px 1px rgba(26, 24, 21, 0.04), 0 2px 6px -2px rgba(26, 24, 21, 0.08);
+  --rp-shadow-md: 0 1px 2px rgba(26, 24, 21, 0.05), 0 10px 26px -14px rgba(26, 24, 21, 0.22);
+  --rp-shadow-lg: 0 2px 4px rgba(26, 24, 21, 0.06), 0 22px 48px -20px rgba(26, 24, 21, 0.3);
+  --rp-shadow-xl: 0 4px 10px rgba(26, 24, 21, 0.08), 0 40px 80px -28px rgba(26, 24, 21, 0.4);
+
+  /* Focus ring - a white halo then the tenant accent, legible on any surface. */
+  --rp-ring: 0 0 0 2px #ffffff, 0 0 0 4px var(--rp-accent);
+  --rp-ring-inverse: 0 0 0 2px rgba(12, 12, 12, 0.9), 0 0 0 4px rgba(255, 255, 255, 0.75);
+
+  --rp-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
 @theme {
   --font-sans:
     'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-display: 'Fraunces', 'Iowan Old Style', Georgia, ui-serif, serif;
 }
 
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f7f7f5;
-  color: #18181b;
+  background-color: var(--rp-paper);
+  color: var(--rp-n-900);
+  /* Inter's optical niceties - real quotes, contextual alternates. */
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'calt';
 }
 
-/* Utility for horizontally scrolling topic rows with snap points. */
+/* ---------------------------------------------------------------------------
+ * Typography
+ * ------------------------------------------------------------------------- */
+
+/* Display face, reserved for headlines. Tighter tracking than the UI face and
+ * balanced wrapping so two-line headlines break evenly. */
+.rp-display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.022em;
+  line-height: 1.05;
+  text-wrap: balance;
+}
+
+.rp-display-bold {
+  font-weight: 700;
+}
+
+/* Comfortable reading measure/leading for body prose. */
+.rp-prose {
+  line-height: 1.7;
+  letter-spacing: -0.005em;
+}
+
+/* Small all-caps section label used above content blocks. */
+.rp-eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+/* ---------------------------------------------------------------------------
+ * Surfaces
+ * ------------------------------------------------------------------------- */
+
+/* Glassy surface: translucent paper over a blur. Falls back to a near-opaque
+ * fill where backdrop-filter is unavailable. */
+.rp-glass {
+  background-color: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .rp-glass {
+    background-color: rgba(255, 255, 255, 0.95);
+  }
+}
+
+.rp-shadow-sm {
+  box-shadow: var(--rp-shadow-sm);
+}
+
+.rp-shadow-md {
+  box-shadow: var(--rp-shadow-md);
+}
+
+.rp-shadow-lg {
+  box-shadow: var(--rp-shadow-lg);
+}
+
+.rp-shadow-xl {
+  box-shadow: var(--rp-shadow-xl);
+}
+
+/* Consistent focus treatment on anything interactive that opts in. */
+.rp-focus:focus-visible {
+  outline: none;
+  box-shadow: var(--rp-ring);
+}
+
+.rp-focus-inverse:focus-visible {
+  outline: none;
+  box-shadow: var(--rp-ring-inverse);
+}
+
+/* ---------------------------------------------------------------------------
+ * Hero treatments
+ * ------------------------------------------------------------------------- */
+
+/* Duotone wash over a hero photograph: the tenant's hero-from at 85% falling to
+ * hero-to at 60%, so the image reads through the lighter end. */
+.rp-hero-duotone {
+  background: linear-gradient(135deg, var(--rp-hero-from), var(--rp-hero-to));
+  opacity: 0.78;
+}
+
+@supports (background: color-mix(in srgb, red 50%, transparent)) {
+  .rp-hero-duotone {
+    opacity: 1;
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--rp-hero-from) 85%, transparent),
+      color-mix(in srgb, var(--rp-hero-to) 60%, transparent)
+    );
+  }
+}
+
+/* Soft light bloom from the top of a gradient hero. */
+.rp-hero-glow {
+  background:
+    radial-gradient(58% 62% at 50% 0%, rgba(255, 255, 255, 0.22), transparent 70%),
+    radial-gradient(42% 48% at 88% 96%, rgba(255, 255, 255, 0.12), transparent 72%);
+}
+
+/* Faint dot grid, drawn inline so there is no extra network request. */
+.rp-dotgrid {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E%3Ccircle cx='1.5' cy='1.5' r='1' fill='%23ffffff' fill-opacity='0.16'/%3E%3C/svg%3E");
+  background-size: 22px 22px;
+}
+
+/* Bottom scrim that keeps headline text legible over any photograph. */
+.rp-scrim-bottom {
+  background: linear-gradient(to top, rgba(10, 10, 12, 0.55), rgba(10, 10, 12, 0) 55%);
+}
+
+/* ---------------------------------------------------------------------------
+ * Motion
+ * ------------------------------------------------------------------------- */
+
+@keyframes rp-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes rp-kenburns {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.06);
+  }
+}
+
+@keyframes rp-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes rp-dwell {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.rp-anim-fade {
+  animation: rp-fade-in 400ms var(--rp-ease) both;
+}
+
+.rp-anim-rise {
+  animation: rp-rise 400ms ease-out both;
+}
+
+.rp-anim-kenburns {
+  animation: rp-kenburns 12s linear both;
+  transform-origin: 50% 45%;
+  will-change: transform;
+}
+
+/* Staggered entrances for a small group of siblings. */
+.rp-delay-1 {
+  animation-delay: 70ms;
+}
+
+.rp-delay-2 {
+  animation-delay: 140ms;
+}
+
+.rp-delay-3 {
+  animation-delay: 210ms;
+}
+
+.rp-delay-4 {
+  animation-delay: 280ms;
+}
+
+/* Route transition on the layout outlet. */
+.rp-page-enter {
+  animation: rp-rise 320ms var(--rp-ease) both;
+}
+
+/* Skeleton shimmer - a travelling highlight rather than a flat pulse. */
+.rp-shimmer {
+  background-color: var(--rp-n-200);
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 20%,
+    rgba(255, 255, 255, 0.65) 50%,
+    rgba(255, 255, 255, 0) 80%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: rp-shimmer 1.6s linear infinite;
+}
+
+/* Timed dwell bar (the answer journey footer). Paused via inline play-state. */
+.rp-dwell-bar {
+  transform-origin: left center;
+  animation: rp-dwell linear both;
+}
+
+/* Card hover: the whole card lifts, the artwork inside creeps in. */
+.rp-lift {
+  transition:
+    transform 260ms var(--rp-ease),
+    box-shadow 260ms var(--rp-ease);
+}
+
+.rp-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--rp-shadow-lg);
+}
+
+.rp-zoom {
+  transition: transform 600ms var(--rp-ease);
+}
+
+.rp-lift:hover .rp-zoom,
+.rp-lift:focus-visible .rp-zoom {
+  transform: scale(1.06);
+}
+
+/* ---------------------------------------------------------------------------
+ * Scrolling rows
+ * ------------------------------------------------------------------------- */
+
 .rp-scroll-row {
   scroll-snap-type: x proximity;
   scrollbar-width: thin;
@@ -31,7 +320,20 @@ body {
   scroll-snap-align: start;
 }
 
-/* Multi-line clamp utilities used by resource cards. */
+/* Chip rows and card rails where a visible scrollbar would spoil the surface. */
+.rp-no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.rp-no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * Clamps
+ * ------------------------------------------------------------------------- */
+
 .rp-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -44,4 +346,47 @@ body {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.rp-clamp-4 {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------------------
+ * Reduced motion - keep the interface readable, drop the theatre.
+ * ------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .rp-anim-kenburns,
+  .rp-anim-rise,
+  .rp-page-enter {
+    animation: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+
+  .rp-anim-fade {
+    animation-duration: 1ms;
+  }
+
+  .rp-shimmer {
+    animation: none;
+    background-image: none;
+  }
+
+  .rp-lift,
+  .rp-zoom {
+    transition: none;
+  }
+
+  .rp-lift:hover {
+    transform: none;
+  }
+
+  .rp-lift:hover .rp-zoom {
+    transform: none;
+  }
 }

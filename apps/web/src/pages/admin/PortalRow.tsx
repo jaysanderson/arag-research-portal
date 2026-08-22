@@ -10,6 +10,7 @@ import {
 } from '../../api/client.ts'
 import { AddContent } from './AddContent.tsx'
 import { AnalysePanel } from './AnalysePanel.tsx'
+import { AppearancePanel } from './AppearancePanel.tsx'
 import { CreateKbBox } from './CreateKbBox.tsx'
 import { KgPanel } from './KgPanel.tsx'
 import { MessagePanel } from './MessagePanel.tsx'
@@ -399,6 +400,10 @@ export function PortalRow({
                     Connect a knowledge box to add content.
                   </p>
                 )}
+            </Section>
+
+            <Section title='Appearance'>
+              <AppearancePanel slug={row.tenant.slug} passcode={passcode} />
             </Section>
 
             <Section title='Intelligence' open={intelligenceOpen} onToggle={setIntelligenceOpen}>

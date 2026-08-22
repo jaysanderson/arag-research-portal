@@ -18,6 +18,8 @@ import { accountOpsAvailable, createKnowledgeBox } from './arag-account.ts'
 import { GENERATE_SCHEMAS } from './generate-schemas.ts'
 import { analyseTenant } from './analyse.ts'
 import { implementKgStrategy, KgProposalStore, proposeKgStrategy } from './kg.ts'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import process from 'node:process'
 import { discoverLinks } from './crawl.ts'
 
 const searchQuerySchema = z.object({ q: z.string().min(1) })
@@ -102,10 +104,63 @@ export function buildApp(opts: BuildAppOptions): Hono {
 
   app.get('/api/tenants', (c) => c.json(tenants.list()))
 
+  const brandingDir = process.env.BRANDING_PATH ?? './data/branding'
+  const brandingFile = (slug: string, kind: 'logo' | 'hero'): string | null => {
+    for (const ext of ['png', 'jpg', 'jpeg', 'webp', 'svg']) {
+      const path = `${brandingDir}/${slug}-${kind}.${ext}`
+      if (existsSync(path)) return path
+    }
+    return null
+  }
+  const withBrandingUrls = (config: TenantConfig): TenantConfig => ({
+    ...config,
+    branding: {
+      ...config.branding,
+      ...(brandingFile(config.slug, 'logo')
+        ? { logoUrl: `/api/t/${config.slug}/branding/logo` }
+        : {}),
+      ...(brandingFile(config.slug, 'hero')
+        ? { heroImageUrl: `/api/t/${config.slug}/branding/hero` }
+        : {}),
+    },
+  })
+
   app.get('/api/t/:slug/config', (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
-    return c.json(config)
+    return c.json(withBrandingUrls(config))
+  })
+
+  app.get('/api/t/:slug/branding/:kind', (c) => {
+    const config = tenant(c.req.param('slug'))
+    const kind = c.req.param('kind')
+    if (!config || (kind !== 'logo' && kind !== 'hero')) {
+      return c.json({ error: 'not_found' }, 404)
+    }
+    const path = brandingFile(config.slug, kind)
+    if (!path) return c.json({ error: 'not_found' }, 404)
+    const ext = path.split('.').pop() ?? 'png'
+    const type = ext === 'svg'
+      ? 'image/svg+xml'
+      : ext === 'webp'
+      ? 'image/webp'
+      : `image/${ext === 'jpg' ? 'jpeg' : ext}`
+    return new Response(readFileSync(path), {
+      headers: { 'content-type': type, 'cache-control': 'public, max-age=300' },
+    })
+  })
+
+  app.get('/api/t/:slug/resources/:id/thumbnail', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    if (!opts.management) return c.json({ error: 'not_found' }, 404)
+    const upstream = await opts.management.thumbnailResponse(config, c.req.param('id'))
+    if (!upstream) return c.json({ error: 'not_found' }, 404)
+    const headers = new Headers()
+    const type = upstream.headers.get('content-type')
+    if (type) headers.set('content-type', type)
+    headers.set('cache-control', 'public, max-age=600')
+    return new Response(upstream.body, { status: 200, headers })
   })
 
   app.get('/api/t/:slug/search', async (c) => {
@@ -518,6 +573,44 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (unavailableAd) return unavailableAd
     await management!.deleteAgent(config, c.req.param('taskId'))
     return c.json({ ok: true })
+  })
+
+  app.post('/api/admin/t/:slug/branding/:kind', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    const kind = c.req.param('kind')
+    if (!config || (kind !== 'logo' && kind !== 'hero')) {
+      return c.json({ error: 'invalid_request' }, 400)
+    }
+    const contentType = c.req.header('content-type') ?? ''
+    const ext = contentType === 'image/png'
+      ? 'png'
+      : contentType === 'image/jpeg'
+      ? 'jpg'
+      : contentType === 'image/webp'
+      ? 'webp'
+      : contentType === 'image/svg+xml'
+      ? 'svg'
+      : null
+    if (!ext) {
+      return c.json({ error: 'unsupported_type', message: 'Use PNG, JPEG, WebP or SVG.' }, 415)
+    }
+    const bytes = new Uint8Array(await c.req.arrayBuffer())
+    if (bytes.length === 0) return c.json({ error: 'empty_file' }, 400)
+    if (bytes.length > 5 * 1024 * 1024) return c.json({ error: 'file_too_large' }, 413)
+    mkdirSync(brandingDir, { recursive: true })
+    // Drop any previous file for this slot so only one extension exists.
+    for (const old of ['png', 'jpg', 'jpeg', 'webp', 'svg']) {
+      const p = `${brandingDir}/${config.slug}-${kind}.${old}`
+      if (existsSync(p)) {
+        try {
+          Deno.removeSync(p)
+        } catch {
+          // ignore
+        }
+      }
+    }
+    writeFileSync(`${brandingDir}/${config.slug}-${kind}.${ext}`, bytes)
+    return c.json({ ok: true, url: `/api/t/${config.slug}/branding/${kind}` })
   })
 
   app.get('/api/admin/t/:slug/crawl', async (c) => {

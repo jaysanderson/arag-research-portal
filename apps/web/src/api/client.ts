@@ -585,3 +585,21 @@ export async function implementKg(
   }
   emit(buffer)
 }
+
+/** Thumbnail URL for a resource; 404s when the platform has none. */
+export function thumbnailUrl(slug: string, id: string): string {
+  return `/api/t/${encodeURIComponent(slug)}/resources/${encodeURIComponent(id)}/thumbnail`
+}
+
+export async function uploadBranding(
+  slug: string,
+  passcode: string,
+  kind: 'logo' | 'hero',
+  file: File,
+): Promise<{ ok: boolean; url: string }> {
+  return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/branding/${kind}`, passcode, {
+    method: 'POST',
+    headers: { 'content-type': file.type || 'application/octet-stream' },
+    body: file,
+  })
+}

@@ -292,6 +292,7 @@ export function AgenticPage() {
   const { config } = useOutletContext<TenantOutletContext>()
 
   const [query, setQuery] = useState('')
+  const [lastQuestion, setLastQuestion] = useState('')
   const [hasStarted, setHasStarted] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
   const [answerText, setAnswerText] = useState('')
@@ -323,6 +324,7 @@ export function AgenticPage() {
 
   async function run(question: string) {
     const trimmed = question.trim()
+    setLastQuestion(trimmed)
     if (trimmed.length === 0 || isRunning) return
 
     setQuery(trimmed)
@@ -578,7 +580,7 @@ export function AgenticPage() {
               {!isRunning && sources.length > 0
                 ? (
                   <div className='mt-4 border-t border-neutral-100 pt-3'>
-                    <ContextJourney slug={config.slug} sources={sources} />
+                    <ContextJourney slug={config.slug} sources={sources} query={lastQuestion} />
                   </div>
                 )
                 : null}

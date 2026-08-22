@@ -4,6 +4,7 @@ import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
 import type { RetrievalMode, ScoredResource } from '@research-portal/core'
 import { getFacets, searchTenantFull } from '../api/client.ts'
 import { AnswerStream } from '../components/AnswerStream.tsx'
+import { ResourceThumb } from '../components/ResourceThumb.tsx'
 import { EmptyState, ErrorCard, Skeleton, TypeBadge } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
@@ -36,7 +37,13 @@ function RelevanceMeter({ relevance }: { relevance: number }) {
   )
 }
 
-function ResultCard({ resource, citedCount }: { resource: ScoredResource; citedCount?: number }) {
+function ResultCard(
+  { resource, citedCount, slug }: {
+    resource: ScoredResource
+    citedCount?: number
+    slug: string
+  },
+) {
   const keyFacts = resource.keyFacts.slice(0, 3)
 
   return (
@@ -44,53 +51,61 @@ function ResultCard({ resource, citedCount }: { resource: ScoredResource; citedC
       id={`result-${resource.id}`}
       className='scroll-mt-6 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm'
     >
-      <div className='flex flex-wrap items-center justify-between gap-3'>
-        <div className='flex flex-wrap items-center gap-2'>
-          <TypeBadge type={resource.type} />
-          {citedCount
+      <div className='flex gap-4'>
+        <div className='hidden h-16 w-24 shrink-0 overflow-hidden rounded-lg sm:block'>
+          <ResourceThumb slug={slug} id={resource.id} type={resource.type} />
+        </div>
+
+        <div className='min-w-0 flex-1'>
+          <div className='flex flex-wrap items-center justify-between gap-3'>
+            <div className='flex flex-wrap items-center gap-2'>
+              <TypeBadge type={resource.type} />
+              {citedCount
+                ? (
+                  <span className='inline-flex items-center rounded-full bg-neutral-900 px-2.5 py-0.5 text-xs font-medium text-white'>
+                    Cited {citedCount}
+                  </span>
+                )
+                : null}
+            </div>
+            <RelevanceMeter relevance={resource.relevance} />
+          </div>
+
+          <h3 className='mt-3 text-lg font-semibold tracking-tight text-neutral-900'>
+            {resource.title}
+          </h3>
+          <p className='mt-2 text-sm leading-relaxed text-neutral-600'>{resource.summary}</p>
+
+          {resource.matchedPassage
             ? (
-              <span className='inline-flex items-center rounded-full bg-neutral-900 px-2.5 py-0.5 text-xs font-medium text-white'>
-                Cited {citedCount}
-              </span>
+              <blockquote
+                className='mt-4 border-l-2 pl-4 text-sm italic leading-relaxed text-neutral-600'
+                style={{ borderColor: 'var(--rp-accent)' }}
+              >
+                &ldquo;{resource.matchedPassage}&rdquo;
+              </blockquote>
+            )
+            : null}
+
+          {keyFacts.length > 0
+            ? (
+              <div className='mt-4'>
+                <p className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>
+                  Key facts
+                </p>
+                <ol className='mt-2 space-y-1'>
+                  {keyFacts.map((fact, index) => (
+                    <li key={index} className='flex gap-2 text-sm text-neutral-700'>
+                      <span className='font-medium text-neutral-400'>{index + 1}.</span>
+                      <span>{fact}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
             )
             : null}
         </div>
-        <RelevanceMeter relevance={resource.relevance} />
       </div>
-
-      <h3 className='mt-3 text-lg font-semibold tracking-tight text-neutral-900'>
-        {resource.title}
-      </h3>
-      <p className='mt-2 text-sm leading-relaxed text-neutral-600'>{resource.summary}</p>
-
-      {resource.matchedPassage
-        ? (
-          <blockquote
-            className='mt-4 border-l-2 pl-4 text-sm italic leading-relaxed text-neutral-600'
-            style={{ borderColor: 'var(--rp-accent)' }}
-          >
-            &ldquo;{resource.matchedPassage}&rdquo;
-          </blockquote>
-        )
-        : null}
-
-      {keyFacts.length > 0
-        ? (
-          <div className='mt-4'>
-            <p className='text-xs font-semibold uppercase tracking-wide text-neutral-500'>
-              Key facts
-            </p>
-            <ol className='mt-2 space-y-1'>
-              {keyFacts.map((fact, index) => (
-                <li key={index} className='flex gap-2 text-sm text-neutral-700'>
-                  <span className='font-medium text-neutral-400'>{index + 1}.</span>
-                  <span>{fact}</span>
-                </li>
-              ))}
-            </ol>
-          </div>
-        )
-        : null}
     </article>
   )
 }
@@ -382,6 +397,7 @@ export function SearchPage() {
                           key={resource.id}
                           resource={resource}
                           citedCount={citedCounts[resource.id]}
+                          slug={config.slug}
                         />
                       ))}
                     </div>

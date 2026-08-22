@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, useOutletContext } from 'react-router-dom'
 import type { CatalogItem } from '@research-portal/core'
 import { getCatalog, getFacets } from '../api/client.ts'
-import { EmptyState, ErrorCard, hueFromId, Skeleton } from '../components/ui.tsx'
+import { ResourceThumb } from '../components/ResourceThumb.tsx'
+import { EmptyState, ErrorCard, Skeleton } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
 const PAGE_SIZE = 24
@@ -39,7 +40,6 @@ function LibraryCard(
     topicLabel: (id: string) => string | undefined
   },
 ) {
-  const hue = hueFromId(item.id)
   const topicLabels = item.topicIds
     .map((id) => topicLabel(id))
     .filter((label): label is string => Boolean(label))
@@ -51,11 +51,9 @@ function LibraryCard(
       className='flex flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm transition-shadow duration-150 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
       style={{ outlineColor: 'var(--rp-accent)' }}
     >
-      <div
-        className='h-28 w-full'
-        style={{ backgroundColor: `hsl(${hue}, 45%, 88%)` }}
-        aria-hidden='true'
-      />
+      <div className='h-28 w-full overflow-hidden rounded-t-2xl' aria-hidden='true'>
+        <ResourceThumb slug={slug} id={item.id} type='document' />
+      </div>
       <div className='flex flex-1 flex-col gap-2 p-4'>
         {statusInfo
           ? (
