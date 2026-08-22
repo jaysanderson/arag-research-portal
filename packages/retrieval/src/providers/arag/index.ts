@@ -747,6 +747,17 @@ export class AragProvider implements RetrievalProvider {
       const weight = new Map<string, { group: string; weight: number }>()
       const edges: { source: string; target: string; label: string }[] = []
       const seenEdge = new Set<string>()
+      // The graph agent names groups inconsistently ("Program"/"Programs") -
+      // canonicalise on a singular key, keeping the first spelling seen.
+      const groupSpellings = new Map<string, string>()
+      const canonicalGroup = (raw: string): string => {
+        if (!raw) return raw
+        const key = raw.toLowerCase().replace(/s$/, '')
+        const existing = groupSpellings.get(key)
+        if (existing) return existing
+        groupSpellings.set(key, raw)
+        return raw
+      }
       for (const path of raw.paths ?? []) {
         const s = path.source?.value
         const d = path.destination?.value
@@ -764,9 +775,10 @@ export class AragProvider implements RetrievalProvider {
         seenEdge.add(key)
         edges.push({ source: s, target: d, label })
         for (const [value, group] of [[s, sg], [d, dg]] as const) {
-          const entry = weight.get(value) ?? { group, weight: 0 }
+          const canonical = canonicalGroup(group)
+          const entry = weight.get(value) ?? { group: canonical, weight: 0 }
           entry.weight += 1
-          if (group) entry.group = group
+          if (canonical) entry.group = canonical
           weight.set(value, entry)
         }
       }

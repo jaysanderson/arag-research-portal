@@ -61,6 +61,11 @@ type SimNode = MapNode & {
 
 type Transform = { x: number; y: number; k: number }
 
+/** Canvas label - long programme titles get an ellipsis; panels show the full name. */
+function shortLabel(label: string): string {
+  return label.length > 38 ? `${label.slice(0, 36)}…` : label
+}
+
 function radiusFor(weight: number): number {
   return Math.max(7, Math.min(26, Math.sqrt(weight) * 3.4 + 6))
 }
@@ -420,7 +425,7 @@ function GraphCanvas({
                       ? 'var(--rp-accent)'
                       : 'var(--rp-ink-3)'}
                     strokeWidth={onPath ? 3 : touchesFocus ? 2 : Math.max(1, edge.weight)}
-                    strokeOpacity={dimmed ? 0.07 : onPath || touchesFocus ? 0.9 : 0.3}
+                    strokeOpacity={dimmed ? 0.07 : onPath || touchesFocus ? 0.9 : 0.42}
                   />
                   {showLabel && edge.label
                     ? (
@@ -500,7 +505,7 @@ function GraphCanvas({
                         paintOrder='stroke'
                         style={{ pointerEvents: 'none' }}
                       >
-                        {node.label}
+                        {shortLabel(node.label)}
                       </text>
                     )
                     : null}
