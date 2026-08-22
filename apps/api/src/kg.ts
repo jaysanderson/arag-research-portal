@@ -382,3 +382,148 @@ export async function* implementKgStrategy(
   }
   yield { type: 'done', agents }
 }
+
+// ---------------------------------------------------------------------------
+// Strategy editing: replace the live llm-graph agent's entity types and
+// examples with librarian-edited ones. Same one-running-agent-per-type
+// constraints as implementKgStrategy - delete the old config, then start the
+// replacement with wait-retry.
+// ---------------------------------------------------------------------------
+
+const slugifyName = (raw: string) =>
+  raw.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+
+export interface GraphStrategyInput {
+  entityTypes: { label: string; description?: string }[]
+  examples: {
+    text: string
+    entities: { name: string; label: string }[]
+    relations: { source: string; target: string; label: string }[]
+  }[]
+  applyExisting: boolean
+}
+
+/** Validation errors a librarian can act on; empty when the strategy is sound. */
+export function validateGraphStrategy(input: GraphStrategyInput): string[] {
+  const problems: string[] = []
+  if (input.entityTypes.length === 0) problems.push('Define at least one entity type.')
+  const labels = new Set(input.entityTypes.map((t) => t.label))
+  if (labels.size !== input.entityTypes.length) {
+    problems.push('Entity type names must be unique.')
+  }
+  if (input.examples.length < 6) {
+    problems.push(
+      `At least six worked examples are needed for reliable relation extraction (currently ${input.examples.length}).`,
+    )
+  }
+  input.examples.forEach((example, index) => {
+    const n = index + 1
+    if (!example.text.trim()) problems.push(`Example ${n}: the text is empty.`)
+    if (example.entities.length < 2) {
+      problems.push(`Example ${n}: needs at least two entities.`)
+    }
+    if (example.relations.length < 1) {
+      problems.push(`Example ${n}: needs at least one relation.`)
+    }
+    const names = new Set(example.entities.map((e) => e.name))
+    for (const entity of example.entities) {
+      if (!labels.has(entity.label)) {
+        problems.push(
+          `Example ${n}: entity "${entity.name}" uses undefined type "${entity.label}".`,
+        )
+      }
+    }
+    for (const relation of example.relations) {
+      if (!names.has(relation.source) || !names.has(relation.target)) {
+        problems.push(
+          `Example ${n}: relation "${relation.label}" references an entity not listed in that example.`,
+        )
+      }
+      if (!relation.label.trim()) {
+        problems.push(`Example ${n}: a relation is missing its label.`)
+      }
+    }
+  })
+  return problems
+}
+
+export async function* replaceGraphStrategy(
+  management: AragProvider,
+  config: TenantConfig,
+  input: GraphStrategyInput,
+): AsyncGenerator<KgImplementEvent> {
+  const problems = validateGraphStrategy(input)
+  if (problems.length > 0) {
+    yield { type: 'error', message: problems.join(' ') }
+    return
+  }
+  const model = await management.generativeModel(config)
+  const title = `kg-${slugifyName(config.slug)}`
+
+  yield { type: 'stage', label: 'Replacing the knowledge graph agent' }
+  const existing = await management.listAgents(config).catch(() => [])
+  const current = existing.find((agent) => agent.title === title)
+  if (current) {
+    try {
+      await management.deleteAgent(config, current.id)
+      yield { type: 'item', label: 'Previous strategy removed' }
+    } catch {
+      yield { type: 'item', label: 'Could not remove the previous agent - continuing' }
+    }
+  }
+
+  const operations = [{
+    graph: {
+      ident: 'kg1',
+      entity_defs: input.entityTypes.map((t) => ({
+        label: t.label,
+        ...(t.description ? { description: t.description } : {}),
+      })),
+      examples: input.examples,
+    },
+  }]
+
+  let registered = false
+  for (let attempt = 1; attempt <= 4 && !registered; attempt++) {
+    try {
+      await management.startAgent(config, {
+        task: 'llm-graph',
+        title,
+        operations,
+        applyExisting: input.applyExisting,
+        model,
+      })
+      registered = true
+    } catch (err) {
+      const message = err instanceof Error ? err.message : ''
+      if (/already running/i.test(message) && attempt < 4) {
+        yield {
+          type: 'item',
+          label: `An extraction run is still in progress - retrying (${attempt}/3)`,
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25_000))
+        // A rejected concurrent start can leave a zombie config - clear it.
+        try {
+          const zombie = (await management.listAgents(config)).find((a) => a.title === title)
+          if (zombie) await management.deleteAgent(config, zombie.id)
+        } catch {
+          // nothing to clean
+        }
+      } else {
+        yield {
+          type: 'error',
+          message: 'The platform rejected the new strategy - the previous agent was removed. ' +
+            'Try again shortly.',
+        }
+        return
+      }
+    }
+  }
+  yield {
+    type: 'item',
+    label: input.applyExisting
+      ? 'New strategy registered - re-extracting across existing resources and every future ingest'
+      : 'New strategy registered - applies to future ingests',
+  }
+  yield { type: 'done', agents: 1 }
+}

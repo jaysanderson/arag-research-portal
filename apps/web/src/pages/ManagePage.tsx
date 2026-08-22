@@ -5,6 +5,7 @@ import { ApiError, getAdminOverview } from '../api/client.ts'
 import { ErrorCard, Skeleton } from '../components/ui.tsx'
 import { AddContent } from './admin/AddContent.tsx'
 import { AnalysePanel } from './admin/AnalysePanel.tsx'
+import { InterrogatePanel } from './admin/InterrogatePanel.tsx'
 import { AppearancePanel } from './admin/AppearancePanel.tsx'
 import { BehaviourPanel } from './admin/BehaviourPanel.tsx'
 import { CorpusHealthPanel } from './admin/CorpusHealthPanel.tsx'
@@ -281,7 +282,12 @@ export function ManagePage() {
                     </Link>
                   </div>
                   {reachable
-                    ? <AnalysePanel slug={slug} passcode={passcode} />
+                    ? (
+                      <>
+                        <AnalysePanel slug={slug} passcode={passcode} />
+                        <InterrogatePanel slug={slug} passcode={passcode} />
+                      </>
+                    )
                     : (
                       <p className='mt-4 text-sm text-ink-3'>
                         Connect a knowledge box to run analysis.

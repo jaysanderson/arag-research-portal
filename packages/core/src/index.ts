@@ -186,6 +186,8 @@ export const LabelsetSchema = z.object({
   title: z.string().min(1),
   multiple: z.boolean(),
   labels: z.string().array(),
+  /** RESOURCES (document-level) or PARAGRAPHS (passage-level). */
+  kind: z.enum(['RESOURCES', 'PARAGRAPHS']).optional(),
 })
 
 /** Facet counts: labelset id -> label -> count of resources carrying it. */

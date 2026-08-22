@@ -123,6 +123,7 @@ export function getCatalog(
     pageSize?: number
     query?: string
     topicIds?: string[]
+    kindIds?: string[]
     sort?: 'created' | 'modified' | 'title'
     order?: 'asc' | 'desc'
   } = {},
@@ -132,6 +133,7 @@ export function getCatalog(
   if (opts.pageSize) params.set('pageSize', String(opts.pageSize))
   if (opts.query) params.set('q', opts.query)
   if (opts.topicIds && opts.topicIds.length > 0) params.set('topics', opts.topicIds.join(','))
+  if (opts.kindIds && opts.kindIds.length > 0) params.set('kind', opts.kindIds.join(','))
   if (opts.sort) params.set('sort', opts.sort)
   if (opts.order) params.set('order', opts.order)
   return request<CatalogPage>(`/api/t/${encodeURIComponent(slug)}/catalog?${params.toString()}`)
@@ -1221,4 +1223,127 @@ export interface CorpusHealthRow {
 
 export function getCorpusHealth(slug: string, passcode: string): Promise<CorpusHealthRow[]> {
   return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/corpus-health`, passcode)
+}
+
+// --- Knowledge graph strategy (Manage) ---------------------------------------
+
+export interface GraphStrategy {
+  taskId: string
+  title: string
+  ident: string
+  entityDefs: { label: string; description?: string }[]
+  examples: {
+    text: string
+    entities: { name: string; label: string }[]
+    relations: { source: string; target: string; label: string }[]
+  }[]
+}
+
+export function getGraphStrategy(
+  slug: string,
+  passcode: string,
+): Promise<{ strategy: GraphStrategy | null }> {
+  return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/kg/strategy`, passcode)
+}
+
+export interface GraphStrategyUpdate {
+  entityTypes: { label: string; description?: string }[]
+  examples: GraphStrategy['examples']
+  applyExisting: boolean
+}
+
+export async function saveGraphStrategy(
+  slug: string,
+  passcode: string,
+  input: GraphStrategyUpdate,
+  onEvent: (event: KgImplementEvent) => void,
+): Promise<void> {
+  const res = await fetch(`/api/admin/t/${encodeURIComponent(slug)}/kg/strategy`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-admin-passcode': passcode },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok || !res.body) {
+    const body: unknown = await res.json().catch(() => null)
+    const problems = body && typeof body === 'object' && 'problems' in body &&
+        Array.isArray((body as { problems: unknown }).problems)
+      ? (body as { problems: string[] }).problems.join(' ')
+      : ''
+    throw new ApiError(res.status, problems || 'The strategy could not be saved')
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const emit = (frame: string) => {
+    const line = frame.trim()
+    if (!line) return
+    const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
+    try {
+      onEvent(JSON.parse(data) as KgImplementEvent)
+    } catch {
+      // truncated trailing frame
+    }
+  }
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) emit(frame)
+  }
+  emit(buffer)
+}
+
+// --- Knowledge-box interrogation and suggestions ------------------------------
+
+export interface SetupSuggestion {
+  id: string
+  kind: 'labelset' | 'label-addition' | 'entity-type' | 'graph-example'
+  title: string
+  detail: string
+  status: 'pending' | 'implemented' | 'ignored'
+  createdAt: string
+  labelset?: { id: string; title: string; paragraphs: boolean; labels: string[] }
+  labels?: { labelsetId: string; labels: string[] }
+  entityType?: { label: string; description: string }
+  example?: {
+    text: string
+    entities: { name: string; label: string }[]
+    relations: { source: string; target: string; label: string }[]
+  }
+}
+
+export function getSuggestions(slug: string, passcode: string): Promise<SetupSuggestion[]> {
+  return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/suggestions`, passcode)
+}
+
+export function runInterrogation(slug: string, passcode: string): Promise<SetupSuggestion[]> {
+  return adminRequest(`/api/admin/t/${encodeURIComponent(slug)}/interrogate`, passcode, {
+    method: 'POST',
+  })
+}
+
+export function implementSuggestion(
+  slug: string,
+  passcode: string,
+  id: string,
+): Promise<{ ok: boolean; summary: string }> {
+  return adminRequest(
+    `/api/admin/t/${encodeURIComponent(slug)}/suggestions/${encodeURIComponent(id)}/implement`,
+    passcode,
+    { method: 'POST' },
+  )
+}
+
+export function ignoreSuggestion(
+  slug: string,
+  passcode: string,
+  id: string,
+): Promise<{ ok: boolean }> {
+  return adminRequest(
+    `/api/admin/t/${encodeURIComponent(slug)}/suggestions/${encodeURIComponent(id)}/ignore`,
+    passcode,
+    { method: 'POST' },
+  )
 }

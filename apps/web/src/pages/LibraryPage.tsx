@@ -346,6 +346,11 @@ export function LibraryPage() {
     const fromUrl = searchParams.get('topic')
     return fromUrl ? [fromUrl] : []
   })
+  // Kind deep links arrive from the knowledge map's concept lens.
+  const [selectedKinds, setSelectedKinds] = useState<string[]>(() => {
+    const fromUrl = searchParams.get('kind')
+    return fromUrl ? [fromUrl] : []
+  })
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [accumulated, setAccumulated] = useState<CatalogItem[]>([])
@@ -359,13 +364,14 @@ export function LibraryPage() {
   }, [queryDraft])
 
   const topicsKey = selectedTopics.join(',')
+  const kindsKey = selectedKinds.join(',')
 
   useEffect(() => {
     setPage(0)
     setAccumulated([])
     setTotal(0)
     setSelectedIds(new Set())
-  }, [debouncedQuery, sort, topicsKey])
+  }, [debouncedQuery, sort, topicsKey, kindsKey])
 
   const summaryModal = useResourceSummary(config.slug)
 
@@ -409,13 +415,14 @@ export function LibraryPage() {
     error,
     refetch,
   } = useQuery({
-    queryKey: ['catalog', config.slug, debouncedQuery, sort, topicsKey, page],
+    queryKey: ['catalog', config.slug, debouncedQuery, sort, topicsKey, kindsKey, page],
     queryFn: () =>
       getCatalog(config.slug, {
         page,
         pageSize: PAGE_SIZE,
         query: debouncedQuery || undefined,
         topicIds: selectedTopics,
+        kindIds: selectedKinds,
         sort: sortOption.sort,
         order: sortOption.order,
       }),
@@ -506,7 +513,9 @@ export function LibraryPage() {
               className='rp-chip h-9 sm:h-7 lg:hidden'
               aria-expanded={filtersOpen}
             >
-              Filters{selectedTopics.length > 0 ? ` (${selectedTopics.length})` : ''}
+              Filters{(selectedTopics.length + selectedKinds.length) > 0
+                ? ` (${selectedTopics.length + selectedKinds.length})`
+                : ''}
             </button>
           )
           : null}
@@ -524,6 +533,26 @@ export function LibraryPage() {
           )
           : null}
       </div>
+
+      {selectedKinds.length > 0
+        ? (
+          <div className='mt-4 flex flex-wrap items-center gap-2'>
+            <span className='text-xs uppercase tracking-wide text-ink-3'>Filtered to kind</span>
+            {selectedKinds.map((kind) => (
+              <button
+                key={kind}
+                type='button'
+                onClick={() => setSelectedKinds((prev) => prev.filter((k) => k !== kind))}
+                className='rp-chip text-xs'
+                title='Remove this filter'
+              >
+                {kind.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                <span aria-hidden='true'>×</span>
+              </button>
+            ))}
+          </div>
+        )
+        : null}
 
       <div className='mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[230px_1fr]'>
         {config.topics.length > 0

@@ -905,11 +905,13 @@ function ConceptPanel({
   node,
   edges,
   labelById,
+  onSelect,
 }: {
   slug: string
   node: MapNode
   edges: MapEdge[]
   labelById: Map<string, string>
+  onSelect: (id: string) => void
 }) {
   const related = edges
     .filter((e) => e.source === node.id || e.target === node.id)
@@ -920,6 +922,18 @@ function ConceptPanel({
     .sort((a, b) => b.count - a.count)
   const isTopic = node.id.startsWith('topic:')
   const slugPart = node.id.split(':')[1] ?? ''
+
+  /** Library link filtered to this node - and to a pair when other is given. */
+  const libraryHref = (otherId?: string) => {
+    const params = new URLSearchParams()
+    params.set(isTopic ? 'topic' : 'kind', slugPart)
+    if (otherId) {
+      const otherIsTopic = otherId.startsWith('topic:')
+      params.set(otherIsTopic ? 'topic' : 'kind', otherId.split(':')[1] ?? '')
+    }
+    return `/t/${slug}/library?${params.toString()}`
+  }
+
   return (
     <>
       <div>
@@ -937,32 +951,36 @@ function ConceptPanel({
             </h3>
             <ul className='mt-2 space-y-1'>
               {related.map(({ otherId, count }) => (
-                <li
-                  key={otherId}
-                  className='flex items-center justify-between gap-2 text-sm text-ink'
-                >
-                  <span className='truncate'>{labelById.get(otherId) ?? otherId}</span>
-                  <span className='shrink-0 text-xs text-ink-3'>
+                <li key={otherId} className='flex items-center justify-between gap-1.5'>
+                  <button
+                    type='button'
+                    onClick={() =>
+                      onSelect(otherId)}
+                    className='min-w-0 truncate rounded-[var(--rp-radius)] px-1.5 py-1 text-left text-sm text-ink hover:bg-[var(--rp-surface-2)]'
+                  >
+                    {labelById.get(otherId) ?? otherId}
+                  </button>
+                  <Link
+                    to={libraryHref(otherId)}
+                    className='shrink-0 text-xs text-ink-3 underline-offset-2 hover:text-[var(--rp-ink)] hover:underline'
+                    title='View the resources where both appear'
+                  >
                     {count} {count === 1 ? 'resource' : 'resources'}
-                  </span>
+                  </Link>
                 </li>
               ))}
             </ul>
           </div>
         )
         : <p className='text-xs text-ink-3'>No overlaps recorded yet.</p>}
-      {isTopic
-        ? (
-          <div className='mt-auto border-t border-line pt-3'>
-            <Link
-              to={`/t/${slug}/library?topic=${encodeURIComponent(slugPart)}`}
-              className='rp-btn rp-btn-primary h-8 px-2.5 text-xs'
-            >
-              View these resources
-            </Link>
-          </div>
-        )
-        : null}
+      <div className='mt-auto border-t border-line pt-3'>
+        <Link
+          to={libraryHref()}
+          className='rp-btn rp-btn-primary h-8 px-2.5 text-xs'
+        >
+          View these {node.weight} {node.weight === 1 ? 'resource' : 'resources'}
+        </Link>
+      </div>
     </>
   )
 }
@@ -1084,7 +1102,11 @@ export function GraphPage() {
         group: n.group === 'primary' ? 'Topic' : 'Kind',
         weight: n.weight,
       })),
-      edges: data.edges.map((e) => ({ ...e, label: '', weight: Math.min(4, e.weight) })),
+      edges: data.edges.map((e) => ({
+        ...e,
+        label: `together on ${e.weight} ${e.weight === 1 ? 'resource' : 'resources'}`,
+        weight: Math.min(4, e.weight),
+      })),
     }
   }, [mode, entityGraph, conceptQuery.data])
 
@@ -1243,6 +1265,7 @@ export function GraphPage() {
                       node={selected}
                       edges={edges}
                       labelById={labelById}
+                      onSelect={focusAndSelect}
                     />
                   )
                   : (

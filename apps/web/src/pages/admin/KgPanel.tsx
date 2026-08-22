@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { KgImplementEvent, KgProposal } from '@research-portal/core'
 import { deleteAgent, getAgents, implementKg, proposeKg } from '../../api/client.ts'
+import { KgStrategyEditor } from './KgStrategyEditor.tsx'
 import { MessagePanel } from './MessagePanel.tsx'
 import { errorMessage, type Message } from './shared.ts'
 
@@ -93,7 +94,10 @@ export function KgPanel(
           if (event.type === 'error') setMessage({ tone: 'error', text: event.message })
         },
       )
-      await queryClient.invalidateQueries({ queryKey: ['kb-agents', slug] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['kb-agents', slug] }),
+        queryClient.invalidateQueries({ queryKey: ['kg-strategy', slug] }),
+      ])
     } catch (err) {
       setMessage({
         tone: 'error',
@@ -245,6 +249,17 @@ export function KgPanel(
             ))}
           </ul>
         )}
+      </div>
+
+      <div className='mt-4 border-t border-line pt-3'>
+        <p className='text-sm font-medium text-ink'>Current strategy</p>
+        <p className='mt-0.5 text-xs text-ink-3'>
+          The entity types and worked examples that teach the extraction agent what to pull out -
+          fully editable.
+        </p>
+        <div className='mt-3'>
+          <KgStrategyEditor slug={slug} passcode={passcode} />
+        </div>
       </div>
     </div>
   )

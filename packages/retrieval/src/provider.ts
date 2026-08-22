@@ -38,6 +38,8 @@ export interface CatalogOptions {
   pageSize?: number
   query?: string
   topicIds?: string[]
+  /** Labels in the 'kind' labelset to filter by. */
+  kindIds?: string[]
   sortField?: 'created' | 'modified' | 'title'
   sortOrder?: 'asc' | 'desc'
 }

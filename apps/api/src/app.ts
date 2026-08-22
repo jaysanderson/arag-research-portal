@@ -16,7 +16,14 @@ import { BindingStore } from './bindings.ts'
 import { accountOpsAvailable, createKnowledgeBox, enableHiddenResources } from './arag-account.ts'
 import { GENERATE_SCHEMAS } from './generate-schemas.ts'
 import { analyseTenant } from './analyse.ts'
-import { implementKgStrategy, KgProposalStore, proposeKgStrategy } from './kg.ts'
+import {
+  type GraphStrategyInput,
+  implementKgStrategy,
+  KgProposalStore,
+  proposeKgStrategy,
+  replaceGraphStrategy,
+  validateGraphStrategy,
+} from './kg.ts'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import process from 'node:process'
 import { discoverLinks } from './crawl.ts'
@@ -28,6 +35,7 @@ import {
   WatchStore,
 } from './stores.ts'
 import { syncSource } from './scheduler.ts'
+import { implementSuggestion, runInterrogation, SuggestionStore } from './interrogate.ts'
 
 const searchQuerySchema = z.object({ q: z.string().min(1) })
 const askBodySchema = z.object({
@@ -103,6 +111,25 @@ const artefactCreateSchema = z.object({
   kind: z.string().min(1).max(40),
   title: z.string().min(1).max(200),
   data: z.unknown(),
+})
+const graphStrategySchema = z.object({
+  entityTypes: z.object({
+    label: z.string().min(1).max(60),
+    description: z.string().max(400).optional(),
+  }).array().min(1).max(20),
+  examples: z.object({
+    text: z.string().min(10).max(2000),
+    entities: z.object({
+      name: z.string().min(1).max(160),
+      label: z.string().min(1).max(60),
+    }).array().min(1).max(20),
+    relations: z.object({
+      source: z.string().min(1).max(160),
+      target: z.string().min(1).max(160),
+      label: z.string().min(1).max(80),
+    }).array().max(20),
+  }).array().min(1).max(30),
+  applyExisting: z.boolean(),
 })
 const verdictsBodySchema = z.object({
   question: z.string().min(3).max(1000),
@@ -218,6 +245,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
   const watches = new WatchStore()
   const sources = new SourceStore()
   const investigations = new InvestigationStore()
+  const suggestions = new SuggestionStore()
   const clientId = (c: Context): string => c.req.header('x-rp-client') ?? 'anonymous'
   const app = new Hono()
 
@@ -323,6 +351,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
     const orderRaw = c.req.query('order')
     return c.json(
       await provider.catalog(config, {
+        kindIds: (c.req.query('kind') ?? '').split(',').filter(Boolean),
         page: Math.max(0, Math.floor(Number(c.req.query('page') ?? 0) || 0)),
         pageSize: Math.min(
           Math.max(1, Math.floor(Number(c.req.query('pageSize') ?? 24) || 24)),
@@ -1070,6 +1099,85 @@ export function buildApp(opts: BuildAppOptions): Hono {
           includeSummaries: parsed.data.includeSummaries ?? false,
         })
       ) {
+        await stream.writeSSE({ data: JSON.stringify(event) })
+      }
+    })
+  })
+
+  app.get('/api/admin/t/:slug/suggestions', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    return c.json(suggestions.list(config.slug))
+  })
+
+  app.post('/api/admin/t/:slug/interrogate', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailable = requireManagement(c)
+    if (unavailable) return unavailable
+    try {
+      const list = await runInterrogation(management!, config, suggestions)
+      return c.json(list)
+    } catch (err) {
+      console.error(err)
+      return c.json({
+        error: 'interrogation_failed',
+        message: 'The interrogation could not complete - try again shortly.',
+      }, 502)
+    }
+  })
+
+  app.post('/api/admin/t/:slug/suggestions/:id/implement', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailable = requireManagement(c)
+    if (unavailable) return unavailable
+    const suggestion = suggestions.list(config.slug).find((s) => s.id === c.req.param('id'))
+    if (!suggestion) return c.json({ error: 'not_found' }, 404)
+    if (suggestion.status !== 'pending') {
+      return c.json({ error: 'already_decided' }, 409)
+    }
+    try {
+      const summary = await implementSuggestion(management!, config, suggestion)
+      suggestions.setStatus(config.slug, suggestion.id, 'implemented')
+      return c.json({ ok: true, summary })
+    } catch (err) {
+      return c.json({
+        error: 'implement_failed',
+        message: err instanceof Error ? err.message : 'The suggestion could not be implemented.',
+      }, 502)
+    }
+  })
+
+  app.post('/api/admin/t/:slug/suggestions/:id/ignore', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const updated = suggestions.setStatus(config.slug, c.req.param('id'), 'ignored')
+    return updated ? c.json({ ok: true }) : c.json({ error: 'not_found' }, 404)
+  })
+
+  app.get('/api/admin/t/:slug/kg/strategy', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailable = requireManagement(c)
+    if (unavailable) return unavailable
+    const strategy = await management!.graphStrategy(config)
+    return c.json({ strategy })
+  })
+
+  app.put('/api/admin/t/:slug/kg/strategy', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailable = requireManagement(c)
+    if (unavailable) return unavailable
+    const parsed = graphStrategySchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    const input: GraphStrategyInput = parsed.data
+    // Validate up front so the UI can show problems without streaming.
+    const problems = validateGraphStrategy(input)
+    if (problems.length > 0) return c.json({ error: 'invalid_strategy', problems }, 422)
+    return streamSSE(c, async (stream) => {
+      for await (const event of replaceGraphStrategy(management!, config, input)) {
         await stream.writeSSE({ data: JSON.stringify(event) })
       }
     })

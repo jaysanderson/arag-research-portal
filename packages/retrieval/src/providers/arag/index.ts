@@ -421,6 +421,9 @@ export class AragProvider implements RetrievalProvider {
     for (const topic of opts.topicIds ?? []) {
       params.append('filters', `/classification.labels/topic/${topic}`)
     }
+    for (const kind of opts.kindIds ?? []) {
+      params.append('filters', `/classification.labels/kind/${kind}`)
+    }
     const raw = await this.client(tenant).getJson<{
       resources?: Record<string, RawResource & { created?: string }>
       fulltext?: { total?: number }
@@ -479,13 +482,14 @@ export class AragProvider implements RetrievalProvider {
     const raw = await this.client(tenant).getJson<{
       labelsets?: Record<
         string,
-        { title?: string; multiple?: boolean; labels?: { title?: string }[] }
+        { title?: string; multiple?: boolean; kind?: string[]; labels?: { title?: string }[] }
       >
     }>('/labelsets')
     return Object.entries(raw.labelsets ?? {}).map(([id, ls]) => ({
       id,
       title: ls.title ?? id,
       multiple: ls.multiple ?? true,
+      kind: (ls.kind ?? []).includes('PARAGRAPHS') ? 'PARAGRAPHS' as const : 'RESOURCES' as const,
       labels: (ls.labels ?? []).map((l) => l.title ?? '').filter(Boolean),
     }))
   }
@@ -666,6 +670,74 @@ export class AragProvider implements RetrievalProvider {
     }
     for (const value of Object.values(raw ?? {})) collect(value)
     return agents
+  }
+
+  /**
+   * The live knowledge-graph strategy: entity types (NER definitions) and the
+   * worked examples that teach relation extraction, read from the registered
+   * llm-graph agent's own configuration.
+   */
+  async graphStrategy(tenant: TenantConfig): Promise<
+    {
+      taskId: string
+      title: string
+      ident: string
+      entityDefs: { label: string; description?: string }[]
+      examples: {
+        text: string
+        entities: { name: string; label: string }[]
+        relations: { source: string; target: string; label: string }[]
+      }[]
+    } | null
+  > {
+    const raw = await this.client(tenant).dpJson<{
+      configs?: {
+        id?: string
+        task?: string | { name?: string }
+        parameters?: {
+          name?: string
+          operations?: {
+            graph?: {
+              ident?: string
+              entity_defs?: { label?: string; description?: string }[]
+              examples?: {
+                text?: string
+                entities?: { name?: string; label?: string }[]
+                relations?: { source?: string; target?: string; label?: string }[]
+              }[]
+            }
+          }[]
+        }
+      }[]
+    }>('GET', '/tasks')
+    for (const config of raw.configs ?? []) {
+      const taskName = typeof config.task === 'string' ? config.task : config.task?.name
+      if (taskName !== 'llm-graph') continue
+      const graph = (config.parameters?.operations ?? []).find((op) => op.graph)?.graph
+      if (!graph) continue
+      return {
+        taskId: config.id ?? '',
+        title: config.parameters?.name ?? '',
+        ident: graph.ident ?? 'kg1',
+        entityDefs: (graph.entity_defs ?? []).map((d) => ({
+          label: d.label ?? '',
+          description: d.description,
+        })).filter((d) => d.label),
+        examples: (graph.examples ?? []).map((e) => ({
+          text: e.text ?? '',
+          entities: (e.entities ?? []).map((en) => ({
+            name: en.name ?? '',
+            label: en.label ?? '',
+          })),
+          relations: (e.relations ?? []).map((r) => ({
+            source: r.source ?? '',
+            target: r.target ?? '',
+            label: r.label ?? '',
+          })),
+        })),
+      }
+    }
+    return null
   }
 
   async startAgent(
