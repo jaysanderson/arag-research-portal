@@ -1298,7 +1298,10 @@ export class AragProvider implements RetrievalProvider {
             'well-structured prose with Markdown, in Australian English. Cite evidence at claim ' +
             'level: after each factual claim, add a bracketed citation number like [1] matching ' +
             'the order sources first appear in your answer. If a statement is your inference ' +
-            'rather than something the context states, mark it (inference).',
+            'rather than something the context states, mark it (inference). When the context ' +
+            'contains conflicting, negative or nuanced findings (adverse observations, ' +
+            'non-detections, disagreements between studies), state them explicitly with their ' +
+            'specifics - a researcher needs the tension, never a smoothed summary.',
       },
     }
     if (opts.context && opts.context.length > 0) {
