@@ -1714,7 +1714,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
               SUBQUERIES_SCHEMA,
               `Break this research question into 3 to 5 focused sub-questions that together cover it fully. Sub-questions must be answerable from the corpus and phrased as standalone questions: ${query}`,
             ),
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), 9000)),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 16000)),
           ])
           const questions = decomposition
             ? ((decomposition.object as { questions?: unknown }).questions ?? []) as string[]
