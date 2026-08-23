@@ -26,6 +26,7 @@ import {
   EvidenceTable,
   type EvidenceVerdictInfo,
 } from '../components/EvidenceTable.tsx'
+import { PipelinePanel } from '../components/PipelinePanel.tsx'
 import { type QualityScores, TrustSignals } from '../components/QualityGauge.tsx'
 import { LiveStatus } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
@@ -250,6 +251,7 @@ function renderCitationMarkers(
             to={citationHref(slug, citation.resourceId, matchedPassage)}
             className='font-semibold no-underline'
             style={{ color: 'var(--rp-accent)' }}
+            title={`Source ${citationIndex} - ${citation.title}; click to open, or find it in the Evidence table below`}
           >
             [{citationIndex}]
           </Link>
@@ -459,7 +461,13 @@ function SessionList({
 // Message bubbles
 // ---------------------------------------------------------------------------
 
-function UserBubble({ message }: { message: ChatMessage }) {
+function UserBubble({
+  message,
+  onAskSubquery,
+}: {
+  message: ChatMessage
+  onAskSubquery: (subquery: string) => void
+}) {
   return (
     <div className='flex flex-col items-end gap-1.5'>
       <div
@@ -470,10 +478,22 @@ function UserBubble({ message }: { message: ChatMessage }) {
       </div>
       {message.subqueries && message.subqueries.length > 0
         ? (
-          <div className='flex max-w-[85%] flex-wrap justify-end gap-1.5 sm:max-w-[70%]'>
-            {message.subqueries.map((subquery, index) => (
-              <span key={index} className='rp-chip text-[11px]'>{subquery}</span>
-            ))}
+          <div className='flex max-w-[85%] flex-col items-end gap-1 sm:max-w-[70%]'>
+            <p className='text-[11px] font-medium uppercase tracking-wide text-ink-3'>
+              Searched for
+            </p>
+            <div className='flex flex-wrap justify-end gap-1.5'>
+              {message.subqueries.map((subquery, index) => (
+                <button
+                  key={index}
+                  type='button'
+                  onClick={() => onAskSubquery(subquery)}
+                  className='rp-chip text-[11px]'
+                >
+                  {subquery}
+                </button>
+              ))}
+            </div>
           </div>
         )
         : null}
@@ -646,6 +666,8 @@ function AssistantCard({
   onAskSubquery: (subquery: string) => void
   onVerdicts: (verdicts: Record<string, EvidenceVerdictInfo>) => void
 }) {
+  const [showPipeline, setShowPipeline] = useState(false)
+
   if (message.error && !message.text.trim()) {
     return (
       <div
@@ -678,6 +700,8 @@ function AssistantCard({
     title: source.title,
     passage: source.matchedPassage,
     score: source.relevance,
+    matchedPage: source.matchedPage,
+    referenceChunk: source.referenceChunk,
   }))
 
   // A refusal gets its own structured "no evidence" state instead of the
@@ -888,6 +912,8 @@ function AssistantCard({
               sources={evidenceSources}
               initialVerdicts={message.verdicts}
               onVerdicts={onVerdicts}
+              citations={message.citations}
+              anchorPrefix={message.id}
             />
           </div>
         )
@@ -909,6 +935,46 @@ function AssistantCard({
         ? (
           <div className='mt-4 border-t border-line pt-3'>
             <ContextJourney slug={slug} sources={message.sources} query={question} />
+          </div>
+        )
+        : null}
+
+      {!message.pending && (message.sources.length > 0 || message.usage || message.quality)
+        ? (
+          <div className='mt-4 border-t border-line pt-3'>
+            <button
+              type='button'
+              onClick={() => setShowPipeline((prev) => !prev)}
+              aria-expanded={showPipeline}
+              className='flex items-center gap-1.5 text-xs font-medium text-ink-3 hover:text-ink'
+            >
+              <svg
+                viewBox='0 0 20 20'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth='1.7'
+                strokeLinecap='round'
+                strokeLinejoin='round'
+                aria-hidden='true'
+                className={`h-3 w-3 shrink-0 transition-transform duration-150 ${
+                  showPipeline ? 'rotate-90' : ''
+                }`}
+              >
+                <path d='M7 4l6 6-6 6' />
+              </svg>
+              {showPipeline ? 'Hide the pipeline' : 'Show the pipeline'}
+            </button>
+            {showPipeline
+              ? (
+                <div className='mt-3'>
+                  <PipelinePanel
+                    sources={message.sources}
+                    usage={message.usage}
+                    quality={message.quality}
+                  />
+                </div>
+              )
+              : null}
           </div>
         )
         : null}
@@ -1304,6 +1370,20 @@ export function AssistantPage() {
             case 'interpreted':
               update((message) => ({ ...message, interpretedQuery: event.query }))
               break
+            case 'searched':
+              // The platform auto-decomposed the question into sub-queries it
+              // researched alongside the main one - attach them to the
+              // preceding USER message (immediately before this assistant
+              // placeholder in `working`), the same slot deep research fills
+              // in before the ask even starts, so they render the same way.
+              working = working.map((message, index) =>
+                index === working.length - 2 && message.author === 'USER' &&
+                  (!message.subqueries || message.subqueries.length === 0)
+                  ? { ...message, subqueries: event.queries }
+                  : message
+              )
+              setMessages(working)
+              break
             case 'usage':
               update((message) => ({
                 ...message,
@@ -1658,7 +1738,13 @@ export function AssistantPage() {
             : (
               messages.map((message, index) =>
                 message.author === 'USER'
-                  ? <UserBubble key={message.id} message={message} />
+                  ? (
+                    <UserBubble
+                      key={message.id}
+                      message={message}
+                      onAskSubquery={(subquery) => void send(subquery)}
+                    />
+                  )
                   : (
                     <AssistantCard
                       key={message.id}

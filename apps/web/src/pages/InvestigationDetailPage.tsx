@@ -10,9 +10,11 @@ import {
   getInvestigation,
   type Investigation,
   type InvestigationArtefact,
+  synthesiseInvestigation,
   updateEvidence,
   updateInvestigation,
 } from '../api/client.ts'
+import { MakeCurrentToggle } from '../components/SaveEvidence.tsx'
 import { EmptyState, ErrorCard, Skeleton } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
@@ -28,6 +30,16 @@ function formatDate(iso: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return iso
   return date.toLocaleDateString('en-AU', { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+/**
+ * A score is normally 0-1, shown as a percentage. A legacy item can carry a
+ * score already stored as a percent (>1) - treat that as already-percent
+ * rather than multiplying it again, and cap either case at 100.
+ */
+function formatScorePercent(score: number): number {
+  const pct = score <= 1 ? score * 100 : score
+  return Math.min(100, Math.round(pct))
 }
 
 function escapeHtml(value: string): string {
@@ -245,6 +257,7 @@ function InvestigationHeader(
         >
           {investigation.status === 'active' ? 'Close investigation' : 'Reopen investigation'}
         </button>
+        <MakeCurrentToggle slug={slug} investigation={investigation} />
         <div className='ml-auto'>
           <ConfirmButton
             label='Delete'
@@ -368,6 +381,7 @@ function EvidenceCard(
   const [expanded, setExpanded] = useState(false)
   const [note, setNote] = useState(item.note)
   const [noteDirty, setNoteDirty] = useState(false)
+  const [tagDraft, setTagDraft] = useState('')
   const noteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => () => {
@@ -397,6 +411,11 @@ function EvidenceCard(
     onSuccess: invalidate,
   })
 
+  const tagsMutation = useMutation({
+    mutationFn: (tags: string[]) => updateEvidence(slug, investigationId, item.id, { tags }),
+    onSuccess: invalidate,
+  })
+
   const onNoteChange = (value: string) => {
     setNote(value)
     setNoteDirty(true)
@@ -404,9 +423,20 @@ function EvidenceCard(
     noteTimerRef.current = setTimeout(() => noteMutation.mutate(value), 1500)
   }
 
+  const addTag = () => {
+    const tag = tagDraft.trim()
+    setTagDraft('')
+    if (!tag || item.tags.includes(tag)) return
+    tagsMutation.mutate([...item.tags, tag])
+  }
+
+  const removeTag = (tag: string) => tagsMutation.mutate(item.tags.filter((t) => t !== tag))
+
   const sourceHref = `/t/${slug}/library/${encodeURIComponent(item.resourceId)}?passage=${
     encodeURIComponent(item.passage.slice(0, 200))
   }`
+  const askQuestion = item.question || `What does the research say about ${item.resourceTitle}?`
+  const askHref = `/t/${slug}/assistant?ask=${encodeURIComponent(askQuestion)}`
 
   return (
     <div className='rp-card p-4'>
@@ -421,7 +451,7 @@ function EvidenceCard(
         {item.score != null
           ? (
             <span className='rp-badge rp-badge-quiet shrink-0 tabular-nums'>
-              {Math.round(item.score * 100)}%
+              {formatScorePercent(item.score)}%
             </span>
           )
           : null}
@@ -474,6 +504,39 @@ function EvidenceCard(
         })}
       </div>
 
+      <div className='mt-3 flex flex-wrap items-center gap-1.5' aria-label='Tags'>
+        {item.tags.map((tag) => (
+          <span key={tag} className='rp-chip'>
+            {tag}
+            <button
+              type='button'
+              onClick={() => removeTag(tag)}
+              aria-label={`Remove tag ${tag}`}
+              className='text-ink-3 hover:text-ink'
+            >
+              &times;
+            </button>
+          </span>
+        ))}
+        <input
+          type='text'
+          value={tagDraft}
+          onChange={(event) => setTagDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              addTag()
+            }
+          }}
+          onBlur={() => {
+            if (tagDraft.trim()) addTag()
+          }}
+          placeholder='Add tag…'
+          aria-label={`Add tag for ${item.resourceTitle}`}
+          className='rp-input h-7 w-24 text-xs'
+        />
+      </div>
+
       <div className='mt-3 flex items-center gap-2'>
         <input
           type='text'
@@ -488,16 +551,21 @@ function EvidenceCard(
           : null}
       </div>
 
-      <div className='mt-3 flex items-center justify-between gap-3 border-t border-line pt-2.5'>
+      <div className='mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2.5'>
         <span className='text-xs text-ink-3'>Added {formatDate(item.createdAt)}</span>
-        <ConfirmButton
-          label='Remove'
-          confirmLabel='Confirm remove'
-          disabled={removeMutation.isPending}
-          onConfirm={() => removeMutation.mutate()}
-          className='rp-btn rp-btn-ghost h-7 px-2 text-xs'
-          confirmClassName='rp-btn rp-btn-danger h-7 px-2 text-xs'
-        />
+        <div className='flex items-center gap-2'>
+          <Link to={askHref} className='rp-btn rp-btn-ghost h-7 px-2 text-xs'>
+            Ask about this
+          </Link>
+          <ConfirmButton
+            label='Remove'
+            confirmLabel='Confirm remove'
+            disabled={removeMutation.isPending}
+            onConfirm={() => removeMutation.mutate()}
+            className='rp-btn rp-btn-ghost h-7 px-2 text-xs'
+            confirmClassName='rp-btn rp-btn-danger h-7 px-2 text-xs'
+          />
+        </div>
       </div>
     </div>
   )
@@ -535,7 +603,167 @@ function ArtefactRow({ artefact }: { artefact: InvestigationArtefact }) {
   )
 }
 
+// --- Synthesis artefacts: rendered as a brief, not raw JSON -----------------
+
+interface SynthesisReference {
+  n: number
+  resourceId: string
+  resourceTitle: string
+}
+
+interface SynthesisData {
+  summary: string
+  supported: string[]
+  contested: string[]
+  gaps: string[]
+  references: SynthesisReference[]
+}
+
+/** Tolerant read of a synthesis artefact's data - never trusts the shape blindly. */
+function readSynthesisData(data: unknown): SynthesisData {
+  const record = data !== null && typeof data === 'object' ? data as Record<string, unknown> : {}
+  const strings = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((v) => typeof v === 'string') : []
+  const references = Array.isArray(record.references)
+    ? record.references.filter(
+      (r): r is SynthesisReference =>
+        r !== null && typeof r === 'object' &&
+        typeof (r as SynthesisReference).resourceId === 'string',
+    )
+    : []
+  return {
+    summary: typeof record.summary === 'string' ? record.summary : '',
+    supported: strings(record.supported),
+    contested: strings(record.contested),
+    gaps: strings(record.gaps),
+    references,
+  }
+}
+
+function SynthesisArtefactCard({
+  slug,
+  artefact,
+  highlighted,
+}: {
+  slug: string
+  artefact: InvestigationArtefact
+  highlighted: boolean
+}) {
+  const data = readSynthesisData(artefact.data)
+
+  return (
+    <div
+      id={`artefact-${artefact.id}`}
+      className={`rounded-[var(--rp-radius)] border p-4 transition-colors duration-500 ${
+        highlighted ? 'border-[var(--rp-accent)] bg-[var(--rp-surface-2)]' : 'border-line'
+      }`}
+    >
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        <div className='flex min-w-0 items-center gap-2'>
+          <span className='rp-badge rp-badge-quiet shrink-0 uppercase tracking-[0.06em]'>
+            Synthesis
+          </span>
+          <span className='truncate text-sm font-medium text-ink'>{artefact.title}</span>
+        </div>
+        <span className='shrink-0 text-xs text-ink-3'>{formatDate(artefact.createdAt)}</span>
+      </div>
+
+      {data.summary
+        ? <p className='mt-3 text-sm leading-relaxed text-ink-2'>{data.summary}</p>
+        : null}
+
+      {data.supported.length > 0
+        ? (
+          <div className='mt-3'>
+            <h4 className='text-xs font-semibold uppercase tracking-[0.06em] text-ink-3'>
+              Established by the evidence
+            </h4>
+            <ul className='mt-1.5 list-disc space-y-1 pl-5 text-sm leading-relaxed text-ink-2'>
+              {data.supported.map((line, index) => <li key={index}>{line}</li>)}
+            </ul>
+          </div>
+        )
+        : null}
+
+      {data.contested.length > 0
+        ? (
+          <div className='mt-3'>
+            <h4 className='text-xs font-semibold uppercase tracking-[0.06em] text-ink-3'>
+              Contested
+            </h4>
+            <ul className='mt-1.5 space-y-1.5'>
+              {data.contested.map((line, index) => (
+                <li
+                  key={index}
+                  className='border-l-2 pl-3 text-sm leading-relaxed text-ink-2'
+                  style={{ borderColor: 'var(--rp-warn-line)' }}
+                >
+                  {line}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+        : null}
+
+      {data.gaps.length > 0
+        ? (
+          <div className='mt-3'>
+            <h4 className='text-xs font-semibold uppercase tracking-[0.06em] text-ink-3'>Gaps</h4>
+            <ul className='mt-1.5 list-disc space-y-1 pl-5 text-sm leading-relaxed text-ink-2'>
+              {data.gaps.map((line, index) => <li key={index}>{line}</li>)}
+            </ul>
+          </div>
+        )
+        : null}
+
+      {data.references.length > 0
+        ? (
+          <div className='mt-3 border-t border-line pt-3'>
+            <h4 className='text-xs font-semibold uppercase tracking-[0.06em] text-ink-3'>
+              References
+            </h4>
+            <ol className='mt-1.5 space-y-1 text-sm text-ink-2'>
+              {data.references.map((ref) => (
+                <li key={ref.n}>
+                  [{ref.n}]{' '}
+                  <Link
+                    to={`/t/${slug}/library/${encodeURIComponent(ref.resourceId)}`}
+                    className='text-ink underline-offset-2 hover:underline'
+                  >
+                    {ref.resourceTitle}
+                  </Link>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )
+        : null}
+    </div>
+  )
+}
+
 // --- Export to Word: the audit's "outputs with references intact" ----------
+
+/** A synthesis artefact formatted as Word-friendly sections, references included. */
+function synthesisArtefactHtml(artefact: InvestigationArtefact): string {
+  const data = readSynthesisData(artefact.data)
+  const list = (items: string[]) =>
+    `<ul>${items.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</ul>`
+
+  return `<h2>${escapeHtml(artefact.title)}</h2>` +
+    (data.summary ? `<p>${escapeHtml(data.summary)}</p>` : '') +
+    (data.supported.length > 0
+      ? `<h3>Established by the evidence</h3>${list(data.supported)}`
+      : '') +
+    (data.contested.length > 0 ? `<h3>Contested</h3>${list(data.contested)}` : '') +
+    (data.gaps.length > 0 ? `<h3>Gaps</h3>${list(data.gaps)}` : '') +
+    (data.references.length > 0
+      ? `<h3>References</h3><ol>${
+        data.references.map((r) => `<li>${escapeHtml(r.resourceTitle)}</li>`).join('')
+      }</ol>`
+      : '')
+}
 
 function investigationToHtml(investigation: Investigation): { title: string; bodyHtml: string } {
   const title = investigation.name || 'Investigation'
@@ -547,6 +775,11 @@ function investigationToHtml(investigation: Investigation): { title: string; bod
     ? `<h2>Notes</h2><p>${escapeHtml(investigation.notes).replace(/\n/g, '<br>')}</p>`
     : ''
 
+  const synthesisHtml = investigation.artefacts
+    .filter((a) => a.kind === 'synthesis')
+    .map(synthesisArtefactHtml)
+    .join('')
+
   const sorted = [...investigation.evidence].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   )
@@ -557,7 +790,7 @@ function investigationToHtml(investigation: Investigation): { title: string; bod
       sorted
         .map((item) => {
           const refIndex = sourceTitles.indexOf(item.resourceTitle) + 1
-          const scoreText = item.score != null ? `${Math.round(item.score * 100)}%` : 'n/a'
+          const scoreText = item.score != null ? `${formatScorePercent(item.score)}%` : 'n/a'
           const noteHtml = item.note.trim().length > 0
             ? `<p><em>Note:</em> ${escapeHtml(item.note)}</p>`
             : ''
@@ -574,7 +807,10 @@ function investigationToHtml(investigation: Investigation): { title: string; bod
     ? `<h2>References</h2><ol>${sourceTitles.map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ol>`
     : ''
 
-  return { title, bodyHtml: `${questionHtml}${notesHtml}${evidenceHtml}${referencesHtml}` }
+  return {
+    title,
+    bodyHtml: `${questionHtml}${notesHtml}${synthesisHtml}${evidenceHtml}${referencesHtml}`,
+  }
 }
 
 /** Word-compatible HTML document shell - opens cleanly as a .doc in Word. */
@@ -594,9 +830,10 @@ function wordDocumentHtml(title: string, bodyHtml: string): string {
 <![endif]-->
 <style>
 body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; line-height: 1.5; }
-h1, h2 { font-family: Arial, Helvetica, sans-serif; color: #111111; }
+h1, h2, h3 { font-family: Arial, Helvetica, sans-serif; color: #111111; }
 h1 { font-size: 22pt; margin-bottom: 12pt; }
 h2 { font-size: 14pt; margin-top: 18pt; margin-bottom: 6pt; }
+h3 { font-size: 12pt; margin-top: 12pt; margin-bottom: 4pt; }
 blockquote { margin: 8pt 0; padding: 6pt 12pt; border-left: 3px solid #cccccc; color: #333333; font-style: italic; }
 ol, ul { margin: 6pt 0; padding-left: 22pt; }
 p { margin: 6pt 0; font-size: 11pt; }
@@ -633,6 +870,99 @@ function exportInvestigationToWord(investigation: Investigation) {
   URL.revokeObjectURL(url)
 }
 
+// --- Tags: v1's stand-in for claims/hypotheses - group and filter evidence -
+
+/** Every tag in use across the investigation's evidence, with a count, most-used first. */
+function tagCounts(evidence: EvidenceItem[]): [string, number][] {
+  const counts = new Map<string, number>()
+  for (const item of evidence) {
+    for (const tag of item.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+  }
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+}
+
+/** Clusters evidence under tag headings; untagged items land in their own group, last. */
+function groupEvidenceByTag(evidence: EvidenceItem[]): { tag: string; items: EvidenceItem[] }[] {
+  const groups = new Map<string, EvidenceItem[]>()
+  for (const item of evidence) {
+    const tags = item.tags.length > 0 ? item.tags : ['Untagged']
+    for (const tag of tags) {
+      const bucket = groups.get(tag)
+      if (bucket) bucket.push(item)
+      else groups.set(tag, [item])
+    }
+  }
+  return Array.from(groups.entries())
+    .sort((a, b) => {
+      if (a[0] === 'Untagged') return 1
+      if (b[0] === 'Untagged') return -1
+      return a[0].localeCompare(b[0])
+    })
+    .map(([tag, items]) => ({ tag, items }))
+}
+
+function TagsSection({
+  evidence,
+  activeTag,
+  onSelectTag,
+  groupByTag,
+  onToggleGroupByTag,
+}: {
+  evidence: EvidenceItem[]
+  activeTag: string | null
+  onSelectTag: (tag: string | null) => void
+  groupByTag: boolean
+  onToggleGroupByTag: () => void
+}) {
+  const tags = tagCounts(evidence)
+
+  return (
+    <section className='rp-card p-5'>
+      <h2 className='text-sm font-semibold text-ink'>Tags</h2>
+      <p className='mt-1 text-sm text-ink-2'>
+        Tag evidence to group it under the claims or themes you are testing.
+      </p>
+      {tags.length === 0
+        ? (
+          <p className='mt-3 text-sm italic text-ink-3'>
+            No tags yet - add one from any evidence card below.
+          </p>
+        )
+        : (
+          <div className='mt-3 flex flex-wrap items-center gap-1.5'>
+            <button
+              type='button'
+              aria-pressed={activeTag === null}
+              onClick={() => onSelectTag(null)}
+              className={`rp-chip ${activeTag === null ? 'rp-chip-active' : ''}`}
+            >
+              All ({evidence.length})
+            </button>
+            {tags.map(([tag, count]) => (
+              <button
+                key={tag}
+                type='button'
+                aria-pressed={activeTag === tag}
+                onClick={() => onSelectTag(activeTag === tag ? null : tag)}
+                className={`rp-chip ${activeTag === tag ? 'rp-chip-active' : ''}`}
+              >
+                {tag} ({count})
+              </button>
+            ))}
+            <button
+              type='button'
+              aria-pressed={groupByTag}
+              onClick={onToggleGroupByTag}
+              className={`rp-chip ml-auto ${groupByTag ? 'rp-chip-active' : ''}`}
+            >
+              Group by tag
+            </button>
+          </div>
+        )}
+    </section>
+  )
+}
+
 // ---------------------------------------------------------------------------
 
 const VERDICT_FILTERS = ['all', 'supports', 'partial', 'contradicts', 'not-relevant'] as const
@@ -641,7 +971,17 @@ type VerdictFilter = typeof VERDICT_FILTERS[number]
 export function InvestigationDetailPage() {
   const { config } = useOutletContext<TenantOutletContext>()
   const { id } = useParams<{ id: string }>()
+  const queryClient = useQueryClient()
   const [verdictFilter, setVerdictFilter] = useState<VerdictFilter>('all')
+  const [tagFilter, setTagFilter] = useState<string | null>(null)
+  const [groupByTag, setGroupByTag] = useState(false)
+  const [highlightArtefactId, setHighlightArtefactId] = useState<string | null>(null)
+  const [synthesisMessage, setSynthesisMessage] = useState('')
+  const synthesisTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => {
+    if (synthesisTimerRef.current) clearTimeout(synthesisTimerRef.current)
+  }, [])
 
   const {
     data: investigation,
@@ -653,6 +993,42 @@ export function InvestigationDetailPage() {
     queryKey: ['investigation', config.slug, id],
     queryFn: () => getInvestigation(config.slug, id ?? ''),
     enabled: Boolean(id),
+  })
+
+  const evidenceCount = investigation?.evidence.length ?? 0
+
+  const synthesise = useMutation({
+    mutationFn: () => synthesiseInvestigation(config.slug, investigation?.id ?? ''),
+    onMutate: () => {
+      setSynthesisMessage(
+        `Reading ${evidenceCount} evidence ${evidenceCount === 1 ? 'item' : 'items'}…`,
+      )
+      if (synthesisTimerRef.current) clearTimeout(synthesisTimerRef.current)
+      synthesisTimerRef.current = setTimeout(() => {
+        setSynthesisMessage('Still working - larger evidence sets can take up to thirty seconds…')
+      }, 8000)
+    },
+    onSuccess: (result) => {
+      if (synthesisTimerRef.current) clearTimeout(synthesisTimerRef.current)
+      setSynthesisMessage('')
+      void queryClient.invalidateQueries({
+        queryKey: ['investigation', config.slug, investigation?.id ?? ''],
+      })
+      setHighlightArtefactId(result.artefact.id)
+      globalThis.setTimeout(() => {
+        document.getElementById(`artefact-${result.artefact.id}`)?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        })
+      }, 60)
+      globalThis.setTimeout(() => {
+        setHighlightArtefactId((current) => current === result.artefact.id ? null : current)
+      }, 5000)
+    },
+    onError: () => {
+      if (synthesisTimerRef.current) clearTimeout(synthesisTimerRef.current)
+      setSynthesisMessage('')
+    },
   })
 
   if (isLoading) {
@@ -696,9 +1072,9 @@ export function InvestigationDetailPage() {
     contradicts: sortedEvidence.filter((e) => e.verdict === 'contradicts').length,
     'not-relevant': sortedEvidence.filter((e) => e.verdict === 'not-relevant').length,
   }
-  const filteredEvidence = verdictFilter === 'all'
-    ? sortedEvidence
-    : sortedEvidence.filter((e) => e.verdict === verdictFilter)
+  const filteredEvidence = sortedEvidence
+    .filter((e) => verdictFilter === 'all' || e.verdict === verdictFilter)
+    .filter((e) => tagFilter === null || e.tags.includes(tagFilter))
 
   return (
     <main className='mx-auto max-w-3xl px-6 py-10'>
@@ -714,20 +1090,51 @@ export function InvestigationDetailPage() {
         <NotebookSection slug={config.slug} investigation={investigation} />
       </div>
 
+      <div className='mt-6'>
+        <TagsSection
+          evidence={investigation.evidence}
+          activeTag={tagFilter}
+          onSelectTag={setTagFilter}
+          groupByTag={groupByTag}
+          onToggleGroupByTag={() => setGroupByTag((g) => !g)}
+        />
+      </div>
+
       <section className='mt-6'>
         <div className='flex flex-wrap items-center justify-between gap-3'>
           <h2 className='text-sm font-semibold text-ink'>
             Evidence <span className='font-normal text-ink-3'>({sortedEvidence.length})</span>
           </h2>
-          <button
-            type='button'
-            disabled={sortedEvidence.length === 0}
-            onClick={() => exportInvestigationToWord(investigation)}
-            className='rp-btn rp-btn-outline disabled:cursor-not-allowed'
-          >
-            Export to Word
-          </button>
+          <div className='flex flex-wrap items-center gap-2'>
+            <button
+              type='button'
+              disabled={sortedEvidence.length === 0 || synthesise.isPending}
+              onClick={() => void synthesise.mutate()}
+              className='rp-btn rp-btn-primary disabled:cursor-not-allowed'
+            >
+              {synthesise.isPending ? 'Synthesising…' : 'Synthesise the evidence'}
+            </button>
+            <button
+              type='button'
+              disabled={sortedEvidence.length === 0}
+              onClick={() => exportInvestigationToWord(investigation)}
+              className='rp-btn rp-btn-outline disabled:cursor-not-allowed'
+            >
+              Export to Word
+            </button>
+          </div>
         </div>
+
+        {synthesise.isPending
+          ? <p aria-live='polite' className='mt-2 text-xs text-ink-3'>{synthesisMessage}</p>
+          : null}
+        {synthesise.isError
+          ? (
+            <p className='mt-2 text-xs' style={{ color: 'var(--rp-bad-ink)' }}>
+              Could not synthesise the evidence - try again.
+            </p>
+          )
+          : null}
 
         {sortedEvidence.length > 0
           ? (
@@ -759,8 +1166,33 @@ export function InvestigationDetailPage() {
             ? (
               <EmptyState
                 title='No evidence matches this filter'
-                description='Try a different verdict, or choose All to see everything.'
+                description='Try a different verdict or tag, or clear filters to see everything.'
               />
+            )
+            : groupByTag
+            ? (
+              <div className='space-y-5'>
+                {groupEvidenceByTag(filteredEvidence).map((group) => (
+                  <div key={group.tag}>
+                    <h3 className='mb-2 text-xs font-semibold uppercase tracking-[0.06em] text-ink-3'>
+                      {group.tag}{' '}
+                      <span className='font-normal normal-case tracking-normal'>
+                        ({group.items.length})
+                      </span>
+                    </h3>
+                    <div className='space-y-3'>
+                      {group.items.map((item) => (
+                        <EvidenceCard
+                          key={item.id}
+                          slug={config.slug}
+                          investigationId={investigation.id}
+                          item={item}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             )
             : (
               <div className='space-y-3'>
@@ -792,9 +1224,18 @@ export function InvestigationDetailPage() {
             )
             : (
               <div className='space-y-2'>
-                {investigation.artefacts.map((artefact) => (
-                  <ArtefactRow key={artefact.id} artefact={artefact} />
-                ))}
+                {investigation.artefacts.map((artefact) =>
+                  artefact.kind === 'synthesis'
+                    ? (
+                      <SynthesisArtefactCard
+                        key={artefact.id}
+                        slug={config.slug}
+                        artefact={artefact}
+                        highlighted={highlightArtefactId === artefact.id}
+                      />
+                    )
+                    : <ArtefactRow key={artefact.id} artefact={artefact} />
+                )}
               </div>
             )}
         </div>

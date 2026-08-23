@@ -2,6 +2,7 @@ import { type FormEvent, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useOutletContext } from 'react-router-dom'
 import { createInvestigation, type InvestigationMeta, listInvestigations } from '../api/client.ts'
+import { MakeCurrentToggle, useCurrentInvestigation } from '../components/SaveEvidence.tsx'
 import { EmptyState, ErrorCard, Skeleton } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
@@ -37,14 +38,22 @@ function StatusBadge({ status }: { status: 'active' | 'closed' }) {
 function InvestigationCard(
   { slug, investigation }: { slug: string; investigation: InvestigationMeta },
 ) {
+  const current = useCurrentInvestigation(slug)
+  const isCurrent = current?.id === investigation.id
+
   return (
-    <Link
-      to={`/t/${slug}/investigations/${investigation.id}`}
-      className='rp-card rp-focus flex flex-col gap-2.5 p-4 transition-colors duration-150 hover:bg-[var(--rp-surface-2)]'
-    >
+    <div className='rp-card relative flex flex-col gap-2.5 p-4 transition-colors duration-150 hover:bg-[var(--rp-surface-2)]'>
+      <Link
+        to={`/t/${slug}/investigations/${investigation.id}`}
+        aria-label={investigation.name || 'Untitled investigation'}
+        className='rp-focus absolute inset-0 rounded-[inherit]'
+      />
       <div className='flex items-start justify-between gap-3'>
         <h3 className='min-w-0 truncate text-sm font-semibold text-ink'>{investigation.name}</h3>
-        <StatusBadge status={investigation.status} />
+        <div className='flex shrink-0 items-center gap-1.5'>
+          {isCurrent ? <span className='rp-badge rp-badge-ok'>Current</span> : null}
+          <StatusBadge status={investigation.status} />
+        </div>
       </div>
       {investigation.question
         ? <p className='rp-clamp-2 text-sm leading-relaxed text-ink-2'>{investigation.question}</p>
@@ -56,7 +65,10 @@ function InvestigationCard(
         </span>
         <span>Updated {timeAgo(investigation.updatedAt)}</span>
       </div>
-    </Link>
+      <div className='relative z-10 flex justify-end'>
+        <MakeCurrentToggle slug={slug} investigation={investigation} />
+      </div>
+    </div>
   )
 }
 

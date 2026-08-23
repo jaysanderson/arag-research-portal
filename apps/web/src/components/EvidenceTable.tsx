@@ -11,6 +11,13 @@ import { SaveEvidenceButton } from './SaveEvidence.tsx'
 // ephemeral - gone the moment the modal closes) with a static table anyone
 // can scan without playing a walk-through, and a one-click "Save" straight
 // into an investigation's evidence log.
+//
+// When the caller knows which sources the answer actually cited, it passes
+// `citations` and the table partitions itself: cited sources first, each
+// carrying the same bracketed [n] badge as the inline marker in the answer,
+// then a quiet separator, then everything else that was retrieved but never
+// used. Without `citations` the table renders one flat, unordered list (the
+// "closest passages found" case under a refusal, where nothing was cited).
 // ---------------------------------------------------------------------------
 
 /** Cap on how many sources get an AI verdict in one call - keeps the judge call fast. */
@@ -23,12 +30,22 @@ export interface EvidenceSource {
   passage?: string
   /** Retrieval relevance in [0, 1], rendered as a percentage. */
   score?: number | null
+  /** Page the matched passage sits on (PDFs), for open-at-page links. */
+  matchedPage?: number
+  /** True when the matched passage looks like a reference list or front matter. */
+  referenceChunk?: boolean
 }
 
 export interface EvidenceVerdictInfo {
   verdict: string
   /** One-line AI sentence on how this source relates to the question. */
   relevance: string
+}
+
+/** A citation as it appears in the answer text: `[index]` pointing at `resourceId`. */
+export interface EvidenceCitation {
+  index: number
+  resourceId: string
 }
 
 const VERDICT_BADGE_CLASS: Record<string, string> = {
@@ -53,6 +70,12 @@ function verdictLabel(verdict: string): string {
   return VERDICT_LABEL[verdict] ?? verdict
 }
 
+/** Appends `?page=<n>` (or `&page=<n>` alongside an existing `?passage=`) so the reader lands on the matched page. */
+function withPage(href: string, page: number | undefined): string {
+  if (page === undefined) return href
+  return `${href}${href.includes('?') ? '&' : '?'}page=${page}`
+}
+
 /** One row: a retrieved source, its match strength, its AI verdict, and a save action. */
 function EvidenceRow({
   slug,
@@ -60,30 +83,64 @@ function EvidenceRow({
   source,
   verdict,
   judging,
+  citationIndices,
+  citationsKnown,
+  anchorId,
 }: {
   slug: string
   question: string
   source: EvidenceSource
   verdict?: EvidenceVerdictInfo
   judging: boolean
+  /** Inline `[n]` marker(s) in the answer that point at this source, in ascending order. */
+  citationIndices: number[]
+  /** Whether the caller supplied `citations` at all - without it "not cited" can't be claimed. */
+  citationsKnown: boolean
+  anchorId?: string
 }) {
   const [expanded, setExpanded] = useState(false)
   const passage = source.passage?.trim() || undefined
   const scorePct = typeof source.score === 'number' ? Math.round(source.score * 100) : null
   const isWeak = scorePct !== null && scorePct < 35
+  const isCited = citationIndices.length > 0
+  const href = withPage(citationHref(slug, source.id, passage), source.matchedPage)
+  const showUnusedFlag = citationsKnown && !isCited && verdict?.verdict === 'supports'
 
   return (
-    <div className='rounded-[var(--rp-radius)] border border-line bg-surface-2 p-3'>
+    <div
+      id={anchorId}
+      className='rounded-[var(--rp-radius)] border border-line bg-surface-2 p-3'
+    >
       <div className='flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5'>
-        <Link
-          to={citationHref(slug, source.id, passage)}
-          className='rp-clamp-2 min-w-0 flex-1 text-sm font-medium text-ink underline-offset-2 hover:underline'
-        >
-          {source.title}
-        </Link>
+        <div className='flex min-w-0 flex-1 items-start gap-1.5'>
+          {isCited
+            ? (
+              <span className='mt-0.5 flex shrink-0 items-center gap-1'>
+                {citationIndices.map((n) => (
+                  <span
+                    key={n}
+                    className='inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white'
+                    style={{ backgroundColor: 'var(--rp-accent)' }}
+                  >
+                    {n}
+                  </span>
+                ))}
+              </span>
+            )
+            : null}
+          <Link
+            to={href}
+            className='rp-clamp-2 min-w-0 flex-1 text-sm font-medium text-ink underline-offset-2 hover:underline'
+          >
+            {source.title}
+          </Link>
+        </div>
         <div className='flex shrink-0 flex-wrap items-center gap-1.5'>
           {scorePct !== null
             ? <span className='text-xs tabular-nums text-ink-3'>{scorePct}%</span>
+            : null}
+          {source.referenceChunk
+            ? <span className='text-[11px] text-ink-3'>reference list</span>
             : null}
           {isWeak ? <span className='rp-badge rp-badge-warn'>weak match</span> : null}
           {judging
@@ -99,9 +156,19 @@ function EvidenceRow({
                 {verdictLabel(verdict.verdict)}
               </span>
             )
-            : null}
+            : <span className='text-xs text-ink-3'>Verdict unavailable</span>}
         </div>
       </div>
+
+      {showUnusedFlag
+        ? (
+          <p className='mt-1.5'>
+            <span className='rp-badge rp-badge-warn'>
+              Supporting evidence not used in the answer
+            </span>
+          </p>
+        )
+        : null}
 
       {passage
         ? (
@@ -166,6 +233,10 @@ export interface EvidenceTableProps {
   judge?: boolean
   /** Header label - defaults to "Evidence", overridable for e.g. "Closest passages found". */
   title?: string
+  /** The answer's inline `[n]` citations - when supplied, cited sources render first with a matching badge. */
+  citations?: EvidenceCitation[]
+  /** Prefix for each row's DOM id (`${anchorPrefix}-src-${resourceId}`), so a page can scroll to a row. */
+  anchorPrefix?: string
 }
 
 /**
@@ -185,6 +256,8 @@ export function EvidenceTable({
   onVerdicts,
   judge = true,
   title = 'Evidence',
+  citations,
+  anchorPrefix,
 }: EvidenceTableProps) {
   const [verdicts, setVerdicts] = useState<Record<string, EvidenceVerdictInfo>>(
     initialVerdicts ?? {},
@@ -242,6 +315,46 @@ export function EvidenceTable({
 
   if (sources.length === 0) return null
 
+  // Partition into cited (ordered by their inline marker) and uncited, only
+  // when the caller actually knows which sources were cited - otherwise
+  // (e.g. the refusal path's "closest passages") every row renders in
+  // retrieval order with no separator.
+  const citationsBySource = new Map<string, number[]>()
+  for (const citation of citations ?? []) {
+    const list = citationsBySource.get(citation.resourceId)
+    if (list) list.push(citation.index)
+    else citationsBySource.set(citation.resourceId, [citation.index])
+  }
+  for (const list of citationsBySource.values()) list.sort((a, b) => a - b)
+
+  const citationsKnown = citations !== undefined
+  const citedSources = citationsKnown
+    ? sources
+      .filter((source) => citationsBySource.has(source.id))
+      .sort((a, b) =>
+        Math.min(...citationsBySource.get(a.id)!) - Math.min(...citationsBySource.get(b.id)!)
+      )
+    : sources
+  const uncitedSources = citationsKnown
+    ? sources.filter((source) => !citationsBySource.has(source.id))
+    : []
+
+  function renderRow(source: EvidenceSource) {
+    return (
+      <EvidenceRow
+        key={source.id}
+        slug={slug}
+        question={question}
+        source={source}
+        verdict={verdicts[source.id]}
+        judging={judgingIds.has(source.id) && !verdicts[source.id]}
+        citationIndices={citationsBySource.get(source.id) ?? []}
+        citationsKnown={citationsKnown}
+        anchorId={anchorPrefix ? `${anchorPrefix}-src-${source.id}` : undefined}
+      />
+    )
+  }
+
   return (
     <div>
       <div className='flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1'>
@@ -253,16 +366,22 @@ export function EvidenceTable({
         </p>
       </div>
       <div className='mt-2 space-y-2'>
-        {sources.map((source) => (
-          <EvidenceRow
-            key={source.id}
-            slug={slug}
-            question={question}
-            source={source}
-            verdict={verdicts[source.id]}
-            judging={judgingIds.has(source.id) && !verdicts[source.id]}
-          />
-        ))}
+        {citedSources.map(renderRow)}
+
+        {uncitedSources.length > 0
+          ? (
+            <>
+              <div className='flex items-center gap-2 pt-1' role='separator'>
+                <span className='h-px flex-1' style={{ backgroundColor: 'var(--rp-line)' }} />
+                <span className='shrink-0 text-[11px] font-medium uppercase tracking-wide text-ink-3'>
+                  Also retrieved (not used in the answer)
+                </span>
+                <span className='h-px flex-1' style={{ backgroundColor: 'var(--rp-line)' }} />
+              </div>
+              {uncitedSources.map(renderRow)}
+            </>
+          )
+          : null}
       </div>
     </div>
   )

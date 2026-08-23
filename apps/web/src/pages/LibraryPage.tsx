@@ -5,7 +5,7 @@ import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
 import type { CatalogItem } from '@research-portal/core'
 import { getCatalog, getFacets, summarizeResources } from '../api/client.ts'
 import { ResourceThumb } from '../components/ResourceThumb.tsx'
-import { EmptyState, ErrorCard, Skeleton } from '../components/ui.tsx'
+import { EmptyState, ErrorCard, prettyLabel, Skeleton } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
 const PAGE_SIZE = 24
@@ -33,6 +33,19 @@ function formatDate(iso: string): string {
   if (Number.isNaN(date.getTime())) return iso
   return date.toLocaleDateString('en-AU', { year: 'numeric', month: 'short', day: 'numeric' })
 }
+
+/** Publish year from an ISO date, or null when the date is missing/unparseable. */
+function formatYear(iso: string): string | null {
+  const match = /^(\d{4})/.exec(iso)
+  return match ? match[1] ?? null : null
+}
+
+/**
+ * Catalogue items may carry the platform's `kind` label and the source's
+ * original publish date - fields not yet in the shared CatalogItem type, so
+ * they're read defensively here and simply omitted when absent.
+ */
+type CatalogItemMeta = CatalogItem & { kind?: string; published?: string }
 
 function SelectionMark({ selected }: { selected: boolean }) {
   return (
@@ -63,19 +76,22 @@ function SelectionMark({ selected }: { selected: boolean }) {
 }
 
 function LibraryCard(
-  { item, slug, topicLabel, selecting, selected, onToggleSelect }: {
+  { item, slug, topicLabel, organisation, selecting, selected, onToggleSelect }: {
     item: CatalogItem
     slug: string
     topicLabel: (id: string) => string | undefined
+    organisation: string
     selecting?: boolean
     selected?: boolean
     onToggleSelect?: (id: string) => void
   },
 ) {
+  const meta = item as CatalogItemMeta
   const topicLabels = item.topicIds
     .map((id) => topicLabel(id))
     .filter((label): label is string => Boolean(label))
   const statusInfo = item.status === 'processed' ? null : STATUS_BADGES[item.status]
+  const publishedYear = meta.published ? formatYear(meta.published) : null
 
   const body = (
     <>
@@ -94,9 +110,16 @@ function LibraryCard(
         <h3 className='rp-clamp-2 text-sm font-semibold leading-snug text-ink'>
           {item.title}
         </h3>
-        {topicLabels.length > 0
+        {topicLabels.length > 0 || meta.kind
           ? (
             <div className='flex flex-wrap gap-1'>
+              {meta.kind
+                ? (
+                  <span className='rp-badge rp-badge-quiet'>
+                    {prettyLabel(meta.kind, organisation)}
+                  </span>
+                )
+                : null}
               {topicLabels.slice(0, 3).map((label) => (
                 <span
                   key={label}
@@ -108,10 +131,11 @@ function LibraryCard(
             </div>
           )
           : null}
-        {item.created
+        {item.created || publishedYear
           ? (
-            <p className='mt-auto pt-1 text-xs tabular-nums text-ink-3'>
-              {formatDate(item.created)}
+            <p className='mt-auto flex flex-wrap items-baseline gap-x-1.5 pt-1 text-xs tabular-nums text-ink-3'>
+              {item.created ? <span>{formatDate(item.created)}</span> : null}
+              {publishedYear ? <span>Published {publishedYear}</span> : null}
             </p>
           )
           : null}
@@ -644,6 +668,7 @@ export function LibraryPage() {
                       item={item}
                       slug={config.slug}
                       topicLabel={topicLabel}
+                      organisation={config.branding.organisation}
                       selecting={selecting}
                       selected={selectedIds.has(item.id)}
                       onToggleSelect={toggleSelect}

@@ -16,7 +16,7 @@ import {
 import { ResourceThumb } from '../components/ResourceThumb.tsx'
 import { SaveEvidenceButton } from '../components/SaveEvidence.tsx'
 import { TypeaheadDropdown, type TypeaheadItem, useTypeahead } from '../components/Typeahead.tsx'
-import { EmptyState, ErrorCard, Skeleton, TypeBadge } from '../components/ui.tsx'
+import { EmptyState, ErrorCard, prettyLabel, Skeleton, TypeBadge } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
 const MODES: { value: RetrievalMode; label: string }[] = [
@@ -37,12 +37,21 @@ const STRENGTH_OPTIONS: { value: MatchStrength; label: string }[] = [
   { value: 'strong', label: 'Strong (60%+)' },
 ]
 
-function RelevanceMeter({ relevance }: { relevance: number }) {
+/** Publish year from an ISO date, or null when the date is missing/unparseable. */
+function formatYear(iso: string): string | null {
+  const match = /^(\d{4})/.exec(iso)
+  return match ? match[1] ?? null : null
+}
+
+function RelevanceMeter(
+  { relevance, referenceChunk }: { relevance: number; referenceChunk?: boolean },
+) {
   const percent = Math.round(relevance * 100)
   const weak = relevance < WEAK_MATCH_THRESHOLD
 
   return (
     <div className='flex shrink-0 items-center gap-2'>
+      {referenceChunk ? <span className='text-[11px] text-ink-3'>reference list</span> : null}
       {weak ? <span className='text-[11px] text-ink-3'>weak match</span> : null}
       <div
         className='h-1 w-20 overflow-hidden rounded-[2px] bg-surface-3'
@@ -62,14 +71,29 @@ function RelevanceMeter({ relevance }: { relevance: number }) {
   )
 }
 
+/** Deep link into the reader, carrying the matched passage and (for PDFs) the page it sits on. */
+function resourceLink(slug: string, resource: ScoredResource): string {
+  const params = new URLSearchParams()
+  if (resource.matchedPassage) params.set('passage', resource.matchedPassage.slice(0, 300))
+  if (resource.matchedPage) params.set('page', String(resource.matchedPage))
+  const query = params.toString()
+  return `/t/${slug}/library/${resource.id}${query ? `?${query}` : ''}`
+}
+
 /**
  * One result. The matched passage is the point of the card - it is the citation
  * in context, which is why this view needs no synthesised answer above it.
  */
 function ResultCard(
-  { resource, slug, query }: { resource: ScoredResource; slug: string; query: string },
+  { resource, slug, query, kindLabel }: {
+    resource: ScoredResource
+    slug: string
+    query: string
+    kindLabel: (id: string) => string
+  },
 ) {
   const keyFacts = resource.keyFacts.slice(0, 3)
+  const year = resource.published ? formatYear(resource.published) : null
 
   return (
     <article id={`result-${resource.id}`} className='rp-card scroll-mt-6 p-4 sm:p-5'>
@@ -80,12 +104,23 @@ function ResultCard(
 
         <div className='min-w-0 flex-1'>
           <div className='flex flex-wrap items-center justify-between gap-2'>
-            <TypeBadge type={resource.type} />
-            <RelevanceMeter relevance={resource.relevance} />
+            <div className='flex flex-wrap items-center gap-1.5'>
+              <TypeBadge type={resource.type} />
+              {resource.kind
+                ? <span className='rp-badge rp-badge-quiet'>{kindLabel(resource.kind)}</span>
+                : null}
+              {year
+                ? <span className='text-xs font-medium tabular-nums text-ink-3'>{year}</span>
+                : null}
+            </div>
+            <RelevanceMeter
+              relevance={resource.relevance}
+              referenceChunk={resource.referenceChunk}
+            />
           </div>
 
           <h3 className='mt-2.5 text-base font-semibold tracking-[-0.01em] text-ink'>
-            <Link to={`/t/${slug}/library/${resource.id}`} className='rp-focus rounded-[4px]'>
+            <Link to={resourceLink(slug, resource)} className='rp-focus rounded-[4px]'>
               {resource.title}
             </Link>
           </h3>
@@ -397,6 +432,10 @@ export function SearchPage() {
     const raw = searchParams.get('topics')
     return raw ? raw.split(',').filter((id) => id.length > 0) : []
   }, [searchParams])
+  const selectedKinds = useMemo(() => {
+    const raw = searchParams.get('kinds')
+    return raw ? raw.split(',').filter((id) => id.length > 0) : []
+  }, [searchParams])
   const strength: MatchStrength = searchParams.get('strength') === 'strong' ? 'strong' : 'all'
 
   const [draft, setDraft] = useState(q)
@@ -428,11 +467,19 @@ export function SearchPage() {
     updateParams({ topics: Array.from(set).join(',') || null })
   }
 
+  function toggleKind(id: string) {
+    const set = new Set(selectedKinds)
+    if (set.has(id)) set.delete(id)
+    else set.add(id)
+    updateParams({ kinds: Array.from(set).join(',') || null })
+  }
+
   function setStrength(next: MatchStrength) {
     updateParams({ strength: next === 'all' ? null : next })
   }
 
   const topicLabel = (id: string) => config.topics.find((topic) => topic.id === id)?.label ?? id
+  const kindLabel = (id: string) => prettyLabel(id, config.branding.organisation)
 
   // Entities sharpen the query in place; a resource title is a search of its own.
   const onPick = useCallback((item: TypeaheadItem) => {
@@ -449,9 +496,11 @@ export function SearchPage() {
 
   const { data: facets } = useQuery({
     queryKey: ['facets', config.slug],
-    queryFn: () => getFacets(config.slug, ['topic']),
+    queryFn: () => getFacets(config.slug, ['topic', 'kind']),
   })
   const topicCounts = facets?.topic ?? {}
+  const kindCounts = facets?.kind ?? {}
+  const kindIds = useMemo(() => Object.keys(kindCounts).sort(), [kindCounts])
 
   const {
     data: results,
@@ -460,8 +509,9 @@ export function SearchPage() {
     error,
     refetch,
   } = useQuery({
-    queryKey: ['search', config.slug, q, mode, selectedTopics.join(',')],
-    queryFn: () => searchTenantFull(config.slug, q, { mode, topicIds: selectedTopics }),
+    queryKey: ['search', config.slug, q, mode, selectedTopics.join(','), selectedKinds.join(',')],
+    queryFn: () =>
+      searchTenantFull(config.slug, q, { mode, topicIds: selectedTopics, kindIds: selectedKinds }),
     enabled: q.trim().length > 0,
   })
 
@@ -481,6 +531,13 @@ export function SearchPage() {
         onRemove: () => toggleTopic(id),
       }),
     )
+    for (const id of selectedKinds) {
+      chips.push({
+        key: `kind-${id}`,
+        label: kindLabel(id),
+        onRemove: () => toggleKind(id),
+      })
+    }
     if (strength === 'strong') {
       chips.push({
         key: 'strength',
@@ -490,7 +547,7 @@ export function SearchPage() {
     }
     return chips
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTopics, strength, config.topics])
+  }, [selectedTopics, selectedKinds, strength, config.topics, config.branding.organisation])
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -735,7 +792,57 @@ export function SearchPage() {
               )
               : null}
 
-            <div className={config.topics.length > 0 ? 'mt-5 border-t border-line pt-4' : ''}>
+            {kindIds.length > 0
+              ? (
+                <div className={config.topics.length > 0 ? 'mt-5 border-t border-line pt-4' : ''}>
+                  <div className='flex items-center justify-between gap-2'>
+                    <p className='rp-eyebrow text-ink-3'>Kind</p>
+                    {selectedKinds.length > 0
+                      ? (
+                        <button
+                          type='button'
+                          onClick={() => updateParams({ kinds: null })}
+                          className='text-xs font-medium text-[var(--rp-ink-3)] transition-colors duration-150 hover:text-[var(--rp-ink)]'
+                        >
+                          Clear
+                        </button>
+                      )
+                      : null}
+                  </div>
+                  <div className='mt-2.5 space-y-0.5'>
+                    {kindIds.map((id) => {
+                      const count = kindCounts[id] ?? 0
+                      const checked = selectedKinds.includes(id)
+                      const muted = count === 0 && !checked
+                      return (
+                        <label
+                          key={id}
+                          className={`flex cursor-pointer items-center gap-2.5 rounded-[6px] px-1 py-1 text-sm ${
+                            muted ? 'text-ink-3' : 'text-ink-2'
+                          }`}
+                        >
+                          <input
+                            type='checkbox'
+                            checked={checked}
+                            onChange={() => toggleKind(id)}
+                            className='h-4 w-4 shrink-0 rounded-[3px] border-line'
+                            style={{ accentColor: 'var(--rp-accent)' }}
+                          />
+                          <span className='min-w-0 flex-1'>{kindLabel(id)}</span>
+                          <span className='text-xs tabular-nums text-ink-3'>{count}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+              : null}
+
+            <div
+              className={(config.topics.length > 0 || kindIds.length > 0)
+                ? 'mt-5 border-t border-line pt-4'
+                : ''}
+            >
               <p className='rp-eyebrow text-ink-3'>Match strength</p>
               <div
                 className='mt-2.5 inline-flex overflow-hidden rounded-[6px] border border-line bg-surface'
@@ -897,6 +1004,7 @@ export function SearchPage() {
                             resource={resource}
                             slug={config.slug}
                             query={trimmedQuery}
+                            kindLabel={kindLabel}
                           />
                         ))}
                       </div>

@@ -69,7 +69,7 @@ const KIND_BY_ID = new Map(KINDS.map((k) => [k.id, k]))
 // shape surprises us.
 // ---------------------------------------------------------------------------
 
-type Rating = { dimension: string; assessment: string }
+type Rating = { dimension: string; assessment: string; source?: string }
 type ComparisonItem = { name: string; ratings: Rating[] }
 type ComparisonObject = { dimensions: string[]; items: ComparisonItem[] }
 
@@ -117,7 +117,11 @@ function isComparison(value: unknown): value is ComparisonObject {
       typeof item.name === 'string' &&
       Array.isArray(item.ratings) &&
       item.ratings.every(
-        (r) => isRecord(r) && typeof r.dimension === 'string' && typeof r.assessment === 'string',
+        (r) =>
+          isRecord(r) &&
+          typeof r.dimension === 'string' &&
+          typeof r.assessment === 'string' &&
+          (r.source === undefined || typeof r.source === 'string'),
       ),
   )
 }
@@ -194,6 +198,11 @@ function isAssessment(value: unknown): value is AssessmentObject {
 // Per-kind renderers
 // ---------------------------------------------------------------------------
 
+/** Source label truncated for the on-screen cell; the title attribute carries the full text. */
+function truncateSource(source: string, max = 40): string {
+  return source.length > max ? `${source.slice(0, max)}…` : source
+}
+
 function ComparisonTable({ data }: { data: ComparisonObject }) {
   return (
     <div className='overflow-x-auto rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface shadow-sm'>
@@ -229,7 +238,14 @@ function ComparisonTable({ data }: { data: ComparisonObject }) {
                     key={item.name}
                     className='border-l border-line px-4 py-3 align-top text-sm text-ink-2'
                   >
-                    {rating?.assessment ?? 'Not covered'}
+                    <div>{rating?.assessment ?? 'Not covered'}</div>
+                    {rating?.source
+                      ? (
+                        <div className='mt-1 text-xs text-ink-3' title={rating.source}>
+                          — {truncateSource(rating.source)}
+                        </div>
+                      )
+                      : null}
                   </td>
                 )
               })}
@@ -566,7 +582,11 @@ function artifactToHtml(
         const cells = object.items
           .map((item) => {
             const rating = item.ratings.find((r) => r.dimension === dim)
-            return `<td>${escapeHtml(rating?.assessment ?? 'Not covered')}</td>`
+            const assessment = escapeHtml(rating?.assessment ?? 'Not covered')
+            const sourceLine = rating?.source
+              ? `<br><small>&mdash; ${escapeHtml(rating.source)}</small>`
+              : ''
+            return `<td>${assessment}${sourceLine}</td>`
           })
           .join('')
         return `<tr><th scope="row">${escapeHtml(dim)}</th>${cells}</tr>`

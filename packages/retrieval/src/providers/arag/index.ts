@@ -451,6 +451,7 @@ export class AragProvider implements RetrievalProvider {
     params.set('page_number', String(opts.page ?? 0))
     params.set('page_size', String(opts.pageSize ?? 24))
     params.append('show', 'basic')
+    params.append('show', 'extra')
     params.set('sort_field', opts.sortField ?? 'created')
     params.set('sort_order', opts.sortOrder ?? 'desc')
     params.set('hidden', 'false')
@@ -476,6 +477,9 @@ export class AragProvider implements RetrievalProvider {
         topicIds: (r.usermetadata?.classifications ?? [])
           .filter((c) => c.labelset === 'topic' && c.label)
           .map((c) => c.label as string),
+        kind: (r.usermetadata?.classifications ?? [])
+          .find((c) => c.labelset === 'kind' && c.label)?.label,
+        published: r.extra?.metadata?.published,
       }
     })
     return { items, total: raw.fulltext?.total ?? raw.total ?? items.length }

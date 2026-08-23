@@ -22,13 +22,19 @@ import {
 import { AnswerStream } from '../components/AnswerStream.tsx'
 import { ResourceThumb } from '../components/ResourceThumb.tsx'
 import { SaveEvidenceButton } from '../components/SaveEvidence.tsx'
-import { ErrorCard, Skeleton, TypeBadge } from '../components/ui.tsx'
+import { ErrorCard, prettyLabel, Skeleton, TypeBadge } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
-function formatDate(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return iso
-  return date.toLocaleDateString('en-AU', { year: 'numeric', month: 'short', day: 'numeric' })
+/** Publish year from an ISO date, or null when the date is missing/unparseable. */
+function formatYear(iso: string): string | null {
+  const match = /^(\d{4})/.exec(iso)
+  return match ? match[1] ?? null : null
+}
+
+/** FRDC project number embedded in a title, e.g. "...FRDC 2018-190..." -> "2018-190". */
+function frdcProjectNumber(title: string): string | null {
+  const match = /FRDC\s*(\d{4}-\d{3})/i.exec(title)
+  return match ? match[1] ?? null : null
 }
 
 /** Lowercase + collapse whitespace, so passage matching survives punctuation/whitespace drift. */
@@ -304,28 +310,54 @@ function WebBody(
   )
 }
 
+/**
+ * The matched passage in its own quiet card, quoted above the PDF viewer -
+ * PDFs bury the same highlight far below a tall iframe, so the reader would
+ * otherwise never see it without scrolling past the embed first.
+ */
+function MatchedPassageCard({ passage, page }: { passage: string; page: number | null }) {
+  return (
+    <div className='rp-card p-4'>
+      <p className='rp-eyebrow text-ink-3'>Matched passage</p>
+      <blockquote
+        className='mt-2 border-l-2 bg-surface-2 py-2 pl-3 pr-2 text-sm italic leading-relaxed text-ink-2'
+        style={{ borderColor: 'var(--rp-accent)' }}
+      >
+        &ldquo;{passage}&rdquo;
+      </blockquote>
+      {page
+        ? <p className='mt-2 text-xs font-medium tabular-nums text-ink-3'>From page {page}</p>
+        : null}
+    </div>
+  )
+}
+
 function PdfBody(
-  { content, fileUrl, passage, flashIndex, forceOpen }: {
+  { content, fileUrl, passage, page, flashIndex, forceOpen }: {
     content: ResourceContent
     fileUrl: string | undefined
     passage: string | null
+    page: number | null
     flashIndex: number | null
     forceOpen: boolean
   },
 ) {
   const paragraphs = useJoinedParagraphs(content.texts)
+  const pdfSrc = fileUrl ? (page ? `${fileUrl}#page=${page}` : fileUrl) : undefined
   return (
     <div className='space-y-4'>
+      {passage ? <MatchedPassageCard passage={passage} page={page} /> : null}
+
       {fileUrl
         ? (
           <div>
             <iframe
-              src={fileUrl}
+              src={pdfSrc}
               className='h-[60vh] w-full rounded-[8px] border border-line bg-surface sm:h-[75vh]'
               title='PDF preview'
             />
             <a
-              href={fileUrl}
+              href={pdfSrc}
               target='_blank'
               rel='noopener noreferrer'
               className='mt-2 inline-block text-sm font-medium text-[var(--rp-ink-3)] transition-colors duration-150 hover:text-[var(--rp-ink)]'
@@ -435,11 +467,12 @@ function TextFileBody(
 
 /** Dispatches to the type-aware body for the resource's content kind. */
 function ResourceBody(
-  { slug, content, resourceSummary, passage, flashIndex, hasTextMatches }: {
+  { slug, content, resourceSummary, passage, page, flashIndex, hasTextMatches }: {
     slug: string
     content: ResourceContent
     resourceSummary: string
     passage: string | null
+    page: number | null
     flashIndex: number | null
     hasTextMatches: boolean
   },
@@ -463,6 +496,7 @@ function ResourceBody(
           content={content}
           fileUrl={fileUrl}
           passage={passage}
+          page={page}
           flashIndex={flashIndex}
           forceOpen={passage != null || hasTextMatches}
         />
@@ -498,13 +532,17 @@ function ResourceBody(
 
 /** Metadata the reader actually has to show - kind, topics, publish date, origin link. */
 function AboutPanel(
-  { resource, content, topicLabel }: {
+  { slug, resource, content, topicLabel, organisation }: {
+    slug: string
     resource: ResourceSummary
     content: ResourceContent | undefined
     topicLabel: (id: string) => string | undefined
+    organisation: string
   },
 ) {
   const originUrl = content?.originUrl
+  const year = resource.published ? formatYear(resource.published) : null
+  const projectNumber = frdcProjectNumber(resource.title)
 
   return (
     <div className='rp-card p-4'>
@@ -512,10 +550,20 @@ function AboutPanel(
 
       <div className='mt-3 flex flex-wrap items-center gap-2'>
         <TypeBadge type={resource.type} />
-        {resource.published
+        {resource.kind
+          ? (
+            <span className='rp-badge rp-badge-quiet'>
+              {prettyLabel(resource.kind, organisation)}
+            </span>
+          )
+          : null}
+        {year
+          ? <span className='text-xs font-medium tabular-nums text-ink-3'>Published {year}</span>
+          : null}
+        {projectNumber
           ? (
             <span className='text-xs font-medium tabular-nums text-ink-3'>
-              Published {formatDate(resource.published)}
+              Project {projectNumber}
             </span>
           )
           : null}
@@ -553,6 +601,18 @@ function AboutPanel(
           </a>
         )
         : null}
+
+      <div className='mt-3 border-t border-line pt-3'>
+        <SaveEvidenceButton
+          slug={slug}
+          label='Save document to investigation'
+          evidence={{
+            passage: resource.summary,
+            resourceId: resource.id,
+            resourceTitle: resource.title,
+          }}
+        />
+      </div>
     </div>
   )
 }
@@ -582,7 +642,7 @@ function useRelatedWork(slug: string, title: string, excludeId: string) {
       if (source.length > 0 && haystack.includes(source.toLowerCase())) names.add(target)
       else if (target.length > 0 && haystack.includes(target.toLowerCase())) names.add(source)
     }
-    return Array.from(names).filter((n) => n.length > 0).slice(0, 4)
+    return Array.from(names).filter((n) => n.length > 0).slice(0, 5)
   }, [relationsQuery.data, title])
 
   const fallbackEnabled = relationsQuery.isSuccess && graphMatches.length === 0 &&
@@ -596,7 +656,7 @@ function useRelatedWork(slug: string, title: string, excludeId: string) {
 
   const fallbackResults = useMemo(() => {
     if (!searchQuery.data) return []
-    return searchQuery.data.resources.filter((r) => r.id !== excludeId).slice(0, 4)
+    return searchQuery.data.resources.filter((r) => r.id !== excludeId).slice(0, 5)
   }, [searchQuery.data, excludeId])
 
   const loading = relationsQuery.isLoading || (fallbackEnabled && searchQuery.isLoading)
@@ -753,6 +813,8 @@ export function ResourceDetailPage() {
   const [searchParams] = useSearchParams()
   const passage = searchParams.get('passage')
   const qParam = searchParams.get('q')
+  const pageParam = Number(searchParams.get('page'))
+  const page = Number.isInteger(pageParam) && pageParam > 0 ? pageParam : null
 
   const [askDraft, setAskDraft] = useState('')
   const [askQuery, setAskQuery] = useState('')
@@ -930,6 +992,7 @@ export function ResourceDetailPage() {
                         content={content}
                         resourceSummary={resource.summary}
                         passage={passage}
+                        page={page}
                         flashIndex={flashIndex}
                         hasTextMatches={matchIndices.length > 0}
                       />
@@ -986,7 +1049,13 @@ export function ResourceDetailPage() {
               </div>
 
               <aside className='space-y-5 lg:sticky lg:top-20 lg:self-start'>
-                <AboutPanel resource={resource} content={content} topicLabel={topicLabel} />
+                <AboutPanel
+                  slug={config.slug}
+                  resource={resource}
+                  content={content}
+                  topicLabel={topicLabel}
+                  organisation={config.branding.organisation}
+                />
                 <MatchesPanel
                   indices={matchIndices}
                   paragraphs={paragraphs}

@@ -179,6 +179,10 @@ export const CatalogItemSchema = z.object({
   status: z.enum(['pending', 'processed', 'error']),
   created: z.string().optional(),
   topicIds: z.string().array(),
+  /** Label in the 'kind' labelset, when classified. */
+  kind: z.string().optional(),
+  /** ISO date the source was published, when known. */
+  published: z.string().optional(),
 })
 
 export const CatalogPageSchema = z.object({

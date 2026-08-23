@@ -108,11 +108,12 @@ export function getKnowledgeBoxStatus(slug: string): Promise<KnowledgeBoxStatus>
 export function searchTenantFull(
   slug: string,
   query: string,
-  opts: { mode?: RetrievalMode; topicIds?: string[] } = {},
+  opts: { mode?: RetrievalMode; topicIds?: string[]; kindIds?: string[] } = {},
 ): Promise<SearchResults> {
   const params = new URLSearchParams({ q: query })
   if (opts.mode) params.set('mode', opts.mode)
   if (opts.topicIds && opts.topicIds.length > 0) params.set('topics', opts.topicIds.join(','))
+  if (opts.kindIds && opts.kindIds.length > 0) params.set('kinds', opts.kindIds.join(','))
   return request<SearchResults>(`/api/t/${encodeURIComponent(slug)}/search?${params.toString()}`)
 }
 

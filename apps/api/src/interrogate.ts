@@ -322,7 +322,9 @@ export async function implementSuggestion(
           input.entityTypes.push({ label: entity.label })
         }
       }
-      input.examples.push(suggestion.example)
+      if (!input.examples.some((e) => e.text === suggestion.example?.text)) {
+        input.examples.push(suggestion.example)
+      }
     }
     let failure: string | null = null
     for await (const event of replaceGraphStrategy(management, config, input)) {
