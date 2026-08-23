@@ -26,7 +26,7 @@ import {
 } from './kg.ts'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import process from 'node:process'
-import { discoverLinks } from './crawl.ts'
+import { discoverLinks, extractMainContent } from './crawl.ts'
 import {
   InsightsStore,
   InvestigationStore,
@@ -131,6 +131,22 @@ const graphStrategySchema = z.object({
   }).array().min(1).max(30),
   applyExisting: z.boolean(),
 })
+const SYNTHESIS_SCHEMA = {
+  name: 'evidence_synthesis',
+  description: 'A cited brief synthesised strictly from supplied evidence passages',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      summary: { type: 'string' },
+      supported: { type: 'array', items: { type: 'string' } },
+      contested: { type: 'array', items: { type: 'string' } },
+      gaps: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['summary', 'supported', 'contested', 'gaps'],
+  },
+}
+
 const verdictsBodySchema = z.object({
   question: z.string().min(3).max(1000),
   sources: z.object({
@@ -341,7 +357,8 @@ export function buildApp(opts: BuildAppOptions): Hono {
     const modeRaw = c.req.query('mode')
     const mode = modeRaw === 'semantic' || modeRaw === 'keyword' ? modeRaw : 'hybrid'
     const topicIds = (c.req.query('topics') ?? '').split(',').filter(Boolean)
-    return c.json(await provider.search(config, parsed.data.q, { mode, topicIds }))
+    const kindIds = (c.req.query('kinds') ?? '').split(',').filter(Boolean)
+    return c.json(await provider.search(config, parsed.data.q, { mode, topicIds, kindIds }))
   })
 
   app.get('/api/t/:slug/catalog', async (c) => {
@@ -448,9 +465,19 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     if (!opts.management) return c.json({ nodes: [], edges: [] })
     const entity = c.req.query('entity')?.trim()
-    return c.json(
-      await opts.management.relationsGraph(config, entity ? { entity, topK: 150 } : {}),
-    )
+    const graph = await opts.management.relationsGraph(config, entity ? { entity, topK: 150 } : {})
+    // An empty graph with a registered agent means extraction is in flight -
+    // the page should say so rather than telling users to configure it.
+    let extracting = false
+    if (graph.edges.length === 0) {
+      try {
+        const agents = await opts.management.listAgents(config)
+        extracting = agents.some((agent) => agent.task === 'llm-graph')
+      } catch {
+        // status stays false
+      }
+    }
+    return c.json({ ...graph, extracting })
   })
 
   app.get('/api/t/:slug/entities', async (c) => {
@@ -813,6 +840,64 @@ export function buildApp(opts: BuildAppOptions): Hono {
     return artefact ? c.json(artefact) : c.json({ error: 'not_found' }, 404)
   })
 
+  // Synthesis from an investigation's own evidence - no fresh retrieval, so
+  // every statement traces to a passage the researcher chose to keep.
+  app.post('/api/t/:slug/investigations/:id/synthesise', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
+    const investigation = investigations.get(config.slug, clientId(c), c.req.param('id'))
+    if (!investigation) return c.json({ error: 'not_found' }, 404)
+    if (investigation.evidence.length === 0) {
+      return c.json({
+        error: 'no_evidence',
+        message: 'Save some evidence first - synthesis works only from kept passages.',
+      }, 400)
+    }
+    const numbered = investigation.evidence.slice(0, 40).map((item, index) =>
+      `[${index + 1}] (${item.verdict ?? 'unjudged'}) ${item.resourceTitle}:\n${
+        item.passage.slice(0, 1200)
+      }`
+    )
+    const prompt = [
+      `Research question: ${investigation.question || investigation.name}`,
+      '',
+      'Synthesise a brief STRICTLY from the numbered evidence passages below - never from ' +
+      'outside knowledge. Cite passages inline as [n]. In `summary` give a clear, careful ' +
+      'answer (or state that the evidence is insufficient). In `supported` list claims the ' +
+      'evidence establishes, each with its [n] citations. In `contested` list points where ' +
+      'passages disagree, naming both sides with citations. In `gaps` list what a researcher ' +
+      'would still need to find out. Australian English.',
+      '',
+      ...numbered,
+    ].join('\n')
+    try {
+      const result = await opts.management.askStructured(config, SYNTHESIS_SCHEMA, prompt)
+      const brief = result.object as {
+        summary?: string
+        supported?: string[]
+        contested?: string[]
+        gaps?: string[]
+      }
+      const references = investigation.evidence.slice(0, 40).map((item, index) => ({
+        n: index + 1,
+        resourceId: item.resourceId,
+        resourceTitle: item.resourceTitle,
+      }))
+      const artefact = investigations.addArtefact(config.slug, clientId(c), investigation.id, {
+        kind: 'synthesis',
+        title: `Synthesis - ${new Date().toISOString().slice(0, 10)}`,
+        data: { ...brief, references },
+      })
+      return c.json({ ok: true, artefact })
+    } catch {
+      return c.json({
+        error: 'synthesis_failed',
+        message: 'The synthesis could not be generated - try again shortly.',
+      }, 502)
+    }
+  })
+
   // Per-source relevance verdicts for an answer's sources - one structured
   // generation covering all passages, so triage is a single scan.
   app.post('/api/t/:slug/verdicts', async (c) => {
@@ -827,7 +912,11 @@ export function buildApp(opts: BuildAppOptions): Hono {
       '',
       'For each source passage below, judge how it bears on the question.',
       "verdict: 'supports' (directly supports an answer), 'partial' (relevant background but not direct evidence), 'not-relevant', or 'contradicts'.",
-      'relevance: one plain sentence saying what the passage does or does not establish for this question.',
+      "Use 'contradicts' whenever a passage cuts against the premise of the question, disagrees " +
+      'with another passage in this set, or contains conflicting findings within itself ' +
+      '(for example: an effect observed in one study but absent in another). Genuine ' +
+      'disagreement is the most valuable signal for a researcher - never smooth it into partial.',
+      'relevance: one plain sentence saying what the passage does or does not establish for this question - name the specific finding, not a generality.',
       '',
       ...sources.map((s) => `Source id=${s.id} (${s.title}):\n${s.passage}`),
     ].join('\n')
@@ -1301,6 +1390,51 @@ export function buildApp(opts: BuildAppOptions): Hono {
     return c.json({ ok: true, id })
   })
 
+  // Replace a crawled link resource with clean main-content text. The HTML
+  // comes from the caller (an admin's browser can render pages the server
+  // cannot fetch); labels, title and origin carry over.
+  app.post('/api/admin/t/:slug/reingest', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailable = requireManagement(c)
+    if (unavailable) return unavailable
+    const body = await c.req.json().catch(() => null) as
+      | { resourceId?: string; html?: string }
+      | null
+    if (!body?.resourceId || !body.html || body.html.length > 4 * 1024 * 1024) {
+      return c.json({ error: 'invalid_request' }, 400)
+    }
+    const [summary, full] = await Promise.all([
+      provider.resource(config, body.resourceId).catch(() => null),
+      management!.resourceFull(config, body.resourceId).catch(() => null),
+    ])
+    if (!summary || !full) return c.json({ error: 'not_found' }, 404)
+    const cleaned = extractMainContent(body.html)
+    if (!cleaned) {
+      return c.json({
+        error: 'no_content',
+        message: 'No meaningful body content survived extraction - resource left unchanged.',
+      }, 422)
+    }
+    const created = await management!.createText(config, {
+      title: summary.title,
+      body: cleaned.body,
+      format: 'MARKDOWN',
+      originUrl: full.originUrl,
+    })
+    // Carry the labels across, then retire the chrome-laden original.
+    const classifications = [
+      ...summary.topicIds.slice(0, 1).map((topic) => ({ labelset: 'topic', label: topic })),
+      ...(summary.kind ? [{ labelset: 'kind', label: summary.kind }] : []),
+    ]
+    if (classifications.length > 0) {
+      await management!.patchResourceClassifications(config, created.id, classifications)
+        .catch(() => {})
+    }
+    await management!.deleteResource(config, body.resourceId)
+    return c.json({ ok: true, newId: created.id, words: cleaned.body.split(/\s+/).length })
+  })
+
   app.get('/api/admin/t/:slug/corpus-health', async (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
@@ -1507,6 +1641,41 @@ export function buildApp(opts: BuildAppOptions): Hono {
     return streamSSE(c, async (stream) => {
       const { query, ...askOpts } = parsed.data
       const settings = tenants.promptsFor(config.slug)
+      // Evidence-seeking questions get decomposed by default: broad questions
+      // otherwise miss decisive passages that narrower phrasings retrieve.
+      // Skipped for follow-up turns and when the caller already decomposed.
+      const evidenceSeeking =
+        /\b(evidence|safe|safety|risk|risks|effect|effects|impact|impacts|compare|comparison|versus|\bvs\b|harm|cause|caused)\b/i
+          .test(query)
+      if (
+        evidenceSeeking && !askOpts.prequeries?.length && !askOpts.context?.length &&
+        opts.management
+      ) {
+        try {
+          const decomposition = await Promise.race([
+            opts.management.askStructured(
+              config,
+              SUBQUERIES_SCHEMA,
+              `Break this research question into 3 to 5 focused sub-questions that together cover it fully. Sub-questions must be answerable from the corpus and phrased as standalone questions: ${query}`,
+            ),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 9000)),
+          ])
+          const questions = decomposition
+            ? ((decomposition.object as { questions?: unknown }).questions ?? []) as string[]
+            : []
+          const cleaned = questions
+            .filter((q) => typeof q === 'string' && q.trim().length > 3)
+            .slice(0, 5)
+          if (cleaned.length > 0) {
+            askOpts.prequeries = cleaned
+            await stream.writeSSE({
+              data: JSON.stringify({ type: 'searched', queries: cleaned }),
+            })
+          }
+        } catch {
+          // Decomposition is best-effort - the plain ask still runs.
+        }
+      }
       // How the platform interpreted the question, surfaced when it lands in
       // time (first turn only - follow-ups depend on chat context).
       let interpreted: string | null | undefined

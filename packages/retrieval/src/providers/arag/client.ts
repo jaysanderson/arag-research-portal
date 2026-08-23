@@ -110,6 +110,12 @@ export class KbClient {
     return await res.json().catch(() => ({}))
   }
 
+  async deleteJson(path: string): Promise<void> {
+    const url = this.url(path)
+    const res = await this.fetchImpl(url, { method: 'DELETE', headers: this.headers() })
+    if (!res.ok && res.status !== 404) throw new AragApiError(res.status, url, await res.text())
+  }
+
   async patchJson<T = unknown>(path: string, body: unknown): Promise<T> {
     const url = this.url(path)
     const res = await this.fetchImpl(url, {

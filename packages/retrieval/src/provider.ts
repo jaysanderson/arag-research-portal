@@ -14,6 +14,8 @@ export interface SearchOptions {
   mode?: RetrievalMode
   /** Topic ids (labels in the 'topic' labelset) to filter by. */
   topicIds?: string[]
+  /** Labels in the 'kind' labelset to filter by. */
+  kindIds?: string[]
   pageSize?: number
 }
 

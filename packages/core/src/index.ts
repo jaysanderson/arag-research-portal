@@ -148,6 +148,8 @@ export const ResourceSummarySchema = z.object({
   keyFacts: z.string().array(),
   /** ISO date the source was published, when known. */
   published: z.string().optional(),
+  /** Label in the 'kind' labelset, when classified. */
+  kind: z.string().optional(),
 })
 
 export const ScoredResourceSchema = ResourceSummarySchema.extend({
@@ -156,6 +158,10 @@ export const ScoredResourceSchema = ResourceSummarySchema.extend({
   /** How many citations in the current answer point at this resource. */
   citedCount: z.number().int().nonnegative().default(0),
   matchedPassage: z.string().optional(),
+  /** Page the matched passage sits on (PDFs), for open-at-page links. */
+  matchedPage: z.number().int().positive().optional(),
+  /** True when the matched passage looks like a reference list or front matter. */
+  referenceChunk: z.boolean().optional(),
 })
 
 export const SearchResultsSchema = z.object({
@@ -310,6 +316,11 @@ export const AskEventSchema = z.discriminatedUnion('type', [
     /** The query as the platform interpreted or rephrased it. */
     type: z.literal('interpreted'),
     query: z.string(),
+  }),
+  z.object({
+    /** Sub-queries automatically researched alongside the main question. */
+    type: z.literal('searched'),
+    queries: z.string().array(),
   }),
   z.object({
     type: z.literal('quality'),

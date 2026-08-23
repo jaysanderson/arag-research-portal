@@ -28,6 +28,28 @@ import { AragApiError, type KbBinding, KbClient, ndjson } from './client.ts'
 
 const CATALOG_TTL_MS = 60_000
 
+/**
+ * Reference-list / front-matter heuristic: bibliography chunks match query
+ * strings through citation TITLES and masquerade as high-scoring evidence.
+ * Dense author-year patterns, DOIs and "References" headers give them away.
+ */
+export function looksLikeReferenceChunk(text: string): boolean {
+  const sample = text.slice(0, 1200)
+  const authorYear = (sample.match(/\(\s*(19|20)\d{2}[a-z]?\s*\)|,\s*(19|20)\d{2}[.,)]/g) ?? [])
+    .length
+  const dois = (sample.match(/doi\.org|10\.\d{4,}\//gi) ?? []).length
+  const etAl = (sample.match(/et al\.?/gi) ?? []).length
+  const headerHit = /^(#+\s*)?(references|bibliography|works cited|further reading)\b/im.test(
+    sample,
+  )
+  const frontMatter =
+    /ISBN|ISSN|all rights reserved|copyright ©|creative commons|this publication (may|should) be cited/i
+      .test(sample)
+  const words = sample.split(/\s+/).length || 1
+  const density = (authorYear + dois + etAl) / (words / 100)
+  return headerHit || frontMatter || density > 2.5 || (authorYear >= 4 && etAl >= 2)
+}
+
 /** The extra.metadata payload the provisioning script stores on every resource. */
 interface PortalMetadata {
   summary?: string
@@ -100,6 +122,8 @@ export class AragProvider implements RetrievalProvider {
     const topicFromLabels = (raw.usermetadata?.classifications ?? [])
       .filter((c) => c.labelset === 'topic' && c.label)
       .map((c) => c.label as string)
+    const kindLabel = (raw.usermetadata?.classifications ?? [])
+      .find((c) => c.labelset === 'kind' && c.label)?.label
     const type: ResourceType = ((): ResourceType => {
       const t = meta.type
       return t === 'video' || t === 'web' || t === 'pdf' ? t : 'document'
@@ -113,6 +137,7 @@ export class AragProvider implements RetrievalProvider {
       topicIds: topicFromLabels.length > 0 ? topicFromLabels : meta.topic ? [meta.topic] : [],
       keyFacts: meta.keyFacts ?? [],
       published: meta.published,
+      ...(kindLabel ? { kind: kindLabel } : {}),
     })
   }
 
@@ -334,7 +359,10 @@ export class AragProvider implements RetrievalProvider {
     // which would make the mode switch inert - only attach it for the
     // default hybrid mode.
     if (mode === 'hybrid') body.search_configuration = 'portal-search'
-    const filters = (opts.topicIds ?? []).map((t) => `/classification.labels/topic/${t}`)
+    const filters = [
+      ...(opts.topicIds ?? []).map((t) => `/classification.labels/topic/${t}`),
+      ...(opts.kindIds ?? []).map((k) => `/classification.labels/kind/${k}`),
+    ]
     if (filters.length > 0) body.filters = filters
     type FindResponse = {
       resources?: Record<
@@ -371,16 +399,21 @@ export class AragProvider implements RetrievalProvider {
       .map(([id, raw]) => {
         let best = 0
         let passage: string | undefined
+        let page: number | undefined
         for (const field of Object.values(raw.fields ?? {})) {
           for (const paragraph of Object.values(field.paragraphs ?? {})) {
             const score = paragraph.score ?? 0
             if (score >= best) {
               best = score
               passage = paragraph.text ?? passage
+              page = (paragraph as { position?: { page_number?: number } }).position?.page_number
             }
           }
         }
-        return { id, raw, best, passage }
+        const reference = passage ? looksLikeReferenceChunk(passage) : false
+        // A reference-list match is citation-title noise - keep it findable
+        // but never let it outrank body text.
+        return { id, raw, best: reference ? best * 0.4 : best, passage, page, reference }
       })
       .filter((s) => s.best >= MIN_SCORE)
     // Near-duplicate suppression: crawled pages repeat nav/footer chrome, so
@@ -396,12 +429,16 @@ export class AragProvider implements RetrievalProvider {
     // already 0-1; BM25 scores (>1) are squashed logistically. Never
     // normalised to the top hit - a weak best match must LOOK weak.
     const calibrate = (s: number): number => s <= 1 ? Math.max(0, Math.min(1, s)) : s / (s + 2)
-    const resources: ScoredResource[] = deduped.map(({ id, raw, best, passage }) => ({
-      ...(byId.get(id) ?? this.toSummary(id, raw)),
-      relevance: Math.round(calibrate(best) * 100) / 100,
-      citedCount: 0,
-      matchedPassage: passage,
-    }))
+    const resources: ScoredResource[] = deduped.map(
+      ({ id, raw, best, passage, page, reference }) => ({
+        ...(byId.get(id) ?? this.toSummary(id, raw)),
+        relevance: Math.round(calibrate(best) * 100) / 100,
+        citedCount: 0,
+        matchedPassage: passage,
+        ...(page ? { matchedPage: page } : {}),
+        ...(reference ? { referenceChunk: true } : {}),
+      }),
+    )
     const lowered = trimmed.toLowerCase()
     const relatedQuestions = tenant.suggestedQuestions
       .filter((q) => q.text.toLowerCase() !== lowered)
@@ -929,6 +966,12 @@ export class AragProvider implements RetrievalProvider {
     })
   }
 
+  /** Remove a resource permanently (curation - e.g. replacing a corrupt ingest). */
+  async deleteResource(tenant: TenantConfig, id: string): Promise<void> {
+    await this.client(tenant).deleteJson(`/resource/${id}`)
+    this.invalidateCatalogue(tenant.slug)
+  }
+
   /** Show or hide a resource from searchers (draft/publish workflow). */
   async setResourceHidden(tenant: TenantConfig, id: string, hidden: boolean): Promise<void> {
     await this.client(tenant).patchJson(`/resource/${id}`, { hidden })
@@ -1313,22 +1356,29 @@ export class AragProvider implements RetrievalProvider {
       Object.entries(retrieved).map(([id, raw]) => {
         let best = 0
         let passage: string | undefined
+        let page: number | undefined
         for (const field of Object.values(raw.fields ?? {})) {
           for (const paragraph of Object.values(field.paragraphs ?? {})) {
             if (paragraph.text) contextTexts.push(paragraph.text)
             if ((paragraph.score ?? 0) >= best) {
               best = paragraph.score ?? 0
               passage = paragraph.text ?? passage
+              page = (paragraph as { position?: { page_number?: number } }).position?.page_number
             }
           }
         }
+        const reference = passage ? looksLikeReferenceChunk(passage) : false
+        const shown = reference ? best * 0.4 : best
         return {
           ...(byId.get(id) ?? this.toSummary(id, raw)),
           // Same calibration as search: semantic scores pass through, BM25
           // squashes - a weak grounding source must LOOK weak.
-          relevance: Math.round((best <= 1 ? Math.max(0, best) : best / (best + 2)) * 100) / 100,
+          relevance: Math.round((shown <= 1 ? Math.max(0, shown) : shown / (shown + 2)) * 100) /
+            100,
           citedCount: 0,
           matchedPassage: passage,
+          ...(page ? { matchedPage: page } : {}),
+          ...(reference ? { referenceChunk: true } : {}),
         }
       })
 
