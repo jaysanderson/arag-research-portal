@@ -1,4 +1,5 @@
 import { type Context, Hono } from 'hono'
+import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
 import { z } from 'zod'
 import { GenerateKindSchema } from '@research-portal/core'
@@ -265,7 +266,13 @@ export function buildApp(opts: BuildAppOptions): Hono {
   const clientId = (c: Context): string => c.req.header('x-rp-client') ?? 'anonymous'
   const app = new Hono()
 
-  // The SPA is served same-origin; no cross-origin API access is needed.
+  // The SPA is served same-origin; no cross-origin API access is needed -
+  // except reingest, where an admin's browser posts rendered HTML from the
+  // source site's own origin (the passcode header still gates it).
+  app.use(
+    '/api/admin/t/*/reingest',
+    cors({ origin: (origin) => origin, allowHeaders: ['content-type', 'x-admin-passcode'] }),
+  )
 
   app.onError((err, c) => {
     if (err instanceof KnowledgeBoxNotConnectedError) {
@@ -518,6 +525,55 @@ export function buildApp(opts: BuildAppOptions): Hono {
     const schema = GENERATE_SCHEMAS[parsed.data.kind]
     try {
       const result = await opts.management.askStructured(config, schema, parsed.data.query)
+      // Comparison cells that came back empty get one targeted second look -
+      // "Not specified" must mean the corpus is silent, not that retrieval
+      // for the broad query missed it.
+      if (parsed.data.kind === 'comparison') {
+        const object = result.object as {
+          items?: { name?: string; ratings?: { dimension?: string; assessment?: string }[] }[]
+        }
+        const empties: { item: string; rating: { assessment?: string }; dimension: string }[] = []
+        for (const item of object.items ?? []) {
+          for (const rating of item.ratings ?? []) {
+            if (/^\s*(not specified|unknown|n\/?a|no data)/i.test(rating.assessment ?? '')) {
+              empties.push({
+                item: item.name ?? '',
+                rating,
+                dimension: rating.dimension ?? '',
+              })
+            }
+          }
+        }
+        const CELL_SCHEMA = {
+          name: 'cell_fill',
+          description: 'A single comparison-cell assessment',
+          parameters: {
+            type: 'object',
+            additionalProperties: false,
+            properties: { assessment: { type: 'string' }, found: { type: 'boolean' } },
+            required: ['assessment', 'found'],
+          },
+        }
+        await Promise.all(
+          empties.slice(0, 4).map(async (cell) => {
+            try {
+              const fill = await opts.management!.askStructured(
+                config,
+                CELL_SCHEMA,
+                `What does the corpus say about the ${cell.dimension} of ${cell.item}? ` +
+                  'Answer in one or two sentences with specifics (figures, findings). ' +
+                  'Set found=false and assessment="Not specified in the corpus" only if genuinely absent.',
+              )
+              const filled = fill.object as { assessment?: string; found?: boolean }
+              if (filled.found && filled.assessment?.trim()) {
+                cell.rating.assessment = filled.assessment
+              }
+            } catch {
+              // the cell keeps its honest "Not specified"
+            }
+          }),
+        )
+      }
       return c.json({ kind: parsed.data.kind, ...result })
     } catch (err) {
       const text = err instanceof Error ? err.message : ''

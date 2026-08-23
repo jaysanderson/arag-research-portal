@@ -34,9 +34,18 @@ export const GENERATE_SCHEMAS: Record<
               name: str,
               ratings: {
                 type: 'array',
-                items: strict({ dimension: str, assessment: str }, [
+                items: strict({
+                  dimension: str,
+                  assessment: str,
+                  source: {
+                    type: 'string',
+                    description:
+                      'Title of the context source this assessment is drawn from; empty string when none applies',
+                  },
+                }, [
                   'dimension',
                   'assessment',
+                  'source',
                 ]),
               },
             },

@@ -1347,3 +1347,15 @@ export function ignoreSuggestion(
     { method: 'POST' },
   )
 }
+
+export function synthesiseInvestigation(
+  slug: string,
+  investigationId: string,
+): Promise<{ ok: boolean; artefact: InvestigationArtefact }> {
+  return clientRequest(
+    `/api/t/${encodeURIComponent(slug)}/investigations/${
+      encodeURIComponent(investigationId)
+    }/synthesise`,
+    { method: 'POST' },
+  )
+}

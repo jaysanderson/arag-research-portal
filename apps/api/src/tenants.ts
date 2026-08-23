@@ -4,9 +4,10 @@ import process from 'node:process'
 import { type TenantConfig, TenantConfigSchema, type TenantSummary } from '@research-portal/core'
 
 // ---------------------------------------------------------------------------
-// Seed tenant configs. These move to SQLite in the provisioning increment -
-// for now they are the single source of truth for tenant-driven theming and
-// copy, validated at module load so a bad seed fails fast on boot.
+// Seed tenant configs - the single source of truth for tenant-driven theming
+// and copy, validated at module load so a bad seed fails fast on boot.
+// Persistence is deliberately plain JSON files on the volume (project rule:
+// no SQLite or embedded databases unless absolutely unavoidable).
 // ---------------------------------------------------------------------------
 
 const grdc: TenantConfig = TenantConfigSchema.parse({

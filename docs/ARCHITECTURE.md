@@ -146,3 +146,11 @@ SDK and tests. Sessions/assessments live in SQLite so the portal, not the browse
   factory concern.)
 - **Corpus sourcing**: I plan to pull ~15-20 public FRDC final reports and ~15-20 GRDC
   publications as the starter corpora - any preferred subject areas?
+
+## Persistence rule
+All app-side state (tenants, bindings, sessions, investigations, watches,
+sources, insights, suggestions) lives in plain JSON / JSONL files on the Fly
+volume. **SQLite and embedded databases are deliberately avoided** (Jay's
+standing directive: keep SQLite use to the absolute minimum - currently zero).
+The stores are small, single-writer, and human-inspectable; if scale ever
+demands more, revisit with Jay first.
