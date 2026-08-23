@@ -331,6 +331,29 @@ export async function* implementKgStrategy(
         })),
       },
     }])}
+  // Topic/kind classification keeps every future ingest visible to facets,
+  // Explore and the coverage line - without it, bulk loads land unorganised.
+  const classifyTitle = `classify-${slugify(config.slug)}`
+  if (existingByTitle.has(classifyTitle)) {
+    agents += 1
+    yield { type: 'item', label: 'Topic and kind classifier already registered - keeping it' }
+  } else {
+    const boxLabelsets = await management.labelsets(config).catch(() => [])
+    const classifyOps = ['topic', 'kind']
+      .map((ident) => boxLabelsets.find((ls) => ls.id === ident))
+      .filter((ls): ls is NonNullable<typeof ls> => ls !== undefined)
+      .map((ls) => ({
+        label: {
+          ident: ls.id,
+          labels: ls.labels.map((label) => ({ label, description: '' })),
+          multiple: false,
+        },
+      }))
+    if (classifyOps.length > 0) {
+      yield* tryStart('Topic and kind classifier', 'labeler', classifyTitle, classifyOps)
+    }
+  }
+
   const questionsTitle = `questions-${slugify(config.slug)}`
   if (existingByTitle.has(questionsTitle)) {
     agents += 1

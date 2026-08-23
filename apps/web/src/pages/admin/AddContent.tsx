@@ -251,25 +251,33 @@ export function AddContent({
     }
   }
 
-  const onChooseFile = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
+  const uploadMany = (files: File[]) => {
+    if (files.length === 0) return
+    // Sequential so a bulk drop cannot swamp the box; one status at the end.
     void run(
-      () => uploadAdminFile(slug, passcode, file),
-      `Uploaded "${file.name}" - it will appear below once processed.`,
+      async () => {
+        for (const file of files) {
+          await uploadAdminFile(slug, passcode, file)
+        }
+        return { id: '' }
+      },
+      files.length === 1
+        ? `Uploaded "${files[0]?.name}" - it will appear below once processed.`
+        : `Uploaded ${files.length} files - they will appear below once processed.`,
     )
+  }
+
+  const onChooseFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    uploadMany(files)
   }
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setDragOver(false)
-    const file = event.dataTransfer.files[0]
-    if (!file) return
-    void run(
-      () => uploadAdminFile(slug, passcode, file),
-      `Uploaded "${file.name}" - it will appear below once processed.`,
-    )
+    const files = Array.from(event.dataTransfer.files)
+    uploadMany(files)
   }
 
   const onSubmitLink = async (event: FormEvent) => {
@@ -359,7 +367,13 @@ export function AddContent({
                 <p className='text-sm text-ink-2'>Drag a file here, or choose one to upload.</p>
                 <label className='rp-btn rp-btn-primary mt-3 cursor-pointer'>
                   {busy ? 'Uploading…' : 'Choose file'}
-                  <input type='file' className='sr-only' disabled={busy} onChange={onChooseFile} />
+                  <input
+                    type='file'
+                    multiple
+                    className='sr-only'
+                    disabled={busy}
+                    onChange={onChooseFile}
+                  />
                 </label>
                 <p className='mt-2 text-xs text-ink-3'>Up to 100 MB.</p>
               </div>

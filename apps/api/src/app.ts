@@ -27,7 +27,7 @@ import {
 } from './kg.ts'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import process from 'node:process'
-import { discoverLinks, extractMainContent } from './crawl.ts'
+import { discoverLinks, extractMainContent, looksLikeChallengePage } from './crawl.ts'
 import {
   InsightsStore,
   InvestigationStore,
@@ -1124,6 +1124,40 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (unavailable) return unavailable
     const parsed = linkBodySchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    // Same quality gate as scheduled syncs: fetch and clean the page so the
+    // index holds body text, and bot walls never enter the corpus. Falls back
+    // to the platform crawler when the site blocks server fetches.
+    try {
+      const res = await fetch(parsed.data.url, {
+        headers: { 'user-agent': 'Mozilla/5.0 (research-portal-ingest)' },
+        signal: AbortSignal.timeout(25_000),
+      })
+      if (res.ok && (res.headers.get('content-type') ?? '').includes('html')) {
+        const html = await res.text()
+        const cleaned = extractMainContent(html)
+        if (cleaned) {
+          const created = await management!.createText(config, {
+            title: parsed.data.title?.trim() || cleaned.title,
+            body: cleaned.body,
+            format: 'MARKDOWN',
+            originUrl: parsed.data.url,
+          })
+          if (parsed.data.hidden) {
+            await management!.setResourceHidden(config, created.id, true).catch(() => {})
+          }
+          return c.json(created)
+        }
+        if (looksLikeChallengePage(html)) {
+          return c.json({
+            error: 'challenge_page',
+            message:
+              'That page serves a bot wall to automated fetches - the content cannot be ingested cleanly. Try uploading the document itself.',
+          }, 422)
+        }
+      }
+    } catch {
+      // fall through to the platform crawler
+    }
     return c.json(await management!.createLink(config, parsed.data))
   })
 

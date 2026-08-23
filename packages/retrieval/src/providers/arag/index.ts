@@ -145,10 +145,17 @@ export class AragProvider implements RetrievalProvider {
     const cached = this.catalogCache.get(tenant.slug)
     if (cached && Date.now() - cached.at < CATALOG_TTL_MS) return cached.resources
     const client = this.client(tenant)
-    const catalog = await client.getJson<{ resources?: Record<string, RawResource> }>(
-      '/catalog?page=0&size=100',
-    )
-    const ids = Object.keys(catalog.resources ?? {})
+    // Paginate - a real corpus exceeds one page, and a truncated catalogue
+    // silently breaks summaries, grounding titles and the graph.
+    const ids: string[] = []
+    for (let page = 0; page < 10; page++) {
+      const catalog = await client.getJson<{ resources?: Record<string, RawResource> }>(
+        `/catalog?page_number=${page}&page_size=100&show=basic`,
+      )
+      const batch = Object.keys(catalog.resources ?? {})
+      ids.push(...batch)
+      if (batch.length < 100) break
+    }
     const resources = await Promise.all(
       ids.map(async (id) => {
         const raw = await client.getJson<RawResource>(
@@ -995,12 +1002,18 @@ export class AragProvider implements RetrievalProvider {
     hidden: boolean
   }[]> {
     const client = this.client(tenant)
-    const catalog = await client.getJson<{
-      resources?: Record<string, RawResource & { hidden?: boolean }>
-    }>('/catalog?page_number=0&page_size=100&show=basic')
+    const all: Record<string, RawResource & { hidden?: boolean }> = {}
+    for (let page = 0; page < 10; page++) {
+      const catalog = await client.getJson<{
+        resources?: Record<string, RawResource & { hidden?: boolean }>
+      }>(`/catalog?page_number=${page}&page_size=100&show=basic`)
+      const batch = catalog.resources ?? {}
+      Object.assign(all, batch)
+      if (Object.keys(batch).length < 100) break
+    }
     const CHALLENGE =
       /(cloudflare|enable javascript and cookies|just a moment|performing security verification|ray id|checking your browser)/i
-    const entries = Object.entries(catalog.resources ?? {})
+    const entries = Object.entries(all)
     const results = await Promise.all(entries.map(async ([id, meta]) => {
       try {
         const full = await client.getJson<{
