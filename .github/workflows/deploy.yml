@@ -1,0 +1,45 @@
+name: Gate and deploy
+
+# The only path to production: local -> repo -> fly.io. Nothing deploys from a
+# developer machine; a push that fails the gate never reaches the app.
+on:
+  push:
+    branches: [scaffold]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-arag-research-portal
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Typecheck, lint, format, tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Install build tooling
+        run: |
+          curl -fsSL https://github.com/tailwindlabs/tailwindcss/releases/latest/download/tailwindcss-linux-x64 \
+            -o /usr/local/bin/tailwindcss
+          chmod +x /usr/local/bin/tailwindcss
+          curl -fsSL https://esbuild.github.io/dl/latest | sh
+          sudo mv ./esbuild /usr/local/bin/esbuild
+      - name: Gate
+        run: deno task check
+      - name: Build web
+        run: deno task build:web
+
+  deploy:
+    name: Deploy to fly.io
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

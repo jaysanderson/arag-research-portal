@@ -154,3 +154,15 @@ volume. **SQLite and embedded databases are deliberately avoided** (Jay's
 standing directive: keep SQLite use to the absolute minimum - currently zero).
 The stores are small, single-writer, and human-inspectable; if scale ever
 demands more, revisit with Jay first.
+
+## Deployment pipeline
+`local -> repo -> fly.io`, in that order, always.
+
+- Repo: `github.com/jaysanderson/arag-research-portal` (private), branch `scaffold`.
+- `.github/workflows/deploy.yml` runs the full gate (`deno task check` -
+  typecheck, lint, format, tests - plus `build:web`) on every push, and only
+  deploys to the Fly app `arag-research-portal` when the gate passes.
+- Fly auth in CI is a scoped **deploy token** stored as the repo secret
+  `FLY_API_TOKEN` (not a personal account token).
+- Deploying from a developer machine is not permitted: it bypasses the gate and
+  leaves production ahead of the repo.

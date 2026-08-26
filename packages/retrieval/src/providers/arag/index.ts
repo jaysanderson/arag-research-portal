@@ -27,6 +27,12 @@ import type {
 import { AragApiError, type KbBinding, KbClient, ndjson } from './client.ts'
 
 const CATALOG_TTL_MS = 60_000
+/** Catalogue paging: 200 per call, up to 40 calls - 8,000 resources. */
+const CATALOG_PAGE_SIZE = 200
+const CATALOG_MAX_PAGES = 40
+/** Health scan reads full text per resource - sample the newest slice. */
+const HEALTH_SCAN_LIMIT = 400
+const HEALTH_SCAN_CONCURRENCY = 12
 
 /**
  * Reference-list / front-matter heuristic: bibliography chunks match query
@@ -145,25 +151,18 @@ export class AragProvider implements RetrievalProvider {
     const cached = this.catalogCache.get(tenant.slug)
     if (cached && Date.now() - cached.at < CATALOG_TTL_MS) return cached.resources
     const client = this.client(tenant)
-    // Paginate - a real corpus exceeds one page, and a truncated catalogue
-    // silently breaks summaries, grounding titles and the graph.
-    const ids: string[] = []
-    for (let page = 0; page < 10; page++) {
+    // Read the catalogue in pages and build summaries from the page payload
+    // itself. A per-resource fetch here would mean one request per document -
+    // thousands of parallel calls on a real corpus, on the hot search path.
+    const resources: ResourceSummary[] = []
+    for (let page = 0; page < CATALOG_MAX_PAGES; page++) {
       const catalog = await client.getJson<{ resources?: Record<string, RawResource> }>(
-        `/catalog?page_number=${page}&page_size=100&show=basic`,
+        `/catalog?page_number=${page}&page_size=${CATALOG_PAGE_SIZE}&show=basic&show=extra`,
       )
-      const batch = Object.keys(catalog.resources ?? {})
-      ids.push(...batch)
-      if (batch.length < 100) break
+      const batch = Object.entries(catalog.resources ?? {})
+      for (const [id, raw] of batch) resources.push(this.toSummary(id, raw))
+      if (batch.length < CATALOG_PAGE_SIZE) break
     }
-    const resources = await Promise.all(
-      ids.map(async (id) => {
-        const raw = await client.getJson<RawResource>(
-          `/resource/${id}?show=basic&show=extra`,
-        )
-        return this.toSummary(id, raw)
-      }),
-    )
     resources.sort((a, b) => (b.published ?? '').localeCompare(a.published ?? ''))
     this.catalogCache.set(tenant.slug, { at: Date.now(), resources })
     return resources
@@ -1013,47 +1012,62 @@ export class AragProvider implements RetrievalProvider {
     }
     const CHALLENGE =
       /(cloudflare|enable javascript and cookies|just a moment|performing security verification|ray id|checking your browser)/i
-    const entries = Object.entries(all)
-    const results = await Promise.all(entries.map(async ([id, meta]) => {
-      try {
-        const full = await client.getJson<{
-          title?: string
-          data?: Record<
-            string,
-            Record<string, { extracted?: { text?: { text?: string } } }>
-          >
-        }>(`/resource/${id}?show=extracted&extracted=text&show=basic`)
-        const texts: string[] = []
-        for (const fieldType of Object.values(full.data ?? {})) {
-          for (const field of Object.values(fieldType ?? {})) {
-            const text = field.extracted?.text?.text
-            if (text) texts.push(text)
+    // Reading every resource's extracted text is one request per document -
+    // scan the newest slice and run it in bounded waves so a big corpus is
+    // never hammered with thousands of parallel calls.
+    const entries = Object.entries(all).slice(0, HEALTH_SCAN_LIMIT)
+    const results: {
+      id: string
+      title: string
+      words: number
+      status: 'ok' | 'thin' | 'challenge'
+      hidden: boolean
+    }[] = []
+    for (let start = 0; start < entries.length; start += HEALTH_SCAN_CONCURRENCY) {
+      const wave = entries.slice(start, start + HEALTH_SCAN_CONCURRENCY)
+      results.push(
+        ...await Promise.all(wave.map(async ([id, meta]) => {
+          try {
+            const full = await client.getJson<{
+              title?: string
+              data?: Record<
+                string,
+                Record<string, { extracted?: { text?: { text?: string } } }>
+              >
+            }>(`/resource/${id}?show=extracted&extracted=text&show=basic`)
+            const texts: string[] = []
+            for (const fieldType of Object.values(full.data ?? {})) {
+              for (const field of Object.values(fieldType ?? {})) {
+                const text = field.extracted?.text?.text
+                if (text) texts.push(text)
+              }
+            }
+            const body = texts.join(' ')
+            const words = body.trim() ? body.trim().split(/\s+/).length : 0
+            const status = CHALLENGE.test(body.slice(0, 2500))
+              ? 'challenge' as const
+              : words < 120
+              ? 'thin' as const
+              : 'ok' as const
+            return {
+              id,
+              title: full.title ?? meta.title ?? id,
+              words,
+              status,
+              hidden: meta.hidden ?? false,
+            }
+          } catch {
+            return {
+              id,
+              title: meta.title ?? id,
+              words: 0,
+              status: 'thin' as const,
+              hidden: meta.hidden ?? false,
+            }
           }
-        }
-        const body = texts.join(' ')
-        const words = body.trim() ? body.trim().split(/\s+/).length : 0
-        const status = CHALLENGE.test(body.slice(0, 2500))
-          ? 'challenge' as const
-          : words < 120
-          ? 'thin' as const
-          : 'ok' as const
-        return {
-          id,
-          title: full.title ?? meta.title ?? id,
-          words,
-          status,
-          hidden: meta.hidden ?? false,
-        }
-      } catch {
-        return {
-          id,
-          title: meta.title ?? id,
-          words: 0,
-          status: 'thin' as const,
-          hidden: meta.hidden ?? false,
-        }
-      }
-    }))
+        })),
+      )
+    }
     return results.sort((a, b) =>
       (a.status === 'ok' ? 1 : 0) - (b.status === 'ok' ? 1 : 0) || b.words - a.words
     )

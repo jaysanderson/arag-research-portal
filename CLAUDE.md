@@ -53,6 +53,10 @@ Capture the answers in `docs/VISION.md` as they're decided.
 - Australian English, no em dashes (spaced hyphen) in any user-facing copy - this becomes a
   Progress asset.
 - Work on a branch; don't commit to main without asking. Secrets live in `.env` only (gitignored).
+- **Deployment order is local -> repo -> fly.io, always.** Never run `fly deploy`
+  from a developer machine. Commit, push to `origin/scaffold`, and the GitHub
+  Actions pipeline gates (typecheck, lint, format, tests, build) then deploys.
+  A push that fails the gate never reaches production.
 
 ## Model & orchestration
 Default is **`fable`** (set in `.claude/settings.json`). Fable acts as **product owner and
