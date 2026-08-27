@@ -21,16 +21,25 @@ jobs:
         with:
           deno-version: v2.x
       - name: Install build tooling
+        # Pinned to match the Dockerfile (ESBUILD_VERSION / TAILWINDCSS_VERSION
+        # build args) and local dev tooling (brew) - bump all three together.
+        env:
+          ESBUILD_VERSION: 0.28.2
+          TAILWINDCSS_VERSION: 4.3.3
         run: |
-          curl -fsSL https://github.com/tailwindlabs/tailwindcss/releases/latest/download/tailwindcss-linux-x64 \
+          curl -fsSL "https://github.com/tailwindlabs/tailwindcss/releases/download/v${TAILWINDCSS_VERSION}/tailwindcss-linux-x64" \
             -o /usr/local/bin/tailwindcss
           chmod +x /usr/local/bin/tailwindcss
-          curl -fsSL https://esbuild.github.io/dl/latest | sh
-          sudo mv ./esbuild /usr/local/bin/esbuild
-      - name: Gate
-        run: deno task check
+          curl -fsSL "https://unpkg.com/@esbuild/linux-x64@${ESBUILD_VERSION}/bin/esbuild" \
+            -o /usr/local/bin/esbuild
+          sudo chmod +x /usr/local/bin/esbuild
       - name: Build web
         run: deno task build:web
+      - name: Gate
+        # Runs after the web build so the /api/health test (which checks
+        # apps/web/dist/index.html is present) exercises a real bundle, the
+        # same way `deno task dev` and the Dockerfile both build before serving.
+        run: deno task check
 
   deploy:
     name: Deploy to fly.io

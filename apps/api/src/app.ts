@@ -247,8 +247,8 @@ export interface BuildAppOptions {
   bindings?: BindingStore
   zone?: string
   adminPasscode?: string
-  /** Passcode value the admin login should prefill (pre-release convenience). */
-  adminPrefill?: string
+  /** Where the built SPA lives; overridable in tests. Defaults to ./apps/web/dist. */
+  webDistPath?: string
   /** Called after a tenant is rebound so the provider can drop its caches. */
   invalidate?: (slug: string) => void
 }
@@ -265,6 +265,18 @@ export function buildApp(opts: BuildAppOptions): Hono {
   const suggestions = new SuggestionStore()
   const clientId = (c: Context): string => c.req.header('x-rp-client') ?? 'anonymous'
   const app = new Hono()
+
+  // Baseline security headers on every response. Deliberately narrow for now:
+  // frame-ancestors only, not a full CSP - the app legitimately loads
+  // modules from esm.sh and fonts from Google, so default-src/script-src is
+  // a later work item once those origins are catalogued.
+  app.use('*', async (c, next) => {
+    await next()
+    c.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains')
+    c.header('X-Content-Type-Options', 'nosniff')
+    c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+    c.header('Content-Security-Policy', "frame-ancestors 'none'")
+  })
 
   // The SPA is served same-origin; no cross-origin API access is needed -
   // except reingest, where an admin's browser posts rendered HTML from the
@@ -294,6 +306,16 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (status) return `The answer service had a problem (HTTP ${status}) - please try again.`
     return 'The answer service had a problem - please try again.'
   }
+
+  // Unauthenticated liveness/readiness check for Fly's health checker - no
+  // upstream/ARAG calls. Also verifies the SPA bundle is present, so an
+  // image built without `deno task build:web` fails health checks instead
+  // of shipping a 404-everywhere deploy (the bug this endpoint exists for).
+  const webDistPath = opts.webDistPath ?? './apps/web/dist'
+  app.get('/api/health', (c) => {
+    const web = existsSync(`${webDistPath}/index.html`)
+    return c.json({ ok: web, web, version: process.env.BUILD_SHA ?? 'dev' }, web ? 200 : 503)
+  })
 
   app.get('/api/tenants', (c) => c.json(tenants.list()))
 
@@ -771,7 +793,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
           record.failed = true
           await write(config.slug, {
             type: 'error',
-            message: err instanceof Error ? err.message : 'unknown_error',
+            message: publicErrorMessage(err),
           })
         }
         try {
@@ -992,10 +1014,6 @@ export function buildApp(opts: BuildAppOptions): Hono {
       return c.json({ verdicts: [] })
     }
   })
-
-  // Convenience: which passcode to prefill on the admin login (pre-release
-  // only; set ADMIN_PASSCODE_PREFILL empty to turn the prefill off).
-  app.get('/api/admin-prefill', (c) => c.json({ passcode: opts.adminPrefill ?? '' }))
 
   // Admin: connect a knowledge box to a tenant. The administrator enters the
   // KB id and service-account token in the app; both stay server-side. When

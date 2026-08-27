@@ -19,6 +19,16 @@ primary_region = "syd"
   # daily without waiting for a visitor to wake the app.
   min_machines_running = 1
 
+  # /api/health only returns 200 when apps/web/dist/index.html exists (see
+  # apps/api/src/app.ts), so an image built without the web bundle fails this
+  # check and never goes live - the guard for the outage this fixes.
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "get"
+    path = "/api/health"
+
 [mounts]
   source = "rp_data"
   destination = "/app/data"

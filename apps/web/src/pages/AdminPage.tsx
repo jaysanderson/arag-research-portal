@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from 'react'
+import { type FormEvent, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { ApiError, getAdminOverview } from '../api/client.ts'
@@ -22,18 +22,6 @@ export function AdminPage() {
   const [passcode, setPasscode] = useState(() => sessionStorage.getItem('rp-admin-passcode') ?? '')
   const [draft, setDraft] = useState('')
   const [expandedSlug, setExpandedSlug] = useState<string | null>(null)
-  // Pre-release convenience: the server can offer a passcode to prefill
-  // (ADMIN_PASSCODE_PREFILL env); nothing is baked into the bundle.
-  useEffect(() => {
-    if (draft) return
-    fetch('/api/admin-prefill')
-      .then((r) => r.json())
-      .then((d: { passcode?: string }) => {
-        if (d.passcode) setDraft(d.passcode)
-      })
-      .catch(() => {})
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['admin-overview'],

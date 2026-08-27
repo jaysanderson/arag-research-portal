@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from 'react'
+import { type FormEvent, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useOutletContext } from 'react-router-dom'
 import { ApiError, getAdminOverview } from '../api/client.ts'
@@ -53,17 +53,6 @@ export function ManagePage() {
   const [draft, setDraft] = useState('')
   const [tab, setTab] = useState<TabId>('overview')
   const [renaming, setRenaming] = useState(false)
-
-  useEffect(() => {
-    if (draft) return
-    fetch('/api/admin-prefill')
-      .then((r) => r.json())
-      .then((d: { passcode?: string }) => {
-        if (d.passcode) setDraft(d.passcode)
-      })
-      .catch(() => {})
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['admin-overview'],

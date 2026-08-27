@@ -14,7 +14,7 @@ import {
   type TenantConfig,
   TenantConfigSchema,
 } from '@research-portal/core'
-import type { RetrievalProvider } from '@research-portal/retrieval'
+import { AragApiError, type RetrievalProvider } from '@research-portal/retrieval'
 import { buildApp } from './app.ts'
 import { TenantStore } from './tenants.ts'
 
@@ -255,5 +255,107 @@ describe('admin', () => {
 
     expect(response.status).toBe(200)
     expect(bindings.status('frdc').status).toBe('demo')
+  })
+})
+
+describe('GET /api/health', () => {
+  it('returns 200 with ok:true and web:true when the SPA bundle exists', async () => {
+    const dir = Deno.makeTempDirSync()
+    Deno.writeTextFileSync(`${dir}/index.html`, '<!doctype html>')
+    const app = buildApp({
+      provider: new StubProvider(),
+      tenants: freshTenants(),
+      webDistPath: dir,
+    })
+
+    const response = await app.request('/api/health')
+
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.ok).toBe(true)
+    expect(body.web).toBe(true)
+    expect(typeof body.version).toBe('string')
+  })
+
+  it('returns 503 when the SPA bundle is missing - a bundle-less image fails its health check', async () => {
+    const dir = Deno.makeTempDirSync()
+    const app = buildApp({
+      provider: new StubProvider(),
+      tenants: freshTenants(),
+      webDistPath: dir,
+    })
+
+    const response = await app.request('/api/health')
+
+    expect(response.status).toBe(503)
+    const body = await response.json()
+    expect(body.ok).toBe(false)
+    expect(body.web).toBe(false)
+  })
+
+  it('requires no authentication', async () => {
+    const dir = Deno.makeTempDirSync()
+    Deno.writeTextFileSync(`${dir}/index.html`, '<!doctype html>')
+    const app = buildApp({
+      provider: new StubProvider(),
+      tenants: freshTenants(),
+      adminPasscode: 'test-passcode',
+      webDistPath: dir,
+    })
+
+    const response = await app.request('/api/health')
+
+    expect(response.status).toBe(200)
+  })
+})
+
+describe('GET /api/admin-prefill', () => {
+  it('no longer exists - the passcode-prefill endpoint has been removed', async () => {
+    const app = makeApp()
+    const response = await app.request('/api/admin-prefill')
+    expect(response.status).toBe(404)
+  })
+})
+
+describe('security headers', () => {
+  it('sets baseline security headers on every response', async () => {
+    const app = makeApp()
+    const response = await app.request('/api/tenants')
+
+    expect(response.headers.get('strict-transport-security')).toBe(
+      'max-age=63072000; includeSubDomains',
+    )
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(response.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin')
+    expect(response.headers.get('content-security-policy')).toBe("frame-ancestors 'none'")
+  })
+})
+
+describe('POST /api/ask-estate', () => {
+  it('scrubs upstream error detail (URL, knowledge-box id, response body) from anonymous callers', async () => {
+    class FailingProvider extends StubProvider {
+      override ask(): AsyncIterable<AskEvent> {
+        throw new AragApiError(
+          500,
+          'https://zone.rag.progress.cloud/api/v1/kb/secret-kb-id-111111',
+          'super secret upstream response body',
+        )
+      }
+    }
+
+    const app = buildApp({ provider: new FailingProvider(), tenants: freshTenants() })
+    const response = await app.request('/api/ask-estate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'What is known about abalone stock health?' }),
+    })
+
+    expect(response.status).toBe(200)
+    const payload = await response.text()
+
+    expect(payload).not.toContain('secret-kb-id')
+    expect(payload).not.toContain('super secret upstream response body')
+    expect(payload).not.toContain('zone.rag.progress.cloud')
+    expect(payload).toContain('had a problem (HTTP 500)')
   })
 })
