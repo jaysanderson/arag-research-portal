@@ -88,6 +88,22 @@ in-app admin surface, not by hand.
   hidden-resource draft/publish curation, scheduled source re-syncs (one Fly machine now stays
   up for the daily job), entity dossier pages, server-synced research trails with export,
   saved searches with change badges, and the conversation-memory DA agent.
+- **2026-08-28** - Operating model (Jay): Claude acts as SVP of Product - product and engineering
+  roll up to it, implementation is delegated to model-matched subagents (Haiku mechanical, Sonnet
+  spec-driven, Opus/Fable judgment-heavy).
+- **2026-08-28** - **The portal becomes an open-source project.** Positioning locked by Jay: the
+  portal is a thin application layer that can be handed an *empty* Progress Agentic RAG knowledge
+  box and provides all portal functionality on top of it. GRDC and FRDC are **real examples and
+  live opportunities** - showcase tenants running real knowledge, used to drive adoption of the
+  product immediately. (This supersedes the earlier open-source-audit suggestion of fictional
+  tenant names: the showcases stay real; the corpus they run on must be genuinely real/cleared
+  content, never synthetic content presented as theirs.)
+- **2026-08-28** - Jay reviewed and agreed with the full state-of-the-nation program review
+  (four audits, five-wave roadmap). Wave 0 (outage + credential exposure) executed same day:
+  admin passcode rotated by Jay after `/api/admin-prefill` was found serving it publicly.
+- **2026-08-28** - MVP acceptance (Jay): Jay personally tests the portal at MVP, supported by
+  release notes / "what's been done" presentation. A user-facing "What's new" release-notes
+  surface becomes part of the portal itself (roadmap Wave 3).
 - **2026-08-23** - External expert audit received (research-portal expert +
   research-scientist walkthrough of the FRDC portal). Verdict: AI plumbing
   ahead of peers; blocked from professional use by corpus corruption
