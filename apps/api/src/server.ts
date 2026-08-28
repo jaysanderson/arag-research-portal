@@ -5,6 +5,7 @@ import { AragProvider } from '@research-portal/retrieval'
 import { buildApp } from './app.ts'
 import { BindingStore } from './bindings.ts'
 import { SourceStore, WatchStore } from './stores.ts'
+import { EnrichmentStore } from './enrichments.ts'
 import { TenantStore } from './tenants.ts'
 import { loadRootEnv } from './load-env.ts'
 import { startScheduler } from './scheduler.ts'
@@ -23,6 +24,7 @@ const provider = new AragProvider({ resolveBinding: (slug) => bindings.get(slug)
 // read-modify-write the same file (see the note on startScheduler).
 const sources = new SourceStore()
 const watches = new WatchStore()
+const enrichments = new EnrichmentStore()
 
 const app = buildApp({
   provider,
@@ -31,6 +33,7 @@ const app = buildApp({
   bindings,
   sources,
   watches,
+  enrichments,
   zone,
   adminPasscode: process.env.ADMIN_PASSCODE,
   invalidate: (slug) => provider.invalidate(slug),

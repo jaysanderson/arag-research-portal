@@ -110,6 +110,9 @@ function LibraryCard(
         <h3 className='rp-clamp-2 text-sm font-semibold leading-snug text-ink'>
           {item.title}
         </h3>
+        {item.summary && item.summary !== item.title
+          ? <p className='rp-clamp-2 text-xs leading-relaxed text-ink-3'>{item.summary}</p>
+          : null}
         {topicLabels.length > 0 || meta.kind
           ? (
             <div className='flex flex-wrap gap-1'>
@@ -131,12 +134,25 @@ function LibraryCard(
             </div>
           )
           : null}
-        {item.created || publishedYear
+        {item.created || publishedYear || item.sourceName
           ? (
-            <p className='mt-auto flex flex-wrap items-baseline gap-x-1.5 pt-1 text-xs tabular-nums text-ink-3'>
-              {item.created ? <span>{formatDate(item.created)}</span> : null}
-              {publishedYear ? <span>Published {publishedYear}</span> : null}
-            </p>
+            <div className='mt-auto pt-1'>
+              {item.created || publishedYear
+                ? (
+                  <p className='flex flex-wrap items-baseline gap-x-1.5 text-xs tabular-nums text-ink-3'>
+                    {item.created ? <span>{formatDate(item.created)}</span> : null}
+                    {publishedYear ? <span>Published {publishedYear}</span> : null}
+                  </p>
+                )
+                : null}
+              {item.sourceName
+                ? (
+                  <p className='truncate text-[11px] tabular-nums text-ink-3/80'>
+                    {item.sourceName}
+                  </p>
+                )
+                : null}
+            </div>
           )
           : null}
       </div>

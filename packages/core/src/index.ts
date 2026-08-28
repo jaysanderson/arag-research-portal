@@ -141,6 +141,7 @@ export const ResourceTypeSchema = z.enum(['document', 'pdf', 'video', 'web'])
 
 export const ResourceSummarySchema = z.object({
   id: z.string().min(1),
+  /** Merchandised display headline - never a raw filename when a better one exists. */
   title: z.string().min(1),
   summary: z.string().min(1),
   type: ResourceTypeSchema,
@@ -150,7 +151,251 @@ export const ResourceSummarySchema = z.object({
   published: z.string().optional(),
   /** Label in the 'kind' labelset, when classified. */
   kind: z.string().optional(),
+  /**
+   * The raw source name (original filename/project code, e.g. "1981-071-DLD.pdf").
+   * Kept as secondary, muted metadata; never the headline. Absent when the raw
+   * title already reads as a real title.
+   */
+  sourceName: z.string().optional(),
+  /** Merchandised key takeaways from the default enrichment, when generated. */
+  keyTakeaways: z.string().array().optional(),
+  /** Merchandised notable quotes from the default enrichment, when generated. */
+  quotesOfInterest: z.string().array().optional(),
+  /** True when a generated enrichment (not just a filename fallback) drives title/summary. */
+  enriched: z.boolean().optional(),
 })
+
+// ---------------------------------------------------------------------------
+// Enrichments - schema-driven merchandising written onto resources.
+//
+// A resource carries one or more "enrichments". Each enrichment is produced by
+// an enrichment AGENT: a named generator with a JSON schema. The app renders
+// whatever fields the schema defines PROGRAMMATICALLY, so a resource is never
+// shown as a raw filename. The default "research summary" agent is the first
+// enrichment (title, summary, key takeaways, quotes of interest); Phase 2 lets
+// users add further agents ("lenses"). The label model applies here too: an
+// enrichment has a SCOPE (resource-level or paragraph/block-level) and a
+// CARDINALITY (single/exclusive or multiple), mirroring how labels attach.
+// ---------------------------------------------------------------------------
+
+/**
+ * How a schema field renders. `title`/`summary` are single strings that drive
+ * a resource's headline and blurb everywhere; `list`/`quotes` are string
+ * arrays (scannable bullets, verbatim quotes). New kinds flow through the
+ * programmatic renderer without touching each surface.
+ */
+export const EnrichmentFieldKindSchema = z.enum(['title', 'summary', 'list', 'quotes'])
+
+export const EnrichmentFieldSchema = z.object({
+  /** Stable key in the generated JSON object. */
+  key: z.string().min(1),
+  /** Human label shown above the field on the resource page and in Management. */
+  label: z.string().min(1),
+  kind: EnrichmentFieldKindSchema,
+  /** Instruction the generator follows for this field - also shown in Management. */
+  description: z.string().min(1),
+})
+
+/** Resource-level vs paragraph/block-level, mirroring the label model. */
+export const EnrichmentScopeSchema = z.enum(['resource', 'paragraph'])
+/** Exclusive (one per resource) vs multiple (several lenses), mirroring labels. */
+export const EnrichmentCardinalitySchema = z.enum(['single', 'multiple'])
+
+/** A generator agent + its JSON schema - the unit users see and run in Management. */
+export const EnrichmentAgentSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().min(1),
+  scope: EnrichmentScopeSchema,
+  cardinality: EnrichmentCardinalitySchema,
+  /** True for the default research-summary agent shipped with the portal. */
+  isDefault: z.boolean(),
+  fields: EnrichmentFieldSchema.array().min(1),
+})
+
+/** One generated enrichment stored against a resource. */
+export const EnrichmentSchema = z.object({
+  /** The agent that produced it (EnrichmentAgent.id). */
+  schemaId: z.string().min(1),
+  generatedAt: z.string().min(1),
+  /** The generated object, keyed by the agent's field keys. */
+  data: z.record(z.string(), z.unknown()),
+  /** Provenance flag: summary reused the platform's DA page-summary field. */
+  usedPageSummary: z.boolean().optional(),
+})
+
+export type EnrichmentFieldKind = z.infer<typeof EnrichmentFieldKindSchema>
+export type EnrichmentField = z.infer<typeof EnrichmentFieldSchema>
+export type EnrichmentScope = z.infer<typeof EnrichmentScopeSchema>
+export type EnrichmentCardinality = z.infer<typeof EnrichmentCardinalitySchema>
+export type EnrichmentAgent = z.infer<typeof EnrichmentAgentSchema>
+export type Enrichment = z.infer<typeof EnrichmentSchema>
+
+/**
+ * The default research-summary enrichment agent: the initial resource summary
+ * every portal ships with. Its fields drive the merchandised headline (title),
+ * blurb (summary) and scannable detail (key takeaways, quotes) on every
+ * surface. Rendering is programmatic from `fields`, so extending this schema
+ * (or adding a Phase 2 lens) flows through with no per-surface change.
+ */
+export const DEFAULT_RESEARCH_ENRICHMENT: EnrichmentAgent = {
+  id: 'research-summary',
+  title: 'Research summary',
+  description: 'The default enrichment. Reads each resource and writes a clean, human title, a ' +
+    'plain-language summary, the key takeaways and a few notable quotes, so the resource ' +
+    'presents as a real research item rather than a raw filename.',
+  scope: 'resource',
+  cardinality: 'single',
+  isDefault: true,
+  fields: [
+    {
+      key: 'title',
+      label: 'Title',
+      kind: 'title',
+      description:
+        'A concise, descriptive title for the document in plain language (roughly 4 to 12 ' +
+        'words). Never the filename or a project code - say what the document is about.',
+    },
+    {
+      key: 'summary',
+      label: 'Summary',
+      kind: 'summary',
+      description:
+        'A plain-language summary of what this document is and what it found or covers, in ' +
+        'two to four sentences. Australian English, no jargon where a plain word will do.',
+    },
+    {
+      key: 'keyTakeaways',
+      label: 'Key takeaways',
+      kind: 'list',
+      description:
+        'The three to six most important findings, results or points, each as one short, ' +
+        'scannable line. Specifics over generalities.',
+    },
+    {
+      key: 'quotesOfInterest',
+      label: 'Quotes of interest',
+      kind: 'quotes',
+      description:
+        'Up to three short, verbatim quotes from the document that are genuinely notable. ' +
+        'Omit rather than paraphrase; return an empty list if none stand out.',
+    },
+  ],
+}
+
+/** Every enrichment agent the portal offers today (Phase 1: the default only). */
+export const ENRICHMENT_AGENTS: EnrichmentAgent[] = [DEFAULT_RESEARCH_ENRICHMENT]
+
+/** Management view of one enrichment agent: the agent, its JSON schema and run coverage. */
+export const EnrichmentAgentStatusSchema = z.object({
+  agent: EnrichmentAgentSchema,
+  /** The exact JSON schema the generator is given - shown to the user in Management. */
+  jsonSchema: z.record(z.string(), z.unknown()),
+  /** Resources with a generated enrichment for this agent. */
+  enrichedCount: z.number().int().nonnegative(),
+  /** Displayable resources in the corpus. */
+  totalCount: z.number().int().nonnegative(),
+  /** How the enrichment is produced today - honest disclosure of the platform path. */
+  generationNote: z.string(),
+})
+
+/** Progress events streamed while an enrichment agent runs over the corpus. */
+export const EnrichmentRunEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('start'), total: z.number().int().nonnegative() }),
+  z.object({
+    type: z.literal('item'),
+    id: z.string(),
+    title: z.string(),
+    outcome: z.enum(['enriched', 'error']),
+    detail: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('done'),
+    enriched: z.number().int().nonnegative(),
+    errors: z.number().int().nonnegative(),
+  }),
+  z.object({ type: z.literal('error'), message: z.string() }),
+])
+
+export type EnrichmentAgentStatus = z.infer<typeof EnrichmentAgentStatusSchema>
+export type EnrichmentRunEvent = z.infer<typeof EnrichmentRunEventSchema>
+
+/**
+ * The OpenAI-function-style JSON schema for an agent, used both as the
+ * `answer_json_schema` sent to the query-time generator and as the schema
+ * shown to the user in Management. Derived from `fields` so the two can never
+ * drift.
+ */
+export function enrichmentJsonSchema(
+  agent: EnrichmentAgent,
+): { name: string; description: string; parameters: Record<string, unknown> } {
+  const properties: Record<string, unknown> = {}
+  const required: string[] = []
+  for (const field of agent.fields) {
+    properties[field.key] = field.kind === 'list' || field.kind === 'quotes'
+      ? { type: 'array', items: { type: 'string' }, description: field.description }
+      : { type: 'string', description: field.description }
+    // Title and summary are the load-bearing display fields - always required.
+    if (field.kind === 'title' || field.kind === 'summary') required.push(field.key)
+  }
+  return {
+    name: agent.id.replace(/-/g, '_'),
+    description: agent.description,
+    parameters: { type: 'object', additionalProperties: false, properties, required },
+  }
+}
+
+/**
+ * Coerce a raw generated object into clean, schema-conformant enrichment data:
+ * string fields to trimmed strings, list/quote fields to arrays of trimmed
+ * non-empty strings. Unknown keys are dropped; missing fields become '' or [].
+ * Pure and total, so a partial or slightly malformed model response never
+ * throws on a user-facing path.
+ */
+export function parseEnrichmentData(
+  agent: EnrichmentAgent,
+  raw: unknown,
+): Record<string, unknown> {
+  const source = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {}
+  const out: Record<string, unknown> = {}
+  for (const field of agent.fields) {
+    const value = source[field.key]
+    if (field.kind === 'list' || field.kind === 'quotes') {
+      out[field.key] = Array.isArray(value)
+        ? value.map((v) => (typeof v === 'string' ? v.trim() : '')).filter((v) => v.length > 0)
+        : []
+    } else {
+      out[field.key] = typeof value === 'string' ? value.trim() : ''
+    }
+  }
+  return out
+}
+
+/** The value of the first field of a given kind - programmatic, no hardcoded keys. */
+export function enrichmentString(
+  agent: EnrichmentAgent,
+  data: Record<string, unknown>,
+  kind: EnrichmentFieldKind,
+): string {
+  const field = agent.fields.find((f) => f.kind === kind)
+  if (!field) return ''
+  const value = data[field.key]
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+/** The array value of the first list/quotes field of a given kind - programmatic. */
+export function enrichmentList(
+  agent: EnrichmentAgent,
+  data: Record<string, unknown>,
+  kind: EnrichmentFieldKind,
+): string[] {
+  const field = agent.fields.find((f) => f.kind === kind)
+  if (!field) return []
+  const value = data[field.key]
+  return Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    : []
+}
 
 export const ScoredResourceSchema = ResourceSummarySchema.extend({
   /** Retrieval relevance in [0, 1]. */
@@ -175,6 +420,7 @@ export const RetrievalModeSchema = z.enum(['hybrid', 'semantic', 'keyword'])
 /** One page of the tenant's catalogue (the Library view). */
 export const CatalogItemSchema = z.object({
   id: z.string().min(1),
+  /** Merchandised display headline - never a raw filename when a better one exists. */
   title: z.string().min(1),
   status: z.enum(['pending', 'processed', 'error']),
   created: z.string().optional(),
@@ -183,6 +429,12 @@ export const CatalogItemSchema = z.object({
   kind: z.string().optional(),
   /** ISO date the source was published, when known. */
   published: z.string().optional(),
+  /** Merchandised blurb from the default enrichment, when generated. */
+  summary: z.string().optional(),
+  /** The raw source name (original filename/project code); muted secondary only. */
+  sourceName: z.string().optional(),
+  /** True when a generated enrichment drives the title/summary. */
+  enriched: z.boolean().optional(),
 })
 
 export const CatalogPageSchema = z.object({
@@ -249,10 +501,26 @@ export const GenerateResultSchema = z.object({
 /** Full typed content of one resource, for the type-aware detail view. */
 export const ResourceContentSchema = z.object({
   id: z.string(),
+  /** Merchandised display headline - never a raw filename when a better one exists. */
   title: z.string(),
   kind: z.enum(['web', 'pdf', 'video', 'audio', 'image', 'office', 'text', 'file']),
   originUrl: z.string().optional(),
   summary: z.string().optional(),
+  /**
+   * The platform DA "page summary" agent's per-resource summary, read back from
+   * the `da-pagesummary-f-*` field when present. A real, human summary already
+   * paid for at ingest time - used as the merchandised summary source before
+   * any richer enrichment is generated.
+   */
+  pageSummary: z.string().optional(),
+  /** The raw source name (original filename/project code); muted secondary only. */
+  sourceName: z.string().optional(),
+  /** Merchandised key takeaways from the default enrichment, when generated. */
+  keyTakeaways: z.string().array().optional(),
+  /** Merchandised notable quotes from the default enrichment, when generated. */
+  quotesOfInterest: z.string().array().optional(),
+  /** True when a generated enrichment drives the title/summary. */
+  enriched: z.boolean().optional(),
   /** Extracted text per field. */
   texts: z.object({ fieldId: z.string(), text: z.string() }).array(),
   /** Timed transcript segments when the platform extracted timings. */

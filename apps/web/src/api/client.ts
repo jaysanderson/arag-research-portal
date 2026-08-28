@@ -3,6 +3,8 @@ import type {
   AnalyseEvent,
   AskEvent,
   CatalogPage,
+  EnrichmentAgentStatus,
+  EnrichmentRunEvent,
   FacetCounts,
   GenerateKind,
   GenerateResult,
@@ -1372,4 +1374,84 @@ export function synthesiseInvestigation(
     }/synthesise`,
     { method: 'POST' },
   )
+}
+
+// --- Enrichments (merchandising) --------------------------------------------
+
+/** The enrichment agents on a portal, each with its JSON schema and coverage. */
+export function getEnrichmentAgents(
+  slug: string,
+  passcode: string,
+): Promise<EnrichmentAgentStatus[]> {
+  return adminRequest<EnrichmentAgentStatus[]>(
+    `/api/admin/t/${encodeURIComponent(slug)}/enrichments`,
+    passcode,
+  )
+}
+
+/** Regenerate one resource's enrichment on demand. */
+export function enrichResource(
+  slug: string,
+  id: string,
+  passcode: string,
+): Promise<{ ok: boolean }> {
+  return adminRequest(
+    `/api/admin/t/${encodeURIComponent(slug)}/resources/${encodeURIComponent(id)}/enrich`,
+    passcode,
+    { method: 'POST' },
+  )
+}
+
+/**
+ * Run an enrichment agent over the corpus, streaming progress. `scope: 'missing'`
+ * only enriches resources without an enrichment yet; `'all'` regenerates all.
+ */
+export async function runEnrichment(
+  slug: string,
+  passcode: string,
+  body: { agentId?: string; scope: 'all' | 'missing'; limit?: number },
+  onEvent: (event: EnrichmentRunEvent) => void,
+): Promise<void> {
+  const res = await fetch(`/api/admin/t/${encodeURIComponent(slug)}/enrichments/run`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-admin-passcode': passcode },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok || !res.body) {
+    let message = res.statusText || 'Enrichment run failed'
+    try {
+      const parsed: unknown = await res.json()
+      if (
+        parsed && typeof parsed === 'object' && 'error' in parsed &&
+        typeof parsed.error === 'string'
+      ) {
+        message = parsed.error
+      }
+    } catch {
+      // Body was not JSON - keep statusText.
+    }
+    throw new ApiError(res.status, message)
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const emit = (frame: string) => {
+    const line = frame.trim()
+    if (!line) return
+    const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
+    try {
+      onEvent(JSON.parse(data) as EnrichmentRunEvent)
+    } catch {
+      // A truncated trailing frame is not an event.
+    }
+  }
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) emit(frame)
+  }
+  emit(buffer)
 }

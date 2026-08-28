@@ -673,7 +673,7 @@ function ResourceHeader(
   },
 ) {
   const year = resource.published ? formatYear(resource.published) : null
-  const projectNumber = frdcProjectNumber(resource.title)
+  const projectNumber = frdcProjectNumber(resource.sourceName ?? resource.title)
 
   return (
     <header className='mt-4'>
@@ -703,6 +703,13 @@ function ResourceHeader(
           <h1 className='rp-display text-2xl leading-tight text-ink sm:text-[1.75rem]'>
             {resource.title}
           </h1>
+          {resource.sourceName
+            ? (
+              <p className='mt-1 text-xs tabular-nums text-ink-3'>
+                Source file <span className='font-medium'>{resource.sourceName}</span>
+              </p>
+            )
+            : null}
           {resource.topicIds.length > 0
             ? (
               <div className='mt-3 flex flex-wrap gap-1.5'>
@@ -764,6 +771,44 @@ function ResourceContext({ resource }: { resource: ResourceSummary }) {
     <article className='rp-card p-5 sm:p-6' aria-labelledby='summary-heading'>
       <h2 id='summary-heading' className='rp-eyebrow text-ink-3'>Summary</h2>
       <p className='mt-2 text-sm leading-relaxed text-ink-2'>{resource.summary}</p>
+
+      {resource.keyTakeaways && resource.keyTakeaways.length > 0
+        ? (
+          <div className='mt-5 border-t border-line pt-4'>
+            <PanelHeading>Key takeaways</PanelHeading>
+            <ul className='mt-2 space-y-1.5'>
+              {resource.keyTakeaways.map((point, index) => (
+                <li key={index} className='flex gap-2 text-sm text-ink-2'>
+                  <span
+                    aria-hidden='true'
+                    className='mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[var(--rp-accent)]'
+                  />
+                  <span>{point}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+        : null}
+
+      {resource.quotesOfInterest && resource.quotesOfInterest.length > 0
+        ? (
+          <div className='mt-5 border-t border-line pt-4'>
+            <PanelHeading>Quotes of interest</PanelHeading>
+            <div className='mt-2 space-y-2.5'>
+              {resource.quotesOfInterest.map((quote, index) => (
+                <blockquote
+                  key={index}
+                  className='border-l-2 pl-3 text-sm italic leading-relaxed text-ink-2'
+                  style={{ borderColor: 'var(--rp-accent)' }}
+                >
+                  {quote}
+                </blockquote>
+              ))}
+            </div>
+          </div>
+        )
+        : null}
 
       {resource.keyFacts.length > 0
         ? (

@@ -138,7 +138,16 @@ function ResultCard(
               {resource.title}
             </Link>
           </h3>
-          <p className='mt-1.5 text-sm leading-relaxed text-ink-2'>{resource.summary}</p>
+          {resource.sourceName
+            ? (
+              <p className='mt-0.5 truncate text-[11px] tabular-nums text-ink-3/80'>
+                {resource.sourceName}
+              </p>
+            )
+            : null}
+          {resource.summary && resource.summary !== resource.title
+            ? <p className='mt-1.5 text-sm leading-relaxed text-ink-2'>{resource.summary}</p>
+            : null}
 
           {resource.matchedPassage
             ? (

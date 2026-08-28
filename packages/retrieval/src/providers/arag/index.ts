@@ -23,6 +23,7 @@ import type {
   RetrievalProvider,
   SearchOptions,
 } from '../../provider.ts'
+import { baselineMerchandising, extractPageSummary } from '../../merchandise.ts'
 import { AragApiError, type KbBinding, KbClient, ndjson } from './client.ts'
 import { spliceCitationMarkers, stripInlineMarkers } from './citations.ts'
 
@@ -342,14 +343,19 @@ type FindResponse = {
 /** Builds a CatalogItem from a raw platform resource - shared by catalogue's paged browse and its filtered-query path, so both render the same shape. */
 function catalogItemFromRaw(id: string, r: RawResource): CatalogItem {
   const status = r.metadata?.status
+  const safe = displayTitle(r.title, id)
+  const rawTitle = safe === 'Untitled resource' ? '' : (r.title ?? '')
+  const merch = baselineMerchandising(rawTitle, r.summary ?? r.extra?.metadata?.summary)
   return {
     id,
-    title: displayTitle(r.title, id),
+    title: merch.title,
     status: status === 'PROCESSED' ? 'processed' : status === 'ERROR' ? 'error' : 'pending',
     created: r.created,
     topicIds: classificationLabels(r, 'topic'),
     kind: classificationLabels(r, 'kind')[0],
     published: r.extra?.metadata?.published,
+    ...(merch.sourceName ? { sourceName: merch.sourceName } : {}),
+    enriched: false,
   }
 }
 
@@ -480,17 +486,24 @@ export class AragProvider implements RetrievalProvider {
       const t = meta.type
       return t === 'video' || t === 'web' || t === 'pdf' ? t : 'document'
     })()
-    const title = displayTitle(raw.title, id)
+    // Merchandise the raw title/summary so a filename ("1981-071-DLD.pdf") is
+    // never the headline. Junk titles (hash/bot/system) collapse to "Untitled
+    // resource" with no source name shown. The API overlays a generated
+    // enrichment (real title/summary/takeaways/quotes) from its own store.
+    const safe = displayTitle(raw.title, id)
+    const rawTitle = safe === 'Untitled resource' ? '' : (raw.title ?? '')
+    const merch = baselineMerchandising(rawTitle, meta.summary || raw.summary)
     return ResourceSummarySchema.parse({
       id,
-      title,
-      // Platform fields can be empty strings, which ?? would keep - use ||.
-      summary: meta.summary || raw.summary || title,
+      title: merch.title,
+      summary: merch.summary,
       type,
       topicIds: topicFromLabels.length > 0 ? topicFromLabels : meta.topic ? [meta.topic] : [],
       keyFacts: meta.keyFacts ?? [],
       published: meta.published,
       ...(kindLabel ? { kind: kindLabel } : {}),
+      ...(merch.sourceName ? { sourceName: merch.sourceName } : {}),
+      enriched: false,
     })
   }
 
@@ -1090,7 +1103,7 @@ export class AragProvider implements RetrievalProvider {
     tenant: TenantConfig,
     schema: { name: string; description: string; parameters: unknown },
     query: string,
-    opts: { requireGrounding?: boolean } = {},
+    opts: { requireGrounding?: boolean; resourceId?: string } = {},
   ): Promise<{ object: unknown; sources: ScoredResource[]; insufficientGrounding: boolean }> {
     const client = this.client(tenant)
     const catalogue = await this.listResources(tenant).catch(() => [] as ResourceSummary[])
@@ -1100,6 +1113,10 @@ export class AragProvider implements RetrievalProvider {
       features: ['keyword', 'semantic'],
       answer_json_schema: schema,
       show: ['basic', 'origin'],
+      // Scope generation to one resource (per-resource enrichment) - the same
+      // resource_filters the per-document chat uses. Verified live: it grounds
+      // the answer on exactly that resource.
+      ...(opts.resourceId ? { resource_filters: [opts.resourceId] } : {}),
       // The default cap triggers 412 "Error generating json: max_tokens" on
       // large payloads like comparison matrices.
       max_tokens: 4096,
@@ -1885,15 +1902,27 @@ export class AragProvider implements RetrievalProvider {
     })
     const primaryFile = files[0]
     const preview = kind === 'office' ? selectPreviewFile(files, primaryFile?.fieldId) : undefined
+    // The platform DA page-summary agent already wrote a real per-resource
+    // summary (field `da-pagesummary-f-*`) at ingest - reuse it as the
+    // merchandised summary source before any richer enrichment is generated.
+    const pageSummary = extractPageSummary(texts)
+    const rawSummary = raw.summary ||
+      (raw.extra?.metadata as { summary?: string } | undefined)?.summary
+    const safe = displayTitle(raw.title, id)
+    const rawTitle = safe === 'Untitled resource' ? '' : (raw.title ?? '')
+    const merch = baselineMerchandising(rawTitle, pageSummary || rawSummary)
     return {
       id,
-      title: displayTitle(raw.title, id),
+      title: merch.title,
       kind,
       originUrl,
-      summary: raw.summary || (raw.extra?.metadata as { summary?: string } | undefined)?.summary,
+      summary: merch.summary,
+      ...(pageSummary ? { pageSummary } : {}),
+      ...(merch.sourceName ? { sourceName: merch.sourceName } : {}),
       texts,
       transcript,
       files,
+      enriched: false,
       ...(preview ? { preview } : {}),
     }
   }

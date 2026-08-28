@@ -9,6 +9,7 @@ import { InterrogatePanel } from './admin/InterrogatePanel.tsx'
 import { AppearancePanel } from './admin/AppearancePanel.tsx'
 import { BehaviourPanel } from './admin/BehaviourPanel.tsx'
 import { CorpusHealthPanel } from './admin/CorpusHealthPanel.tsx'
+import { EnrichmentsPanel } from './admin/EnrichmentsPanel.tsx'
 import { InsightsPanel } from './admin/InsightsPanel.tsx'
 import { KgPanel } from './admin/KgPanel.tsx'
 import { RecentList } from './admin/RecentList.tsx'
@@ -21,6 +22,7 @@ type TabId =
   | 'overview'
   | 'insights'
   | 'content'
+  | 'enrichments'
   | 'taxonomy'
   | 'graph'
   | 'appearance'
@@ -31,6 +33,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'insights', label: 'Insights' },
   { id: 'content', label: 'Content' },
+  { id: 'enrichments', label: 'Enrichments' },
   { id: 'taxonomy', label: 'Taxonomy' },
   { id: 'graph', label: 'Knowledge graph' },
   { id: 'appearance', label: 'Appearance' },
@@ -260,6 +263,18 @@ export function ManagePage() {
                   {reachable && <SourcesPanel slug={slug} passcode={passcode} />}
                   {reachable && <CorpusHealthPanel slug={slug} passcode={passcode} />}
                 </div>
+              )}
+
+              {tab === 'enrichments' && (
+                reachable
+                  ? <EnrichmentsPanel slug={slug} passcode={passcode} />
+                  : (
+                    <div className='rp-card p-5'>
+                      <p className='text-sm text-ink-3'>
+                        Connect a knowledge box to generate enrichments.
+                      </p>
+                    </div>
+                  )
               )}
 
               {tab === 'taxonomy' && (

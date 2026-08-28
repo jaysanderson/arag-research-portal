@@ -2,7 +2,13 @@ import { type Context, Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
 import { z } from 'zod'
-import { GenerateKindSchema } from '@research-portal/core'
+import {
+  DEFAULT_RESEARCH_ENRICHMENT,
+  ENRICHMENT_AGENTS,
+  type EnrichmentAgentStatus,
+  enrichmentJsonSchema,
+  GenerateKindSchema,
+} from '@research-portal/core'
 import type { MigrationEvent, TenantConfig } from '@research-portal/core'
 import {
   AragApiError,
@@ -38,6 +44,16 @@ import {
 import { syncSource } from './scheduler.ts'
 import { implementSuggestion, runInterrogation, SuggestionStore } from './interrogate.ts'
 import { clientIp, rateLimit, SlidingWindowLimiter } from './rate-limit.ts'
+import {
+  EnrichmentStore,
+  generateEnrichment,
+  merchandiseCatalogPage,
+  merchandiseContent,
+  merchandiseSearchResults,
+  merchandiseSummaries,
+  merchandiseSummary,
+  runEnrichmentOverCorpus,
+} from './enrichments.ts'
 
 const searchQuerySchema = z.object({ q: z.string().min(1) })
 const askBodySchema = z.object({
@@ -270,6 +286,8 @@ export interface BuildAppOptions {
   sources?: SourceStore
   /** Watch registry; same sharing rationale as `sources`. */
   watches?: WatchStore
+  /** Merchandising enrichment cache; a fresh store when omitted (tests). */
+  enrichments?: EnrichmentStore
   zone?: string
   adminPasscode?: string
   /** Where the built SPA lives; overridable in tests. Defaults to ./apps/web/dist. */
@@ -294,6 +312,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
   const sources = opts.sources ?? new SourceStore()
   const investigations = new InvestigationStore()
   const suggestions = new SuggestionStore()
+  const enrichments = opts.enrichments ?? new EnrichmentStore()
   const clientId = (c: Context): string => c.req.header('x-rp-client') ?? 'anonymous'
   const app = new Hono()
 
@@ -431,7 +450,8 @@ export function buildApp(opts: BuildAppOptions): Hono {
     const mode = modeRaw === 'semantic' || modeRaw === 'keyword' ? modeRaw : 'hybrid'
     const topicIds = (c.req.query('topics') ?? '').split(',').filter(Boolean)
     const kindIds = (c.req.query('kinds') ?? '').split(',').filter(Boolean)
-    return c.json(await provider.search(config, parsed.data.q, { mode, topicIds, kindIds }))
+    const results = await provider.search(config, parsed.data.q, { mode, topicIds, kindIds })
+    return c.json(merchandiseSearchResults(enrichments, config.slug, results))
   })
 
   app.get('/api/t/:slug/catalog', async (c) => {
@@ -439,27 +459,27 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     const sortRaw = c.req.query('sort')
     const orderRaw = c.req.query('order')
-    return c.json(
-      await provider.catalog(config, {
-        kindIds: (c.req.query('kind') ?? '').split(',').filter(Boolean),
-        page: Math.max(0, Math.floor(Number(c.req.query('page') ?? 0) || 0)),
-        pageSize: Math.min(
-          Math.max(1, Math.floor(Number(c.req.query('pageSize') ?? 24) || 24)),
-          100,
-        ),
-        query: c.req.query('q') || undefined,
-        topicIds: (c.req.query('topics') ?? '').split(',').filter(Boolean),
-        sortField: sortRaw === 'modified' || sortRaw === 'title' ? sortRaw : 'created',
-        sortOrder: orderRaw === 'asc' ? 'asc' : 'desc',
-      }),
-    )
+    const page = await provider.catalog(config, {
+      kindIds: (c.req.query('kind') ?? '').split(',').filter(Boolean),
+      page: Math.max(0, Math.floor(Number(c.req.query('page') ?? 0) || 0)),
+      pageSize: Math.min(
+        Math.max(1, Math.floor(Number(c.req.query('pageSize') ?? 24) || 24)),
+        100,
+      ),
+      query: c.req.query('q') || undefined,
+      topicIds: (c.req.query('topics') ?? '').split(',').filter(Boolean),
+      sortField: sortRaw === 'modified' || sortRaw === 'title' ? sortRaw : 'created',
+      sortOrder: orderRaw === 'asc' ? 'asc' : 'desc',
+    })
+    return c.json(merchandiseCatalogPage(enrichments, config.slug, page))
   })
 
   app.get('/api/t/:slug/topics/:topicId/resources', async (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     const limit = Math.min(Math.max(1, Math.floor(Number(c.req.query('limit') ?? 12) || 12)), 24)
-    return c.json(await provider.topicResources(config, c.req.param('topicId'), limit))
+    const items = await provider.topicResources(config, c.req.param('topicId'), limit)
+    return c.json(merchandiseSummaries(enrichments, config.slug, items))
   })
 
   app.get('/api/t/:slug/facets', async (c) => {
@@ -484,7 +504,9 @@ export function buildApp(opts: BuildAppOptions): Hono {
   app.get('/api/t/:slug/resources', async (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
-    return c.json(await provider.listResources(config))
+    return c.json(
+      merchandiseSummaries(enrichments, config.slug, await provider.listResources(config)),
+    )
   })
 
   app.get('/api/t/:slug/resources/:id', async (c) => {
@@ -492,7 +514,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     const resource = await provider.resource(config, c.req.param('id'))
     if (!resource) return c.json({ error: 'unknown_resource' }, 404)
-    return c.json(resource)
+    return c.json(merchandiseSummary(enrichments, config.slug, resource))
   })
 
   app.get('/api/t/:slug/resources/:id/content', async (c) => {
@@ -501,7 +523,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
     const content = await opts.management.resourceContent(config, c.req.param('id'))
     if (!content) return c.json({ error: 'unknown_resource' }, 404)
-    return c.json(content)
+    return c.json(merchandiseContent(enrichments, config.slug, content))
   })
 
   app.get('/api/t/:slug/resources/:id/file/:fieldId', async (c) => {
@@ -1483,6 +1505,102 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (unavailableAd) return unavailableAd
     await management!.deleteAgent(config, c.req.param('taskId'))
     return c.json({ ok: true })
+  })
+
+  // ------------------------------------------------------------------------
+  // Enrichments (merchandising) - the schema-driven generator agents that
+  // replace raw filenames with a real title/summary/takeaways/quotes. Phase 1
+  // ships the default "research summary" agent; each appears here with its JSON
+  // schema and run controls, gated by the admin passcode.
+  // ------------------------------------------------------------------------
+
+  const ENRICHMENT_GENERATION_NOTE =
+    "Generated in-app with the platform's query-time structured answer " +
+    "(answer_json_schema) scoped to each resource, then cached. The platform's " +
+    'ingest-time JSON generator is not available on this knowledge box, so this ' +
+    "schema-driven path is used instead. The summary reuses the platform's existing " +
+    'per-resource page summary where one was already generated.'
+
+  app.get('/api/admin/t/:slug/enrichments', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailableEn = requireManagement(c)
+    if (unavailableEn) return unavailableEn
+    let total = 0
+    try {
+      total = (await management!.listResources(config)).length
+    } catch {
+      total = 0
+    }
+    const rows: EnrichmentAgentStatus[] = ENRICHMENT_AGENTS.map((agent) => ({
+      agent,
+      jsonSchema: enrichmentJsonSchema(agent),
+      enrichedCount: enrichments.count(config.slug, agent.id),
+      totalCount: total,
+      generationNote: ENRICHMENT_GENERATION_NOTE,
+    }))
+    return c.json(rows)
+  })
+
+  app.post('/api/admin/t/:slug/enrichments/run', (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailableRun = requireManagement(c)
+    if (unavailableRun) return unavailableRun
+    return streamSSE(c, async (stream) => {
+      try {
+        const body = await c.req.json().catch(() => ({})) as {
+          scope?: string
+          limit?: number
+          agentId?: string
+        }
+        const scope = body.scope === 'all' ? 'all' : 'missing'
+        const limit = typeof body.limit === 'number' && body.limit > 0
+          ? Math.min(Math.floor(body.limit), 2000)
+          : undefined
+        const agent = ENRICHMENT_AGENTS.find((a) => a.id === body.agentId) ??
+          DEFAULT_RESEARCH_ENRICHMENT
+        for await (
+          const event of runEnrichmentOverCorpus(management!, enrichments, config, {
+            scope,
+            limit,
+            agent,
+          })
+        ) {
+          await stream.writeSSE({ data: JSON.stringify(event) })
+        }
+      } catch (err) {
+        await stream.writeSSE({
+          data: JSON.stringify({
+            type: 'error',
+            message: err instanceof Error ? err.message : 'Enrichment run failed',
+          }),
+        })
+      }
+    })
+  })
+
+  app.post('/api/admin/t/:slug/resources/:id/enrich', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailableOne = requireManagement(c)
+    if (unavailableOne) return unavailableOne
+    const id = c.req.param('id')
+    try {
+      const agentId = new URL(c.req.url).searchParams.get('agentId')
+      const agent = ENRICHMENT_AGENTS.find((a) => a.id === agentId) ?? DEFAULT_RESEARCH_ENRICHMENT
+      const enrichment = await generateEnrichment(management!, config, id, agent)
+      enrichments.put(config.slug, id, enrichment)
+      const resource = await provider.resource(config, id)
+      return c.json({
+        ok: true,
+        enrichment,
+        resource: resource ? merchandiseSummary(enrichments, config.slug, resource) : null,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'generation failed'
+      return c.json({ error: 'enrichment_failed', message }, 502)
+    }
   })
 
   app.post('/api/admin/t/:slug/branding/:kind', async (c) => {

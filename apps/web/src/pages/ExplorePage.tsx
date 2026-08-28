@@ -351,7 +351,16 @@ function ResourceCard({ slug, resource }: { slug: string; resource: ResourceSumm
         <h3 className='rp-clamp-2 text-[0.9375rem] font-semibold leading-snug tracking-[-0.01em] text-ink'>
           {resource.title}
         </h3>
-        <p className='rp-clamp-3 text-sm leading-relaxed text-ink-3'>{resource.summary}</p>
+        {resource.summary && resource.summary !== resource.title
+          ? <p className='rp-clamp-3 text-sm leading-relaxed text-ink-3'>{resource.summary}</p>
+          : null}
+        {resource.sourceName
+          ? (
+            <p className='mt-auto truncate pt-1 text-[11px] tabular-nums text-ink-3/80'>
+              {resource.sourceName}
+            </p>
+          )
+          : null}
       </div>
     </Link>
   )

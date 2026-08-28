@@ -10,3 +10,12 @@ export {
 } from './providers/arag/client.ts'
 export type { KbBinding } from './providers/arag/client.ts'
 export { createProviderFromEnv, envBindings } from './env.ts'
+export {
+  baselineMerchandising,
+  extractPageSummary,
+  fallbackTitle,
+  looksLikeFilenameTitle,
+  type Merchandised,
+  overlayEnrichment,
+  sourceNameFor,
+} from './merchandise.ts'
