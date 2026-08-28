@@ -116,6 +116,25 @@ in-app admin surface, not by hand.
   evaluation each iteration, and their findings drive the next build. This compresses the pilot
   era into an agent-speed loop and feeds straight into the v1.0 launch candidate. Real client
   feedback is welcome but not on the critical path.
+- **2026-08-28** - Trust-through-transparency directive (Jay): maximise accuracy via ARAG's
+  advanced retrieval configurations AND make confidence fully transparent, so a low-confidence
+  answer is clearly communicated rather than presented as authoritative. Two workstreams:
+  (1) Accuracy - add a reranking pass and an accuracy-measurement harness over dozens of real
+  scientist questions, tuning retrieval configs (rag_strategies, search configurations, reranker)
+  against measured results, not assertion. Current ask already uses neighbouring_paragraphs,
+  graph_beta, full_resource (deep), prequeries, image/table strategies and REMi. (2) Transparency
+  - promote the REMi trust signal from coloured meters to an explicit per-answer confidence state
+  with an unmissable plain-language low-confidence warning ("treat as a lead, verify against the
+  cited sources"); never present a weak answer as authoritative. The acceptance sweep reports the
+  confidence distribution. Sequenced after the in-flight FRDC punch-list to avoid conflicts.
+- **2026-08-28** - Handover quality bar (Jay): "I can't have anything not working when I hand it
+  over." Hard gate before any client handover: a **full functional acceptance sweep** - every
+  user-facing feature and endpoint exercised against the real FRDC corpus, scored pass/fail,
+  all green. Distinct from factual accuracy of AI answers, which is inherently probabilistic:
+  the guarantee there is no fabrication (grounding gates), every citation resolves to a real
+  openable source, and honest refusal over bluffing - measured with a scored rubric across
+  dozens of scientist questions, not claimed as infallible. The acceptance sweep runs AFTER the
+  in-flight fixes land, so it tests the fixed portal, and its green result is part of the go.
 - **2026-08-28** - Design directive (Jay): the portal must not look "vibe coded" - no generic
   AI-generated design tells. A judgment-tier design-craft pass joins the roadmap: considered
   typography and spacing, distinct per-tenant identity, purposeful motion, nothing templated.

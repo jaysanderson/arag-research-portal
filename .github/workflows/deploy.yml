@@ -62,11 +62,9 @@ jobs:
         # scripted test-double retrieval provider (no real ARAG account) -
         # see e2e/persona-journeys.test.ts. Separate from the unit gate above
         # (deno task test) since it downloads/drives a real browser.
-        # Report-only for now: this passes locally, but must be seen green in
-        # CI once before it blocks deploys - a headless-browser quirk in the
-        # runner must never block a delivery-day deploy. Flip to blocking (drop
-        # continue-on-error) after the first green CI run.
-        continue-on-error: true
+        # Blocking: proven green in CI (persona-gate run, 2026-08-28), so a
+        # failure here now genuinely means a broken persona journey and must
+        # stop the deploy.
         run: deno task test:e2e
 
   deploy:

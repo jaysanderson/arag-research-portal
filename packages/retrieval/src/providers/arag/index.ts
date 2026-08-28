@@ -57,6 +57,61 @@ export function looksLikeReferenceChunk(text: string): boolean {
 }
 
 /**
+ * Raw platform id/hash rather than a human title - the shape a resource's
+ * internal identifier takes when title extraction failed and the id leaked
+ * through as the display title (e.g. a bare 32-char hex uuid). Requires both
+ * a letter and a digit so ordinary short codes and numeric strings never
+ * false-positive.
+ */
+export function looksLikeRawHashTitle(value: string): boolean {
+  const v = value.trim()
+  if (!v || v.includes(' ')) return false
+  return /^[a-f0-9-]{20,64}$/i.test(v) && /[a-f]/i.test(v) && /\d/.test(v)
+}
+
+/** Known bot-challenge page titles that must never surface as a resource label. */
+export function looksLikeBotChallengeTitle(value: string): boolean {
+  return /(just a moment\s*\.{0,3}$|attention required|please verify you are human|enable javascript and cookies to continue)/i
+    .test(value.trim())
+}
+
+/**
+ * A resource's best available human title, never a raw platform id/hash and
+ * never a bot-challenge string. Falls back to a clean, generic label rather
+ * than the id itself - a bare FRDC-style project code is fine to show as-is,
+ * it just isn't a hash.
+ */
+export function displayTitle(rawTitle: string | undefined, _id: string): string {
+  const trimmed = (rawTitle ?? '').trim()
+  if (trimmed && !looksLikeRawHashTitle(trimmed) && !looksLikeBotChallengeTitle(trimmed)) {
+    return trimmed
+  }
+  return 'Untitled resource'
+}
+
+/** The shape `isDisplayableResource` needs from a raw platform resource. */
+export interface DisplayabilityInput {
+  title?: string
+  metadata?: { status?: string }
+}
+
+/**
+ * Whether a resource belongs in a user-facing list (catalog, library,
+ * search, typeahead). Failed ingests (status ERROR) and junk titles - a raw
+ * platform hash where title extraction failed, or a bot-challenge page that
+ * slipped through ingestion - are hidden from every user-facing surface.
+ * Admin/corpus-health surfaces read the platform's raw catalogue directly
+ * and never call this, so curators still see everything that needs fixing.
+ */
+export function isDisplayableResource(raw: DisplayabilityInput): boolean {
+  if ((raw.metadata?.status ?? '').toUpperCase() === 'ERROR') return false
+  const title = (raw.title ?? '').trim()
+  if (looksLikeRawHashTitle(title)) return false
+  if (looksLikeBotChallengeTitle(title)) return false
+  return true
+}
+
+/**
  * Relevance floor for structured generation's grounding gate: a calibrated
  * retrieval score below this is noise, not evidence - the same floor
  * `search`'s MIN_SCORE already applies to /find results. Kept as its own
@@ -64,6 +119,19 @@ export function looksLikeReferenceChunk(text: string): boolean {
  * independent of search's, even though today the two agree.
  */
 export const MIN_GENERATE_GROUNDING = 0.1
+
+/**
+ * Refusal-override floor for `ask`: a known platform quirk (see
+ * docs/ARAG-DEV.md) has Nuclia's default guardrail sentence ("Not enough
+ * data to answer this.") fire even when the system prompt explicitly forbids
+ * it and genuinely relevant material was retrieved - this is the inconsistent
+ * refusal a rephrased question sails past. When a retrieved source clears
+ * this bar, one retry with a firmer directive runs before an honest refusal
+ * is accepted (see `ask`). Set well above the search/grounding noise floor
+ * (`MIN_GENERATE_GROUNDING`, 0.1) so a genuinely out-of-corpus question -
+ * which retrieves nothing this relevant - is never talked out of refusing.
+ */
+export const MIN_REFUSAL_OVERRIDE_RELEVANCE = 0.3
 
 /**
  * Calibrates a raw retrieval score to [0, 1], comparable across queries:
@@ -131,6 +199,104 @@ interface RawResource {
   metadata?: { status?: string }
 }
 
+/** Shape of a /find response's resources map - shared by `search` and `catalogByQuery`. */
+type FindResponse = {
+  resources?: Record<
+    string,
+    RawResource & {
+      fields?: Record<string, { paragraphs?: Record<string, { score?: number; text?: string }> }>
+    }
+  >
+}
+
+/** Builds a CatalogItem from a raw platform resource - shared by catalogue's paged browse and its filtered-query path, so both render the same shape. */
+function catalogItemFromRaw(id: string, r: RawResource): CatalogItem {
+  const status = r.metadata?.status
+  return {
+    id,
+    title: displayTitle(r.title, id),
+    status: status === 'PROCESSED' ? 'processed' : status === 'ERROR' ? 'error' : 'pending',
+    created: r.created,
+    topicIds: (r.usermetadata?.classifications ?? [])
+      .filter((c) => c.labelset === 'topic' && c.label)
+      .map((c) => c.label as string),
+    kind: (r.usermetadata?.classifications ?? []).find((c) => c.labelset === 'kind' && c.label)
+      ?.label,
+    published: r.extra?.metadata?.published,
+  }
+}
+
+/**
+ * Words too generic to signal a real topic match between a query and a
+ * suggested question - question scaffolding ("what", "does", "about"), not
+ * subject matter.
+ */
+const RELATED_QUESTION_STOPWORDS = new Set([
+  'what',
+  'does',
+  'about',
+  'which',
+  'that',
+  'this',
+  'from',
+  'with',
+  'into',
+  'than',
+  'then',
+  'over',
+  'under',
+  'more',
+  'some',
+  'will',
+  'have',
+  'been',
+  'were',
+  'being',
+  'says',
+  'say',
+  'covers',
+  'cover',
+  'how',
+  'when',
+  'where',
+  'who',
+  'whom',
+  'whose',
+  'why',
+  'also',
+])
+
+/**
+ * Query-aware "people also ask": `tenant.suggestedQuestions` filtered to the
+ * ones that actually share meaningful words with the current query, so the
+ * widget reflects what was searched instead of showing the same static
+ * chips for every query. Returns `[]` when nothing genuinely overlaps - the
+ * caller hides the widget rather than showing irrelevant suggestions. (The
+ * platform's per-resource synthetic-questions DA output isn't read back
+ * anywhere yet - see the final report; this is a lightweight heuristic over
+ * the tenant's own curated question list, not a rewrite of that task.)
+ */
+export function deriveRelatedQuestions(query: string, suggested: Question[]): Question[] {
+  const lowered = query.trim().toLowerCase()
+  const queryWords = new Set(
+    lowered.split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !RELATED_QUESTION_STOPWORDS.has(w)),
+  )
+  if (queryWords.size === 0) return []
+  return suggested
+    .filter((q) => q.text.toLowerCase() !== lowered)
+    .map((q) => {
+      const words = q.text.toLowerCase().split(/[^a-z0-9]+/).filter((w) =>
+        w.length >= 4 && !RELATED_QUESTION_STOPWORDS.has(w)
+      )
+      const overlap = words.filter((w) => queryWords.has(w)).length
+      return { q, overlap }
+    })
+    .filter((s) => s.overlap > 0)
+    .sort((a, b) => b.overlap - a.overlap)
+    .slice(0, 4)
+    .map((s) => s.q)
+}
+
 export class KnowledgeBoxNotConnectedError extends Error {
   constructor(readonly slug: string) {
     super(`No knowledge box connected for tenant '${slug}'`)
@@ -190,11 +356,12 @@ export class AragProvider implements RetrievalProvider {
       const t = meta.type
       return t === 'video' || t === 'web' || t === 'pdf' ? t : 'document'
     })()
+    const title = displayTitle(raw.title, id)
     return ResourceSummarySchema.parse({
       id,
-      title: raw.title || id,
+      title,
       // Platform fields can be empty strings, which ?? would keep - use ||.
-      summary: meta.summary || raw.summary || raw.title || id,
+      summary: meta.summary || raw.summary || title,
       type,
       topicIds: topicFromLabels.length > 0 ? topicFromLabels : meta.topic ? [meta.topic] : [],
       keyFacts: meta.keyFacts ?? [],
@@ -216,7 +383,12 @@ export class AragProvider implements RetrievalProvider {
         `/catalog?page_number=${page}&page_size=${CATALOG_PAGE_SIZE}&show=basic&show=extra`,
       )
       const batch = Object.entries(catalog.resources ?? {})
-      for (const [id, raw] of batch) resources.push(this.toSummary(id, raw))
+      for (const [id, raw] of batch) {
+        // Failed ingests and junk (hash/bot-challenge) titles never reach a
+        // user-facing list - see isDisplayableResource.
+        if (!isDisplayableResource(raw)) continue
+        resources.push(this.toSummary(id, raw))
+      }
       if (batch.length < CATALOG_PAGE_SIZE) break
     }
     resources.sort((a, b) => (b.published ?? '').localeCompare(a.published ?? ''))
@@ -426,43 +598,16 @@ export class AragProvider implements RetrievalProvider {
       ...(opts.kindIds ?? []).map((k) => `/classification.labels/kind/${k}`),
     ]
     if (filters.length > 0) body.filters = filters
-    type FindResponse = {
-      resources?: Record<
-        string,
-        RawResource & {
-          fields?: Record<
-            string,
-            { paragraphs?: Record<string, { score?: number; text?: string }> }
-          >
-        }
-      >
-    }
-    const findWithFallback = async (): Promise<FindResponse> => {
-      try {
-        const first = await client.postJson<FindResponse>('/find', body)
-        // A stored search configuration can exist but be broken - seen live
-        // on admin-connected boxes where the configured find returns zero
-        // for every query while a config-free find works. Zero resources
-        // with a named config attached earns one config-free retry.
-        if (body.search_configuration && Object.keys(first.resources ?? {}).length === 0) {
-          delete body.search_configuration
-          return await client.postJson<FindResponse>('/find', body)
-        }
-        return first
-      } catch (err) {
-        if (err instanceof AragApiError && err.status >= 400 && err.status < 500) {
-          delete body.search_configuration
-          return await client.postJson<FindResponse>('/find', body)
-        }
-        throw err
-      }
-    }
     const [found, all] = await Promise.all([
-      findWithFallback(),
+      this.findWithFallback(client, body),
       this.listResources(tenant),
     ])
     const byId = new Map(all.map((r) => [r.id, r]))
-    const entries = Object.entries(found.resources ?? {})
+    // Failed ingests and junk (hash/bot-challenge) titles never surface as a
+    // search result - see isDisplayableResource.
+    const entries = Object.entries(found.resources ?? {}).filter(([, raw]) =>
+      isDisplayableResource(raw)
+    )
     // Relevance floor: below this a match is noise, and an off-corpus query
     // should say "no results" honestly rather than surface weak hits.
     const MIN_SCORE = 0.1
@@ -510,14 +655,46 @@ export class AragProvider implements RetrievalProvider {
         ...(reference ? { referenceChunk: true } : {}),
       }),
     )
-    const lowered = trimmed.toLowerCase()
-    const relatedQuestions = tenant.suggestedQuestions
-      .filter((q) => q.text.toLowerCase() !== lowered)
-      .slice(0, 4)
+    const relatedQuestions = deriveRelatedQuestions(trimmed, tenant.suggestedQuestions)
     return { query: trimmed, resources, relatedQuestions }
   }
 
+  /**
+   * POST /find with the fallback the platform's search configuration bug
+   * needs: a stored config can exist but return zero for every query on an
+   * admin-connected box while a config-free find works - shed it and retry
+   * once, on a zero-result response or a 4xx before the fallback would ever
+   * see output. Shared by `search` and the catalogue's filtered-query path
+   * (`catalog`/`catalogByQuery`) so both use the exact same retrieval call.
+   */
+  private async findWithFallback(
+    client: KbClient,
+    body: Record<string, unknown>,
+  ): Promise<FindResponse> {
+    try {
+      const first = await client.postJson<FindResponse>('/find', body)
+      if (body.search_configuration && Object.keys(first.resources ?? {}).length === 0) {
+        delete body.search_configuration
+        return await client.postJson<FindResponse>('/find', body)
+      }
+      return first
+    } catch (err) {
+      if (err instanceof AragApiError && err.status >= 400 && err.status < 500) {
+        delete body.search_configuration
+        return await client.postJson<FindResponse>('/find', body)
+      }
+      throw err
+    }
+  }
+
   async catalog(tenant: TenantConfig, opts: CatalogOptions = {}): Promise<CatalogPage> {
+    const query = opts.query?.trim()
+    // A query filters the library, so it needs real retrieval, not the bare
+    // `/catalog?query=` title-substring match (weak - it misses documents
+    // `/find` finds for the same string). Route it through the same
+    // retrieval path `search` uses; unfiltered browse/paging below is
+    // untouched.
+    if (query) return await this.catalogByQuery(tenant, query, opts)
     const params = new URLSearchParams()
     params.set('page_number', String(opts.page ?? 0))
     params.set('page_size', String(opts.pageSize ?? 24))
@@ -526,7 +703,6 @@ export class AragProvider implements RetrievalProvider {
     params.set('sort_field', opts.sortField ?? 'created')
     params.set('sort_order', opts.sortOrder ?? 'desc')
     params.set('hidden', 'false')
-    if (opts.query) params.set('query', opts.query)
     for (const topic of opts.topicIds ?? []) {
       params.append('filters', `/classification.labels/topic/${topic}`)
     }
@@ -538,22 +714,57 @@ export class AragProvider implements RetrievalProvider {
       fulltext?: { total?: number }
       total?: number
     }>(`/catalog?${params.toString()}`)
-    const items: CatalogItem[] = Object.entries(raw.resources ?? {}).map(([id, r]) => {
-      const status = r.metadata?.status
-      return {
-        id,
-        title: r.title ?? id,
-        status: status === 'PROCESSED' ? 'processed' : status === 'ERROR' ? 'error' : 'pending',
-        created: r.created,
-        topicIds: (r.usermetadata?.classifications ?? [])
-          .filter((c) => c.labelset === 'topic' && c.label)
-          .map((c) => c.label as string),
-        kind: (r.usermetadata?.classifications ?? [])
-          .find((c) => c.labelset === 'kind' && c.label)?.label,
-        published: r.extra?.metadata?.published,
-      }
-    })
+    // Failed ingests and junk (hash/bot-challenge) titles never surface in
+    // the library - see isDisplayableResource.
+    const entries = Object.entries(raw.resources ?? {}).filter(([, r]) => isDisplayableResource(r))
+    const items: CatalogItem[] = entries.map(([id, r]) => catalogItemFromRaw(id, r))
     return { items, total: raw.fulltext?.total ?? raw.total ?? items.length }
+  }
+
+  /**
+   * Filtered catalogue browse: real retrieval via `/find` (the same path
+   * `search` uses), reshaped into the catalogue's own item shape and paged
+   * in-memory over the candidate pool. `total` reflects the candidate pool
+   * actually scored (capped below), not the platform's full-corpus count.
+   */
+  private async catalogByQuery(
+    tenant: TenantConfig,
+    query: string,
+    opts: CatalogOptions,
+  ): Promise<CatalogPage> {
+    const client = this.client(tenant)
+    const body: Record<string, unknown> = {
+      query,
+      features: ['keyword', 'semantic'],
+      page_size: 200,
+      show: ['basic', 'extra'],
+      search_configuration: 'portal-search',
+    }
+    const filters = [
+      ...(opts.topicIds ?? []).map((t) => `/classification.labels/topic/${t}`),
+      ...(opts.kindIds ?? []).map((k) => `/classification.labels/kind/${k}`),
+    ]
+    if (filters.length > 0) body.filters = filters
+    const found = await this.findWithFallback(client, body)
+    const MIN_SCORE = 0.1
+    const scored = Object.entries(found.resources ?? {})
+      .filter(([, raw]) => isDisplayableResource(raw))
+      .map(([id, raw]) => {
+        let best = 0
+        for (const field of Object.values(raw.fields ?? {})) {
+          for (const paragraph of Object.values(field.paragraphs ?? {})) {
+            best = Math.max(best, paragraph.score ?? 0)
+          }
+        }
+        return { id, raw, best }
+      })
+      .filter((s) => s.best >= MIN_SCORE)
+      .sort((a, b) => b.best - a.best)
+    const items = scored.map(({ id, raw }) => catalogItemFromRaw(id, raw))
+    const page = opts.page ?? 0
+    const pageSize = opts.pageSize ?? 24
+    const start = page * pageSize
+    return { items: items.slice(start, start + pageSize), total: items.length }
   }
 
   async facets(
@@ -1193,40 +1404,82 @@ export class AragProvider implements RetrievalProvider {
     )
   }
 
-  /** Type-ahead: entity and title suggestions from the box's suggest index. */
+  /**
+   * Type-ahead: entity and title suggestions. The platform's `/suggest`
+   * index alone is weak on short prefixes - it can rank author-name/
+   * fragment noise over an obviously-relevant title (a query like "abal"
+   * never surfacing "abalone"), so every candidate (platform or local) is
+   * required to actually contain the query as a prefix or a whole word, and
+   * results are backed by a lightweight prefix match over the corpus's own
+   * (already-filtered, per isDisplayableResource) titles and the tenant's
+   * topic labels when the platform index comes up short.
+   */
   async typeahead(
     tenant: TenantConfig,
     query: string,
   ): Promise<{ entities: string[]; titles: string[] }> {
-    try {
-      const raw = await this.client(tenant).getJson<{
-        entities?: { entities?: { value?: string }[] }
-        paragraphs?: {
-          results?: { rid?: string; field?: string; text?: string }[]
-        }
-      }>(
-        `/suggest?query=${encodeURIComponent(query)}&features=entities&features=paragraph`,
-      )
-      // The graph agent occasionally extracts vague time/direction words as
-      // entities - keep suggestions to substantive names.
-      const NOISE =
-        /^(recent|early|late|last|next|this|coming|current|previous)\b|^(north|south|east|west)$|^(january|february|march|april|may|june|july|august|september|october|november|december)\b|^\d{1,4}$/i
-      const entities = (raw.entities?.entities ?? [])
-        .map((e) => (e.value ?? '').trim())
-        .filter((v) => v.length > 2 && !NOISE.test(v) && !v.includes('\n'))
-        .slice(0, 6)
-      const seen = new Set<string>()
-      const titles: string[] = []
-      for (const r of raw.paragraphs?.results ?? []) {
-        if (r.field !== 'title' || !r.text || !r.rid || seen.has(r.rid)) continue
-        seen.add(r.rid)
-        titles.push(r.text)
+    const trimmed = query.trim()
+    if (!trimmed) return { entities: [], titles: [] }
+    const q = trimmed.toLowerCase()
+    const matchesQuery = (value: string): boolean => {
+      const v = value.toLowerCase()
+      if (v.startsWith(q)) return true
+      return v.split(/[^a-z0-9]+/).some((word) => word.length > 0 && word.startsWith(q))
+    }
+
+    const [resources, platform] = await Promise.all([
+      this.listResources(tenant).catch(() => [] as ResourceSummary[]),
+      this.client(tenant)
+        .getJson<{
+          entities?: { entities?: { value?: string }[] }
+          paragraphs?: { results?: { rid?: string; field?: string; text?: string }[] }
+        }>(`/suggest?query=${encodeURIComponent(trimmed)}&features=entities&features=paragraph`)
+        .catch(() => ({ entities: undefined, paragraphs: undefined })),
+    ])
+    const displayableIds = new Set(resources.map((r) => r.id))
+
+    // The graph agent occasionally extracts vague time/direction words as
+    // entities - keep suggestions to substantive names that actually match
+    // the query, dropping single-fragment noise unrelated to it.
+    const NOISE =
+      /^(recent|early|late|last|next|this|coming|current|previous)\b|^(north|south|east|west)$|^(january|february|march|april|may|june|july|august|september|october|november|december)\b|^\d{1,4}$/i
+    const entities = (platform.entities?.entities ?? [])
+      .map((e) => (e.value ?? '').trim())
+      .filter((v) => v.length > 2 && !NOISE.test(v) && !v.includes('\n') && matchesQuery(v))
+      .slice(0, 6)
+
+    const seen = new Set<string>()
+    const titles: string[] = []
+    for (const r of platform.paragraphs?.results ?? []) {
+      if (r.field !== 'title' || !r.text || !r.rid || seen.has(r.rid)) continue
+      // Drop hits on hidden/junk resources (error status, hash or
+      // bot-challenge titles) and anything that doesn't actually match.
+      if (!displayableIds.has(r.rid) || !matchesQuery(r.text)) continue
+      seen.add(r.rid)
+      titles.push(r.text)
+      if (titles.length >= 5) break
+    }
+
+    // Local fallback/augmentation over real, displayable resource titles.
+    if (titles.length < 5) {
+      for (const r of resources) {
+        if (seen.has(r.id) || titles.includes(r.title) || !matchesQuery(r.title)) continue
+        seen.add(r.id)
+        titles.push(r.title)
         if (titles.length >= 5) break
       }
-      return { entities, titles }
-    } catch {
-      return { entities: [], titles: [] }
     }
+    // Known topic/entity terms - a query like "abal" should surface an
+    // "Abalone" topic chip even when no title happens to start with it.
+    if (entities.length < 6) {
+      for (const topic of tenant.topics) {
+        if (entities.includes(topic.label) || !matchesQuery(topic.label)) continue
+        entities.push(topic.label)
+        if (entities.length >= 6) break
+      }
+    }
+
+    return { entities, titles }
   }
 
   /** Named search configurations on the box - the wiring for every surface. */
@@ -1376,7 +1629,7 @@ export class AragProvider implements RetrievalProvider {
       : 'text'
     return {
       id,
-      title: raw.title || id,
+      title: displayTitle(raw.title, id),
       kind,
       originUrl,
       summary: raw.summary || (raw.extra?.metadata as { summary?: string } | undefined)?.summary,
@@ -1496,6 +1749,11 @@ export class AragProvider implements RetrievalProvider {
     let refusalPossible = true
     let generating = false
     let emitted = false
+    // See MIN_REFUSAL_OVERRIDE_RELEVANCE: at most one retry when the model
+    // refuses despite a genuinely relevant retrieved source - never more,
+    // so a true out-of-corpus question (no strong source to trigger it)
+    // refuses exactly as before.
+    let refusalRetried = false
     // Raw citations-map entries accumulate across every `citations` NDJSON
     // item (the platform can stream them progressively). Binding only runs
     // once, on the complete map against the complete answer text - see
@@ -1650,6 +1908,26 @@ export class AragProvider implements RetrievalProvider {
           delete body.search_configuration
           continue
         }
+        // Refusal-calibration fix: the model produced only the guardrail
+        // sentence, but a genuinely relevant source WAS retrieved (above
+        // MIN_REFUSAL_OVERRIDE_RELEVANCE) - this is the inconsistency a
+        // rephrased question sails past. One retry with a firmer directive
+        // before an honest refusal is accepted; never more than once, so a
+        // true out-of-corpus question (nothing this relevant retrieved)
+        // refuses exactly as before.
+        if (
+          refusalPossible && fullAnswer.trim() && !refusalRetried && attempt < MAX_ATTEMPTS &&
+          sources.some((s) => s.relevance >= MIN_REFUSAL_OVERRIDE_RELEVANCE)
+        ) {
+          refusalRetried = true
+          const prompt = body.prompt as { system: string }
+          body.prompt = {
+            system: `${prompt.system} Relevant sources WERE retrieved for this exact question - ` +
+              'you must not refuse or say there is not enough data; answer directly from the ' +
+              'context provided.',
+          }
+          continue
+        }
         let refused = false
         if (refusalPossible && fullAnswer.trim()) {
           // The model produced only the guardrail sentence - replace it with
@@ -1675,8 +1953,14 @@ export class AragProvider implements RetrievalProvider {
           const bound = spliceCitationMarkers(
             fullAnswer,
             citationsMapAccum,
+            // Both branches already resolve through toSummary/displayTitle,
+            // so this never surfaces a raw hash - but a resource id absent
+            // from both (never retrieved as a scored source) still needs a
+            // clean fallback rather than citations.ts's own last-resort
+            // `?? resourceId`.
             (resourceId) =>
-              byId.get(resourceId)?.title ?? sources.find((s) => s.id === resourceId)?.title,
+              byId.get(resourceId)?.title ?? sources.find((s) => s.id === resourceId)?.title ??
+                'Untitled resource',
           )
           for (const citation of bound.citations) {
             yield { type: 'citation', citation }
