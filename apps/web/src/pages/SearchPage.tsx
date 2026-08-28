@@ -728,7 +728,7 @@ export function SearchPage() {
   }
 
   return (
-    <main className='mx-auto max-w-6xl px-6 py-8'>
+    <main className='rp-shell py-8'>
       <div className='flex flex-wrap items-baseline justify-between gap-3'>
         <h1 className='rp-display text-2xl text-ink'>Search</h1>
         <Link
@@ -1025,7 +1025,7 @@ export function SearchPage() {
 
           {hasQuery && answerMode
             ? (
-              <div className='mb-4'>
+              <div className='mb-4 rp-measure'>
                 <SearchAnswer slug={config.slug} query={q} onResult={setAnswer} />
               </div>
             )
@@ -1042,7 +1042,7 @@ export function SearchPage() {
 
           {!hasQuery
             ? (
-              <div className='rp-card p-5'>
+              <div className='rp-card rp-measure p-5'>
                 <p className='rp-eyebrow text-ink-3'>Start here</p>
                 <p className='mt-2 text-base font-semibold text-ink'>
                   Search {config.branding.productName}
@@ -1220,7 +1220,7 @@ export function SearchPage() {
                           </div>
                         )
                         : (
-                          <div className='mt-2 space-y-3'>
+                          <div className='mt-2 grid grid-cols-1 gap-3 2xl:grid-cols-2'>
                             {(resultView === 'citations' ? citedResults : filteredResults).map((
                               resource,
                             ) => (
@@ -1242,7 +1242,7 @@ export function SearchPage() {
                   ? (
                     <div className='mt-8'>
                       <p className='rp-eyebrow text-ink-3'>People also ask</p>
-                      <div className='mt-2.5 flex flex-col gap-1.5'>
+                      <div className='mt-2.5 grid gap-1.5 sm:grid-cols-2 2xl:grid-cols-3'>
                         {results.relatedQuestions.map((question) => (
                           <button
                             key={question.id}

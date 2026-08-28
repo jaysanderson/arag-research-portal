@@ -135,7 +135,7 @@ export function ManagePage() {
 
   return (
     <main className='min-h-[calc(100dvh-65px)] bg-app'>
-      <div className='mx-auto max-w-5xl px-6 py-10'>
+      <div className='mx-auto max-w-6xl px-6 py-10'>
         <div className='flex flex-wrap items-center justify-between gap-3'>
           <div>
             <p className='rp-eyebrow text-ink-3'>{config.branding.productName}</p>

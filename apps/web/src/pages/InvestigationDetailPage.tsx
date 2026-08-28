@@ -1033,7 +1033,7 @@ export function InvestigationDetailPage() {
 
   if (isLoading) {
     return (
-      <main className='mx-auto max-w-3xl px-6 py-10'>
+      <main className='mx-auto max-w-4xl px-6 py-10'>
         <div className='space-y-3'>
           <Skeleton className='h-32 w-full' />
           <Skeleton className='h-40 w-full' />
@@ -1046,7 +1046,7 @@ export function InvestigationDetailPage() {
   if (isError || !investigation) {
     const notFound = error instanceof ApiError && error.status === 404
     return (
-      <main className='mx-auto max-w-3xl px-6 py-10'>
+      <main className='mx-auto max-w-4xl px-6 py-10'>
         <ErrorCard
           message={notFound
             ? 'This investigation does not exist or has been removed.'
@@ -1077,7 +1077,7 @@ export function InvestigationDetailPage() {
     .filter((e) => tagFilter === null || e.tags.includes(tagFilter))
 
   return (
-    <main className='mx-auto max-w-3xl px-6 py-10'>
+    <main className='mx-auto max-w-4xl px-6 py-10'>
       <Link to={`/t/${config.slug}/investigations`} className='text-sm text-ink-3 hover:text-ink'>
         &larr; Investigations
       </Link>

@@ -215,7 +215,7 @@ export function AssessmentPage() {
     : ''
 
   return (
-    <main className='mx-auto max-w-4xl px-6 py-10'>
+    <main className='mx-auto max-w-6xl px-6 py-10'>
       <LiveStatus message={liveMessage} />
       <p className='text-xs font-semibold uppercase tracking-wide text-ink-3'>Self assessment</p>
       <h1 className='mt-1 text-2xl font-semibold tracking-tight text-ink'>
@@ -250,7 +250,7 @@ export function AssessmentPage() {
               </div>
             )
             : (
-              <div className='mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3'>
+              <div className='mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'>
                 {config.topics.map((topic) => (
                   <AreaCard
                     key={topic.id}

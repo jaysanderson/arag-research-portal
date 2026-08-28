@@ -278,7 +278,7 @@ function CoverageStrip({ slug, organisation }: { slug: string; organisation: str
     .sort((a, b) => b[1] - a[1])
   if (kinds.length === 0) return null
   return (
-    <p className='mx-auto mt-4 max-w-3xl px-6 text-center text-sm text-ink-2'>
+    <p className='mx-auto mt-4 max-w-5xl px-6 text-center text-sm text-ink-2'>
       Holding {kinds.map(([label, count], index) => (
         <span key={label}>
           {index > 0 ? (index === kinds.length - 1 ? ' and ' : ', ') : ''}
@@ -304,7 +304,7 @@ function StatsStrip({ counters }: { counters: KbCounters }) {
   ]
 
   return (
-    <div className='rp-anim-rise rp-delay-4 relative z-10 mx-auto -mt-12 grid max-w-4xl grid-cols-2 gap-2.5 px-6 sm:grid-cols-4'>
+    <div className='rp-anim-rise rp-delay-4 relative z-10 mx-auto -mt-12 grid max-w-5xl grid-cols-2 gap-2.5 px-6 sm:grid-cols-4'>
       {stats.map((stat) => <StatTile key={stat.label} label={stat.label} value={stat.value} />)}
     </div>
   )
@@ -312,7 +312,7 @@ function StatsStrip({ counters }: { counters: KbCounters }) {
 
 function StatsStripSkeleton() {
   return (
-    <div className='relative z-10 mx-auto -mt-12 grid max-w-4xl grid-cols-2 gap-2.5 px-6 sm:grid-cols-4'>
+    <div className='relative z-10 mx-auto -mt-12 grid max-w-5xl grid-cols-2 gap-2.5 px-6 sm:grid-cols-4'>
       {Array.from({ length: 4 }).map((_, index) => (
         <div
           key={index}
@@ -484,7 +484,7 @@ export function ExplorePage() {
         : null}
       <CoverageStrip slug={config.slug} organisation={config.branding.organisation} />
 
-      <section className='mx-auto max-w-6xl space-y-10 px-6 pb-16 pt-12'>
+      <section className='rp-shell space-y-10 pb-16 pt-12'>
         {isError
           ? (
             <ErrorCard
@@ -534,7 +534,7 @@ export function ExplorePage() {
                   label={topic.label}
                   count={count}
                 />
-                <div className='rp-scroll-row rp-no-scrollbar -mx-6 mt-3.5 flex gap-3 overflow-x-auto px-6 pb-4 pt-1'>
+                <div className='rp-scroll-row rp-no-scrollbar -mx-6 mt-3.5 flex gap-3 overflow-x-auto px-6 pb-4 pt-1 lg:-mx-8 lg:px-8 2xl:-mx-10 2xl:px-10'>
                   {items.map((resource) => (
                     <ResourceCard key={resource.id} slug={config.slug} resource={resource} />
                   ))}

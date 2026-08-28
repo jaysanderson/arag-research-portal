@@ -167,7 +167,7 @@ export function TenantLayout() {
       } as CSSProperties}
     >
       <header className='rp-glass sticky top-0 z-40 border-b border-line'>
-        <div className='mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-2.5'>
+        <div className='rp-shell flex items-center justify-between gap-4 py-2.5'>
           <div className='flex min-w-0 shrink-0 items-center gap-2.5'>
             <KbSwitcher config={config} />
             {kbStatus?.status === 'demo' && (

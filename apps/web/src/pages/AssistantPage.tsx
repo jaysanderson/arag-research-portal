@@ -1647,7 +1647,7 @@ export function AssistantPage() {
   return (
     <main
       aria-label='Research assistant'
-      className='mx-auto flex h-[calc(100dvh-65px)] max-w-6xl flex-col gap-3 px-4 py-4 sm:px-6 sm:py-6 lg:flex-row lg:gap-6'
+      className='mx-auto flex h-[calc(100dvh-65px)] max-w-[100rem] flex-col gap-3 px-4 py-4 sm:px-6 sm:py-6 lg:flex-row lg:gap-6 2xl:gap-8'
     >
       <div className='flex shrink-0 items-center justify-between lg:hidden'>
         <button
@@ -1661,7 +1661,7 @@ export function AssistantPage() {
 
       <aside
         aria-label='Chat sessions'
-        className='hidden w-64 shrink-0 rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface-2 p-3 lg:flex'
+        className='hidden w-64 shrink-0 rounded-[calc(var(--rp-radius)+4px)] border border-line bg-surface-2 p-3 lg:flex 2xl:w-72'
       >
         <SessionList
           sessions={sessions}
@@ -1705,7 +1705,7 @@ export function AssistantPage() {
         )
         : null}
 
-      <div className='flex min-w-0 flex-1 flex-col'>
+      <div className='mx-auto flex w-full min-w-0 max-w-[56rem] flex-1 flex-col 2xl:max-w-[60rem]'>
         {!isEmpty
           ? (
             <div className='mb-2 flex shrink-0 items-center justify-between gap-2'>

@@ -12,7 +12,7 @@ export function TenantPicker() {
 
   return (
     <main className='min-h-screen bg-app px-6 py-10'>
-      <div className='mx-auto w-full max-w-4xl'>
+      <div className='mx-auto w-full max-w-6xl'>
         <div className='flex items-start justify-between gap-4'>
           <header className='min-w-0'>
             <p className='rp-eyebrow text-ink-3'>Research Portal</p>
@@ -27,7 +27,7 @@ export function TenantPicker() {
           <ThemeToggle />
         </div>
 
-        <div className='mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2'>
+        <div className='mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'>
           {isLoading
             ? (
               <>

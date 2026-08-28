@@ -489,7 +489,7 @@ export function LibraryPage() {
   const isInitialLoading = isLoading && page === 0
 
   return (
-    <main className='mx-auto max-w-6xl px-6 py-8'>
+    <main className='rp-shell py-8'>
       <div className='flex flex-wrap items-baseline justify-between gap-2'>
         <h1 className='rp-display text-2xl text-ink'>Library</h1>
         {!isInitialLoading && !isError
@@ -655,8 +655,8 @@ export function LibraryPage() {
 
           {isInitialLoading
             ? (
-              <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'>
-                {Array.from({ length: 6 }).map((_, index) => <LibraryCardSkeleton key={index} />)}
+              <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'>
+                {Array.from({ length: 10 }).map((_, index) => <LibraryCardSkeleton key={index} />)}
               </div>
             )
             : null}
@@ -674,7 +674,7 @@ export function LibraryPage() {
             ? (
               <>
                 <div
-                  className={`grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 ${
+                  className={`grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 ${
                     selecting ? 'pb-24' : ''
                   }`}
                 >

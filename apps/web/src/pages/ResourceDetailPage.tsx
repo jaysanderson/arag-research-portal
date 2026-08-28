@@ -292,7 +292,7 @@ function DocumentReader(
 
   const titleNorm = normalise(title)
   return (
-    <div className='rp-prose max-w-none text-sm text-ink-2'>
+    <div className='rp-prose rp-measure text-sm text-ink-2'>
       {blocks.map((block, i) => {
         if (
           i === 0 && block.kind === 'heading' && block.level === 1 &&
@@ -770,13 +770,13 @@ function ResourceContext({ resource }: { resource: ResourceSummary }) {
   return (
     <article className='rp-card p-5 sm:p-6' aria-labelledby='summary-heading'>
       <h2 id='summary-heading' className='rp-eyebrow text-ink-3'>Summary</h2>
-      <p className='mt-2 text-sm leading-relaxed text-ink-2'>{resource.summary}</p>
+      <p className='rp-measure mt-2 text-sm leading-relaxed text-ink-2'>{resource.summary}</p>
 
       {resource.keyTakeaways && resource.keyTakeaways.length > 0
         ? (
           <div className='mt-5 border-t border-line pt-4'>
             <PanelHeading>Key takeaways</PanelHeading>
-            <ul className='mt-2 space-y-1.5'>
+            <ul className='rp-measure mt-2 space-y-1.5'>
               {resource.keyTakeaways.map((point, index) => (
                 <li key={index} className='flex gap-2 text-sm text-ink-2'>
                   <span
@@ -795,7 +795,7 @@ function ResourceContext({ resource }: { resource: ResourceSummary }) {
         ? (
           <div className='mt-5 border-t border-line pt-4'>
             <PanelHeading>Quotes of interest</PanelHeading>
-            <div className='mt-2 space-y-2.5'>
+            <div className='rp-measure mt-2 space-y-2.5'>
               {resource.quotesOfInterest.map((quote, index) => (
                 <blockquote
                   key={index}
@@ -814,7 +814,7 @@ function ResourceContext({ resource }: { resource: ResourceSummary }) {
         ? (
           <div className='mt-5 border-t border-line pt-4'>
             <PanelHeading>Key facts</PanelHeading>
-            <ol className='mt-2 space-y-1.5'>
+            <ol className='rp-measure mt-2 space-y-1.5'>
               {resource.keyFacts.map((fact, index) => (
                 <li key={index} className='flex gap-2 text-sm text-ink-2'>
                   <span className='font-medium tabular-nums text-ink-3'>{index + 1}.</span>
@@ -1194,7 +1194,7 @@ export function ResourceDetailPage() {
   const topicLabel = (topicId: string) => config.topics.find((topic) => topic.id === topicId)?.label
 
   return (
-    <main className='mx-auto max-w-6xl px-4 py-8 sm:px-6'>
+    <main className='rp-shell py-8'>
       <Link
         to={`/t/${config.slug}/library`}
         className='text-sm font-medium text-[var(--rp-ink-3)] transition-colors duration-150 hover:text-[var(--rp-ink)]'
@@ -1238,7 +1238,7 @@ export function ResourceDetailPage() {
                 organisation={config.branding.organisation}
               />
 
-              <div className='mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_368px]'>
+              <div className='mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_368px] 2xl:grid-cols-[minmax(0,1fr)_408px]'>
                 <div className='min-w-0 space-y-6'>
                   <div className='relative' ref={contentRef} onMouseUp={handleContentMouseUp}>
                     {contentLoading ? <ViewerSkeleton /> : content
