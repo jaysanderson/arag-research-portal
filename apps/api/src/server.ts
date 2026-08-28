@@ -54,6 +54,16 @@ try {
   indexHtml = ''
 }
 
+// The versioned index must be served by our own handler, not serveStatic:
+// registering `/` before the static middleware stops serveStatic from
+// handing out the raw (unversioned, cacheable) index.html for the root, and
+// the `*` fallback covers every client-side route. serveStatic in between
+// serves the real asset files (app.js, styles.css, thumbnails).
+app.get('/', (c) => {
+  if (!indexHtml) return c.text('The web build is not available.', 503)
+  c.header('Cache-Control', 'no-cache')
+  return c.html(indexHtml)
+})
 app.use('*', serveStatic({ root: './apps/web/dist' }))
 app.get('*', (c) => {
   if (!indexHtml) return c.text('The web build is not available.', 503)
