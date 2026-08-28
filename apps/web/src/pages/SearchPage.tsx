@@ -18,6 +18,7 @@ import { SaveEvidenceButton } from '../components/SaveEvidence.tsx'
 import { SearchAnswer, type SearchAnswerResult } from '../components/SearchAnswer.tsx'
 import { TypeaheadDropdown, type TypeaheadItem, useTypeahead } from '../components/Typeahead.tsx'
 import { EmptyState, ErrorCard, prettyLabel, Skeleton, TypeBadge } from '../components/ui.tsx'
+import { answerModeParam, readAnswerMode } from '../lib/search-mode.ts'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
 const MODES: { value: RetrievalMode; label: string }[] = [
@@ -435,6 +436,48 @@ function WatchStrip(
   )
 }
 
+/**
+ * Find mode's answer-on-demand invitation. It sits where the AI answer would
+ * be, so switching Find -> Ask swaps the same region: results are already on
+ * screen, this is the deliberate step up to a synthesised, cited answer over
+ * them. No LLM call fires until the user chooses it.
+ */
+function AskStepUp({ onAsk }: { onAsk: () => void }) {
+  return (
+    <section
+      className='rp-card flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5'
+      aria-label='Ask for an AI answer'
+    >
+      <div className='flex min-w-0 items-start gap-3'>
+        <span
+          className='mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full'
+          style={{ backgroundColor: 'color-mix(in srgb, var(--rp-accent) 14%, transparent)' }}
+          aria-hidden='true'
+        >
+          <span
+            className='h-2 w-2 rounded-full'
+            style={{ backgroundColor: 'var(--rp-accent)' }}
+          />
+        </span>
+        <div className='min-w-0'>
+          <p className='text-sm font-semibold text-ink'>Want a synthesised answer?</p>
+          <p className='mt-0.5 text-sm leading-relaxed text-ink-2'>
+            Ask reads the top results and writes a short, cited answer to your search. Plain search
+            stays instant and answer-free.
+          </p>
+        </div>
+      </div>
+      <button
+        type='button'
+        onClick={onAsk}
+        className='rp-btn rp-btn-primary shrink-0 font-semibold'
+      >
+        Ask AI
+      </button>
+    </section>
+  )
+}
+
 export function SearchPage() {
   const { config } = useOutletContext<TenantOutletContext>()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -452,6 +495,9 @@ export function SearchPage() {
     return raw ? raw.split(',').filter((id) => id.length > 0) : []
   }, [searchParams])
   const strength: MatchStrength = searchParams.get('strength') === 'strong' ? 'strong' : 'all'
+  // FIND (results only) vs ASK (results + streamed cited answer). Held in the
+  // URL so both are shareable and reload to the same state; Find is the default.
+  const answerMode = readAnswerMode(searchParams)
 
   const [draft, setDraft] = useState(q)
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -548,6 +594,16 @@ export function SearchPage() {
     setResultView('resources')
   }, [q])
 
+  // Find mode has no answer: SearchAnswer is unmounted, so clear any citations
+  // it left behind (they would otherwise linger as "Cited" badges) and drop the
+  // Citations view, which only makes sense alongside an answer.
+  useEffect(() => {
+    if (!answerMode) {
+      setAnswer({ citations: [], sources: [] })
+      setResultView('resources')
+    }
+  }, [answerMode])
+
   // Lowest `[n]` marker each cited resource id appears under - used both for
   // the "Cited [n]" badge and to order the Citations view the same way the
   // markers read in the answer above.
@@ -600,17 +656,27 @@ export function SearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTopics, selectedKinds, strength, config.topics, config.branding.organisation])
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const trimmed = draft.trim()
+  // Submit the current draft. `answer` picks the intent: false for a plain
+  // Find (no LLM call), true for Ask (results + streamed cited answer).
+  function runSearch(text: string, answer: boolean) {
+    const trimmed = text.trim()
     if (trimmed.length === 0) return
     typeahead.close()
-    updateParams({ q: trimmed })
+    setDraft(trimmed)
+    updateParams({ q: trimmed, answer: answerModeParam(answer) })
   }
 
+  // Enter and the primary button both run Find - the fast, cheap default;
+  // Ask is always a deliberate, separate action.
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    runSearch(draft, false)
+  }
+
+  // Suggested and "people also ask" chips are phrased as questions, so their
+  // payoff is the synthesised answer - they run Ask.
   function askQuestion(text: string) {
-    setDraft(text)
-    updateParams({ q: text })
+    runSearch(text, true)
   }
 
   const hasQuery = q.trim().length > 0
@@ -698,9 +764,23 @@ export function SearchPage() {
               aria-activedescendant={typeahead.activeDescendant}
               className='min-w-0 flex-1 border-0 bg-transparent px-1.5 py-1.5 text-sm text-ink placeholder:text-[var(--rp-ink-3)] focus:outline-none'
             />
-            <button type='submit' className='rp-btn rp-btn-primary shrink-0 font-semibold'>
-              Search
-            </button>
+            <div className='flex shrink-0 items-center gap-1.5'>
+              <button type='submit' className='rp-btn rp-btn-primary font-semibold'>
+                Search
+              </button>
+              <button
+                type='button'
+                onClick={() => runSearch(draft, true)}
+                aria-pressed={answerMode}
+                title='Search and generate a cited AI answer for this query'
+                className='rp-btn rp-btn-outline font-semibold'
+                style={answerMode
+                  ? { borderColor: 'var(--rp-accent)', color: 'var(--rp-accent)' }
+                  : undefined}
+              >
+                Ask AI
+              </button>
+            </div>
           </div>
           <TypeaheadDropdown state={typeahead} />
         </div>
@@ -775,8 +855,7 @@ export function SearchPage() {
           ? (
             <p className='ml-auto text-sm font-medium tabular-nums text-ink-3'>
               {filteredResults.length} {filteredResults.length === 1 ? 'resource' : 'resources'}
-              {' · '}
-              {citedResults.length} cited
+              {answerMode ? ` · ${citedResults.length} cited` : ''}
               {activeFilters.length > 0
                 ? ` · filters: ${activeFilters.map((f) => f.label).join(', ')}`
                 : ''}
@@ -935,10 +1014,19 @@ export function SearchPage() {
             )
             : null}
 
-          {hasQuery
+          {hasQuery && answerMode
             ? (
               <div className='mb-4'>
                 <SearchAnswer slug={config.slug} query={q} onResult={setAnswer} />
+              </div>
+            )
+            : null}
+
+          {hasQuery && !answerMode && !isLoading && !isError && results &&
+              filteredResults.length > 0
+            ? (
+              <div className='mb-4'>
+                <AskStepUp onAsk={() => updateParams({ answer: '1' })} />
               </div>
             )
             : null}
@@ -952,22 +1040,30 @@ export function SearchPage() {
                 </p>
                 <p className='mt-1 text-sm leading-relaxed text-ink-2'>
                   Results carry the passage that matched, so you can judge a source before you open
-                  it.
+                  it. <span className='font-medium text-ink-2'>Search</span>{' '}
+                  returns results only, fast and answer-free.{' '}
+                  <span className='font-medium text-ink-2'>Ask AI</span>{' '}
+                  adds a short, cited answer synthesised over them.
                 </p>
                 {config.suggestedQuestions.length > 0
                   ? (
-                    <div className='mt-4 flex flex-wrap gap-1.5'>
-                      {config.suggestedQuestions.slice(0, 6).map((question) => (
-                        <button
-                          key={question.id}
-                          type='button'
-                          onClick={() => askQuestion(question.text)}
-                          className='rp-chip h-9 sm:h-7'
-                        >
-                          {question.text}
-                        </button>
-                      ))}
-                    </div>
+                    <>
+                      <p className='mt-4 text-xs font-medium text-ink-3'>
+                        Try a question - these run Ask:
+                      </p>
+                      <div className='mt-2 flex flex-wrap gap-1.5'>
+                        {config.suggestedQuestions.slice(0, 6).map((question) => (
+                          <button
+                            key={question.id}
+                            type='button'
+                            onClick={() => askQuestion(question.text)}
+                            className='rp-chip h-9 sm:h-7'
+                          >
+                            {question.text}
+                          </button>
+                        ))}
+                      </div>
+                    </>
                   )
                   : null}
               </div>
@@ -1039,45 +1135,53 @@ export function SearchPage() {
                   : (
                     <>
                       <div className='flex flex-wrap items-center justify-between gap-2'>
-                        <div
-                          className='inline-flex overflow-hidden rounded-[6px] border border-line bg-surface'
-                          role='radiogroup'
-                          aria-label='Results view'
-                        >
-                          {[
-                            {
-                              value: 'resources' as const,
-                              label: `Resources (${filteredResults.length})`,
-                            },
-                            {
-                              value: 'citations' as const,
-                              label: `Citations (${citedResults.length})`,
-                            },
-                          ].map((option, index) => {
-                            const active = resultView === option.value
-                            return (
-                              <button
-                                key={option.value}
-                                type='button'
-                                role='radio'
-                                aria-checked={active}
-                                onClick={() => setResultView(option.value)}
-                                className={`rp-focus px-3 py-1.5 text-xs font-medium transition-colors duration-150 ${
-                                  index > 0 ? 'border-l border-line' : ''
-                                } ${
-                                  active
-                                    ? 'text-white'
-                                    : 'text-[var(--rp-ink-2)] hover:bg-[var(--rp-surface-2)] hover:text-[var(--rp-ink)]'
-                                }`}
-                                style={active
-                                  ? { backgroundColor: 'var(--rp-primary)' }
-                                  : undefined}
-                              >
-                                {option.label}
-                              </button>
-                            )
-                          })}
-                        </div>
+                        {answerMode
+                          ? (
+                            <div
+                              className='inline-flex overflow-hidden rounded-[6px] border border-line bg-surface'
+                              role='radiogroup'
+                              aria-label='Results view'
+                            >
+                              {[
+                                {
+                                  value: 'resources' as const,
+                                  label: `Resources (${filteredResults.length})`,
+                                },
+                                {
+                                  value: 'citations' as const,
+                                  label: `Citations (${citedResults.length})`,
+                                },
+                              ].map((option, index) => {
+                                const active = resultView === option.value
+                                return (
+                                  <button
+                                    key={option.value}
+                                    type='button'
+                                    role='radio'
+                                    aria-checked={active}
+                                    onClick={() => setResultView(option.value)}
+                                    className={`rp-focus px-3 py-1.5 text-xs font-medium transition-colors duration-150 ${
+                                      index > 0 ? 'border-l border-line' : ''
+                                    } ${
+                                      active
+                                        ? 'text-white'
+                                        : 'text-[var(--rp-ink-2)] hover:bg-[var(--rp-surface-2)] hover:text-[var(--rp-ink)]'
+                                    }`}
+                                    style={active
+                                      ? { backgroundColor: 'var(--rp-primary)' }
+                                      : undefined}
+                                  >
+                                    {option.label}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          )
+                          : (
+                            <p className='text-xs font-medium text-ink-3'>
+                              Every match, most relevant first
+                            </p>
+                          )}
                         <button
                           type='button'
                           onClick={summariseResults}
@@ -1087,7 +1191,7 @@ export function SearchPage() {
                         </button>
                       </div>
 
-                      {resultView === 'citations' && citedResults.length === 0
+                      {answerMode && resultView === 'citations' && citedResults.length === 0
                         ? (
                           <div className='mt-2'>
                             <EmptyState
