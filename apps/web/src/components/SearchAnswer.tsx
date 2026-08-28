@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import type { AskEvent, Citation, ScoredResource } from '@research-portal/core'
 import { ApiError, streamAsk } from '../api/client.ts'
 import { citationHref } from './AnswerStream.tsx'
+import { ConfidenceIndicator, type QualityScores } from './QualityGauge.tsx'
 import { ErrorCard, LiveStatus, Skeleton } from './ui.tsx'
 
 /**
@@ -163,6 +164,7 @@ export function SearchAnswer({ slug, query, onResult }: SearchAnswerProps) {
   const [sources, setSources] = useState<ScoredResource[]>([])
   const [citations, setCitations] = useState<Citation[]>([])
   const [refused, setRefused] = useState(false)
+  const [quality, setQuality] = useState<QualityScores | undefined>(undefined)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [stageLabel, setStageLabel] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState(false)
@@ -196,6 +198,7 @@ export function SearchAnswer({ slug, query, onResult }: SearchAnswerProps) {
     setSources([])
     setCitations([])
     setRefused(false)
+    setQuality(undefined)
     setErrorMessage(null)
     setStageLabel('Retrieving sources…')
 
@@ -212,6 +215,13 @@ export function SearchAnswer({ slug, query, onResult }: SearchAnswerProps) {
           break
         case 'citation':
           setCitations((prev) => [...prev, event.citation])
+          break
+        case 'quality':
+          setQuality({
+            answerRelevance: event.answerRelevance,
+            groundedness: event.groundedness,
+            contextRelevance: event.contextRelevance,
+          })
           break
         case 'done':
           setStageLabel(null)
@@ -341,6 +351,14 @@ export function SearchAnswer({ slug, query, onResult }: SearchAnswerProps) {
                         className='mt-1 inline-block h-4 w-1.5 animate-pulse bg-[var(--rp-ink-3)] align-text-bottom'
                         aria-hidden='true'
                       />
+                    )
+                    : null}
+
+                  {status === 'done' && !refused
+                    ? (
+                      <div className='mt-3'>
+                        <ConfidenceIndicator quality={quality} />
+                      </div>
                     )
                     : null}
 

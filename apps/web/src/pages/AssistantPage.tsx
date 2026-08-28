@@ -27,7 +27,11 @@ import {
   type EvidenceVerdictInfo,
 } from '../components/EvidenceTable.tsx'
 import { PipelinePanel } from '../components/PipelinePanel.tsx'
-import { type QualityScores, TrustSignals } from '../components/QualityGauge.tsx'
+import {
+  ConfidenceIndicator,
+  type QualityScores,
+  TrustSignals,
+} from '../components/QualityGauge.tsx'
 import { LiveStatus } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
@@ -810,6 +814,14 @@ function AssistantCard({
             style={{ backgroundColor: 'var(--rp-accent)' }}
             aria-hidden='true'
           />
+        )
+        : null}
+
+      {!message.pending
+        ? (
+          <div className='mt-3'>
+            <ConfidenceIndicator quality={message.quality} />
+          </div>
         )
         : null}
 

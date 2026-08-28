@@ -134,6 +134,8 @@
     "https://esm.sh/react-dom@18.3.1/client": "21721a0da8572c9017131699230e73bd29b31cae9763948f5a7e3966315d07a2",
     "https://esm.sh/react-router-dom@7.1.1?deps=react@18.3.1,react-dom@18.3.1": "9b027751a84b0084b987bffee543d4ee4dd9bc42586d5c72af033a4b9cd16d02",
     "https://esm.sh/react@18.3.1": "336090fd1f03fdb9530dce4ac761717b5e1e1a630c775bac184ec4ee0809cf89",
+    "https://esm.sh/react@18.3.1/denonext/jsx-runtime.mjs": "bcfa2f01bbb7c04a674e06d5748773d46c431e8ac8e8ff79aad6962af0a79b0f",
+    "https://esm.sh/react@18.3.1/denonext/react.mjs": "fec8d5ab4ffa55c8b563abc31060c3dc0205699aff20beec4aba0311efdcc1a0",
     "https://esm.sh/react@18.3.1/jsx-runtime": "fae022412d077731999a21e4ed1eac632822bab088f04c980b08750ba33ade9a",
     "https://esm.sh/zod@3.25.76": "3fb2d6fc9ba6facc140a9875710339f90e89befb26fd9b39da83644d4dd6a701",
     "https://esm.sh/zod@3.25.76/denonext/v3/ZodError.mjs": "7cb18052dad1b35a84cb7a3c1dc825e455f6c3fec0d89c4c4cc4059120042e30",
