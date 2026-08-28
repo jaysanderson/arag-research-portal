@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import {
   type CatalogItem,
   type CatalogPage,
+  type Citation,
   DEFAULT_RESEARCH_ENRICHMENT,
   type Enrichment,
   type EnrichmentAgent,
@@ -170,6 +171,36 @@ export function merchandiseCatalogPage(
   page: CatalogPage,
 ): CatalogPage {
   return { ...page, items: page.items.map((i) => merchandiseCatalogItem(store, slug, i)) }
+}
+
+/**
+ * The `/ask` and `/generate` answer surface's own sources list - the same
+ * overlay `merchandiseSearchResults`/`merchandiseCatalogPage` apply to
+ * /search, /catalog and /resources, so a source card on the answer surface
+ * never shows a raw filename or project code when a real enrichment exists.
+ */
+export function merchandiseSources(
+  store: EnrichmentStore,
+  slug: string,
+  resources: ScoredResource[],
+): ScoredResource[] {
+  return resources.map((r) => merchandiseScored(store, slug, r))
+}
+
+/**
+ * A resolved citation's display title, merchandised the same way its
+ * resource's card is everywhere else - a citation must never show a bare
+ * filename/project code when a real enrichment exists for that resource.
+ * Only the title changes; the citation's passage/index/resourceId are the
+ * platform's own evidence and are left untouched.
+ */
+export function merchandiseCitation(
+  store: EnrichmentStore,
+  slug: string,
+  citation: Citation,
+): Citation {
+  const m = overlay({ title: citation.title }, store.get(slug, citation.resourceId))
+  return { ...citation, title: m.title }
 }
 
 export function merchandiseContent(

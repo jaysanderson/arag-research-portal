@@ -5,6 +5,8 @@ import {
   type AskEvent,
   AskEventSchema,
   type CatalogPage,
+  DEFAULT_RESEARCH_ENRICHMENT,
+  type Enrichment,
   type FacetCounts,
   type Labelset,
   type Question,
@@ -17,6 +19,7 @@ import {
 import { AragApiError, type RetrievalProvider } from '@research-portal/retrieval'
 import { buildApp } from './app.ts'
 import { TenantStore } from './tenants.ts'
+import { EnrichmentStore } from './enrichments.ts'
 
 // Hermetic tenant store - tests must never read the repo's live data/tenants.json.
 const freshTenants = () =>
@@ -116,8 +119,8 @@ class StubProvider implements RetrievalProvider {
   }
 }
 
-function makeApp() {
-  return buildApp({ provider: new StubProvider(), tenants: freshTenants() })
+function makeApp(enrichments?: EnrichmentStore) {
+  return buildApp({ provider: new StubProvider(), tenants: freshTenants(), enrichments })
 }
 
 describe('GET /api/tenants', () => {
@@ -192,6 +195,73 @@ describe('POST /api/t/:slug/ask', () => {
 
     const events = dataLines.map((line) => AskEventSchema.parse(JSON.parse(line)))
     expect(events.some((event) => event.type === 'done')).toBe(true)
+  })
+
+  it('BUG 1: merchandises sources and citations with the real generated title, never the raw filename/project-code title', async () => {
+    // resourceOne's raw title stands in for a raw filename/project code
+    // (e.g. "Project 1996-107") the way /search, /catalog and /resources
+    // never show one when a real enrichment exists - /ask and /generate must
+    // not diverge from that surface-wide rule.
+    const enrichment: Enrichment = {
+      schemaId: DEFAULT_RESEARCH_ENRICHMENT.id,
+      generatedAt: '2026-08-28T00:00:00.000Z',
+      data: {
+        title: 'Distribution and Ecology of Southern Rock Lobster Larvae',
+        summary: 'A study of larval distribution and ecology in southern rock lobster stocks.',
+      },
+    }
+    const store = new EnrichmentStore(Deno.makeTempDirSync())
+    store.put('frdc', resourceOne.id, enrichment)
+    const app = makeApp(store)
+
+    const response = await app.request('/api/t/frdc/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'What is known about abalone stock health?' }),
+    })
+    expect(response.status).toBe(200)
+
+    const payload = await response.text()
+    const events = payload
+      .split('\n\n')
+      .map((chunk) => chunk.trim())
+      .filter((chunk) => chunk.startsWith('data: '))
+      .map((chunk) => AskEventSchema.parse(JSON.parse(chunk.slice('data: '.length))))
+
+    const sourcesEvent = events.find((e) => e.type === 'sources') as
+      | { type: 'sources'; resources: { id: string; title: string }[] }
+      | undefined
+    const citationEvent = events.find((e) => e.type === 'citation') as
+      | { type: 'citation'; citation: { resourceId: string; title: string } }
+      | undefined
+
+    expect(sourcesEvent?.resources[0]?.title).toBe(
+      'Distribution and Ecology of Southern Rock Lobster Larvae',
+    )
+    expect(sourcesEvent?.resources[0]?.title).not.toBe(resourceOne.title)
+    expect(citationEvent?.citation.title).toBe(
+      'Distribution and Ecology of Southern Rock Lobster Larvae',
+    )
+    expect(citationEvent?.citation.title).not.toBe(resourceOne.title)
+  })
+
+  it('falls back to the baseline title when no enrichment exists for the cited resource', async () => {
+    const app = makeApp(new EnrichmentStore(Deno.makeTempDirSync()))
+    const response = await app.request('/api/t/frdc/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'What is known about abalone stock health?' }),
+    })
+    const payload = await response.text()
+    const events = payload
+      .split('\n\n')
+      .map((chunk) => chunk.trim())
+      .filter((chunk) => chunk.startsWith('data: '))
+      .map((chunk) => AskEventSchema.parse(JSON.parse(chunk.slice('data: '.length))))
+    const sourcesEvent = events.find((e) => e.type === 'sources') as
+      | { type: 'sources'; resources: { title: string }[] }
+      | undefined
+    expect(sourcesEvent?.resources[0]?.title).toBe(resourceOne.title)
   })
 })
 

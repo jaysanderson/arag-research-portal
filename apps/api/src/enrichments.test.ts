@@ -1,6 +1,7 @@
 import { describe, it } from '@std/testing/bdd'
 import { expect } from '@std/expect'
 import type {
+  Citation,
   Enrichment,
   EnrichmentRunEvent,
   ResourceSummary,
@@ -13,7 +14,9 @@ import {
   buildEnrichmentQuery,
   EnrichmentStore,
   generateEnrichment,
+  merchandiseCitation,
   merchandiseScored,
+  merchandiseSources,
   merchandiseSummary,
   runEnrichmentOverCorpus,
 } from './enrichments.ts'
@@ -94,6 +97,32 @@ describe('merchandising overlays', () => {
     const out = merchandiseScored(store, 'frdc-2', scored)
     expect(out.title).toBe('Echo-sounder and radar training for professional fishers')
     expect(out.relevance).toBe(0.8)
+  })
+
+  it('merchandiseSources overlays every source in an /ask or /generate sources list', () => {
+    const store = new EnrichmentStore(tmp())
+    store.put('frdc-2', 'r1', enrichment())
+    const scored: ScoredResource = { ...baseSummary(), relevance: 0.8, citedCount: 0 }
+    const [out] = merchandiseSources(store, 'frdc-2', [scored])
+    expect(out?.title).toBe('Echo-sounder and radar training for professional fishers')
+  })
+
+  it('merchandiseCitation - BUG 1 - overlays a resolved /ask citation title, never the raw filename', () => {
+    const store = new EnrichmentStore(tmp())
+    store.put('frdc-2', 'r1', enrichment())
+    const citation: Citation = { index: 1, resourceId: 'r1', title: 'Project 1981-071' }
+    const out = merchandiseCitation(store, 'frdc-2', citation)
+    expect(out.title).toBe('Echo-sounder and radar training for professional fishers')
+    // Everything else about the citation (the platform's own evidence) is untouched.
+    expect(out.index).toBe(1)
+    expect(out.resourceId).toBe('r1')
+  })
+
+  it('merchandiseCitation falls back to the baseline title when no enrichment is stored', () => {
+    const store = new EnrichmentStore(tmp())
+    const citation: Citation = { index: 1, resourceId: 'unknown-resource', title: 'A Real Title' }
+    const out = merchandiseCitation(store, 'frdc-2', citation)
+    expect(out.title).toBe('A Real Title')
   })
 })
 

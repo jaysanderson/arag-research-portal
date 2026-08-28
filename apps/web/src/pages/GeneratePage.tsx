@@ -243,7 +243,7 @@ function ComparisonTable({ data }: { data: ComparisonObject }) {
                     {rating?.source
                       ? (
                         <div className='mt-1 text-xs text-ink-3' title={rating.source}>
-                          — {truncateSource(rating.source)}
+                          - {truncateSource(rating.source)}
                         </div>
                       )
                       : null}

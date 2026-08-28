@@ -9,9 +9,11 @@ import type {
   ResourceSummary,
   SearchResults,
 } from '@research-portal/core'
+import { DEFAULT_RESEARCH_ENRICHMENT, type Enrichment } from '@research-portal/core'
 import { AragProvider, type RetrievalProvider } from '@research-portal/retrieval'
 import { buildApp } from './app.ts'
 import { TenantStore } from './tenants.ts'
+import { EnrichmentStore } from './enrichments.ts'
 
 /**
  * Route-level tests for the /generate endpoint's grounding gate - the fix
@@ -99,11 +101,12 @@ function hit(id: string, title: string, score: number, text = 'A retrieved passa
   return { [id]: { title, fields: { a: { paragraphs: { p1: { score, text } } } } } }
 }
 
-function makeApp(askLines: unknown[]) {
+function makeApp(askLines: unknown[], enrichments?: EnrichmentStore) {
   return buildApp({
     provider: new UnusedProvider(),
     tenants: freshTenants(),
     management: buildManagement(askLines),
+    enrichments,
   })
 }
 
@@ -145,6 +148,46 @@ describe('POST /api/t/:slug/generate', () => {
     expect(body.object?.title).toBe('Soil carbon measurement')
     expect(body.sources).toHaveLength(1)
     expect(body.sources[0]?.id).toBe('res-1')
+  })
+
+  it('BUG 1: merchandises /generate sources with the real generated title, never the raw filename/project-code title', async () => {
+    const store = new EnrichmentStore(Deno.makeTempDirSync())
+    const enrichment: Enrichment = {
+      schemaId: DEFAULT_RESEARCH_ENRICHMENT.id,
+      generatedAt: '2026-08-28T00:00:00.000Z',
+      data: {
+        title: 'Soil Carbon Measurement: A Practical Handbook',
+        summary: 'A practical guide to direct and indirect soil-carbon measurement.',
+      },
+    }
+    store.put('grdc', 'res-1', enrichment)
+    const app = makeApp([
+      {
+        item: {
+          type: 'retrieval',
+          results: { resources: hit('res-1', 'Soil Carbon Measurement Handbook', 0.75) },
+        },
+      },
+      {
+        item: {
+          type: 'answer_json',
+          object: {
+            title: 'Soil carbon measurement',
+            executive_summary: 'A grounded overview.',
+            sections: [{ heading: 'Methods', content: 'Direct and indirect measurement.' }],
+            key_takeaways: ['Direct methods are more accurate but costlier.'],
+          },
+        },
+      },
+    ], store)
+    const response = await app.request('/api/t/grdc/generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ kind: 'briefing', query: 'soil carbon measurement' }),
+    })
+    expect(response.status).toBe(200)
+    const body = await response.json() as { sources: { id: string; title: string }[] }
+    expect(body.sources[0]?.title).toBe('Soil Carbon Measurement: A Practical Handbook')
   })
 
   it('zero grounding: returns an honest insufficient-grounding result, not a fabricated artefact', async () => {
@@ -219,7 +262,7 @@ describe('POST /api/t/:slug/generate', () => {
     expect(body.object).toBeUndefined()
   })
 
-  it('comparison: strips an invented per-cell citation but keeps one that names a real retrieved source', async () => {
+  it('comparison: drops an invented per-cell citation (never an empty-string source) but keeps one that names a real retrieved source', async () => {
     const app = makeApp([
       {
         item: {
@@ -275,9 +318,12 @@ describe('POST /api/t/:slug/generate', () => {
     const ratings = body.object.items[0]?.ratings ?? []
     const costRating = ratings.find((r) => r.dimension === 'Cost')
     const compactionRating = ratings.find((r) => r.dimension === 'Soil compaction')
-    expect(costRating?.source).toBe('')
+    // An unattributable cell has its `source` field DROPPED entirely, never
+    // shown as an empty-string attribution (BUG 4: prefer honest omission).
+    expect(costRating?.source).toBeUndefined()
+    expect('source' in (costRating ?? {})).toBe(false)
     expect(compactionRating?.source).toBe('Controlled Traffic Farming Field Trial')
-    // Every non-empty citation resolves to a source actually in the response.
+    // Every present citation resolves to a source actually in the response.
     const knownTitles = new Set(body.sources.map((s) => s.title))
     for (const rating of ratings) {
       if (rating.source) expect(knownTitles.has(rating.source)).toBe(true)

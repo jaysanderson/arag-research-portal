@@ -225,6 +225,32 @@ export const MIN_GENERATE_GROUNDING = 0.1
  */
 export const MIN_REFUSAL_OVERRIDE_RELEVANCE = 0.3
 
+/** Nuclia's default guardrail sentence - see MIN_REFUSAL_OVERRIDE_RELEVANCE above. */
+export const REFUSAL_TEXT = 'not enough data to answer this.'
+
+/**
+ * Whether `text` IS (or reduces to) the platform's bare guardrail refusal
+ * sentence, tolerant of the incidental noise a real streamed response can
+ * carry around it - surrounding whitespace/newlines (including non-breaking
+ * space, which the platform has been seen to emit), wrapping quote marks, or
+ * a missing trailing period. This is the single source of truth for "was
+ * this call refused" - `ask`'s retry gates and its final refused/done.text
+ * decision all read through it, so they can never disagree with each other
+ * (see BUG 2: a prior ad hoc, streaming-only prefix check could diverge from
+ * what the client was ultimately shown, letting a bare guardrail sentence
+ * through as if it were a real, cited answer).
+ */
+export function isGuardrailRefusal(text: string): boolean {
+  const normalised = text
+    .replace(/[\s\u00a0]+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/^['"“”]+|['"“”]+$/g, '')
+    .trim()
+  if (!normalised) return false
+  return normalised === REFUSAL_TEXT || normalised === REFUSAL_TEXT.replace(/\.$/, '')
+}
+
 /**
  * Calibrates a raw retrieval score to [0, 1], comparable across queries:
  * semantic scores are already 0-1; BM25 scores (>1) are squashed
@@ -2040,7 +2066,6 @@ export class AragProvider implements RetrievalProvider {
     let sources: ScoredResource[] = []
     const contextTexts: string[] = []
     let fullAnswer = ''
-    const REFUSAL = 'not enough data to answer this.'
     let refusalPossible = true
     let generating = false
     let emitted = false
@@ -2137,14 +2162,20 @@ export class AragProvider implements RetrievalProvider {
             // the answer is still a prefix of it, and swap in honest guidance
             // if that is all the model produced.
             if (refusalPossible) {
-              const lowered = fullAnswer.trim().toLowerCase()
+              const lowered = fullAnswer.replace(/\s+/g, ' ').trim().toLowerCase()
               // Keep buffering while the text is still a prefix of the
               // guardrail sentence, or is the full sentence with only a few
               // trailing characters - but the moment real content follows it,
-              // release everything (the model refused then kept going).
+              // release everything (the model refused then kept going). This
+              // is a display-only heuristic to avoid flashing the bare
+              // guardrail sentence mid-stream; the authoritative refused/
+              // done.text decision below always re-checks the COMPLETE
+              // answer with `isGuardrailRefusal`, so a chunk boundary this
+              // heuristic guesses wrong on can never leak the guardrail
+              // sentence into the client as if it were a real answer (BUG 2).
               if (
-                REFUSAL.startsWith(lowered) ||
-                (lowered.startsWith(REFUSAL) && lowered.length <= REFUSAL.length + 12)
+                REFUSAL_TEXT.startsWith(lowered) ||
+                (lowered.startsWith(REFUSAL_TEXT) && lowered.length <= REFUSAL_TEXT.length + 12)
               ) {
                 continue
               }
@@ -2198,7 +2229,7 @@ export class AragProvider implements RetrievalProvider {
         // refusal. The deleted key cannot re-trigger this branch.
         if (
           sources.length === 0 && !emitted && body.search_configuration &&
-          refusalPossible && fullAnswer.trim() && attempt < MAX_ATTEMPTS
+          isGuardrailRefusal(fullAnswer) && attempt < MAX_ATTEMPTS
         ) {
           delete body.search_configuration
           continue
@@ -2211,7 +2242,7 @@ export class AragProvider implements RetrievalProvider {
         // true out-of-corpus question (nothing this relevant retrieved)
         // refuses exactly as before.
         if (
-          refusalPossible && fullAnswer.trim() && !refusalRetried && attempt < MAX_ATTEMPTS &&
+          isGuardrailRefusal(fullAnswer) && !refusalRetried && attempt < MAX_ATTEMPTS &&
           sources.some((s) => s.relevance >= MIN_REFUSAL_OVERRIDE_RELEVANCE)
         ) {
           refusalRetried = true
@@ -2223,18 +2254,33 @@ export class AragProvider implements RetrievalProvider {
           }
           continue
         }
+        // BUG 2/3: the guardrail refusal is detected against the COMPLETE
+        // answer text via `isGuardrailRefusal` here - not the incremental
+        // `refusalPossible` streaming heuristic above, which only decides
+        // when to START showing delta text and can diverge from the final
+        // text on an unlucky chunk boundary. This is the one place `refused`
+        // and the reader-facing refusal message are decided, so `done.text`
+        // (BUG 3) and the retry gates above always agree with it.
         let refused = false
-        if (refusalPossible && fullAnswer.trim()) {
+        let refusalMessage: string | undefined
+        if (isGuardrailRefusal(fullAnswer)) {
           // The model produced only the guardrail sentence - replace it with
           // guidance the reader can act on.
           refused = true
           fullAnswer = ''
-          yield {
-            type: 'delta',
-            text: "This portal's content does not hold enough relevant material to answer this " +
-              'confidently. Try rephrasing the question, narrowing it to a topic, or browsing ' +
-              'the Library to see what it covers.',
-          }
+          refusalMessage =
+            "This portal's content does not hold enough relevant material to answer this " +
+            'confidently. Try rephrasing the question, narrowing it to a topic, or browsing ' +
+            'the Library to see what it covers.'
+          yield { type: 'delta', text: refusalMessage }
+          // A refusal must never carry the sources/citations retrieved for
+          // it - they did not ground an answer, so showing them beside "not
+          // enough data" reads as contradictory evidence (BUG 2). The
+          // `sources` event already streamed during retrieval, before this
+          // was known to be a refusal - this corrective empty one supersedes
+          // it; every client here replaces its source list on `sources`
+          // rather than appending, so this reliably clears it.
+          if (sources.length > 0) yield { type: 'sources', resources: [] }
         }
         // Deterministic citation binding: only runs once, here, against the
         // COMPLETE answer text and the COMPLETE accumulated citations map -
@@ -2287,7 +2333,12 @@ export class AragProvider implements RetrievalProvider {
           }
         }
         yield { type: 'stage', stage: 'validating', status: 'completed' }
-        yield { type: 'done', refused, ...(boundText !== undefined ? { text: boundText } : {}) }
+        // BUG 3: done.text always carries the final answer text, refusal
+        // included - a client that reads done.text as canonical (replacing
+        // its accumulated streamed text, as the delta contract intends)
+        // must get the honest refusal message here too, not nothing.
+        const doneText = refused ? refusalMessage : boundText
+        yield { type: 'done', refused, ...(doneText !== undefined ? { text: doneText } : {}) }
         return
       } catch (err) {
         const status = err instanceof AragApiError ? err.status : 0

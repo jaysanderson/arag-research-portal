@@ -48,8 +48,10 @@ import {
   EnrichmentStore,
   generateEnrichment,
   merchandiseCatalogPage,
+  merchandiseCitation,
   merchandiseContent,
   merchandiseSearchResults,
+  merchandiseSources,
   merchandiseSummaries,
   merchandiseSummary,
   runEnrichmentOverCorpus,
@@ -630,6 +632,11 @@ export function buildApp(opts: BuildAppOptions): Hono {
       const result = await opts.management.askStructured(config, schema, parsed.data.query, {
         requireGrounding: true,
       })
+      // Merchandise the answer surface's own sources the same way /search,
+      // /catalog and /resources are - see BUG 1: the enrichment store lives
+      // only in this app layer, so the provider's `sources` still carry
+      // baseline-only (possibly raw filename/project-code) titles.
+      result.sources = merchandiseSources(enrichments, config.slug, result.sources)
       if (result.insufficientGrounding) {
         return c.json({
           kind: parsed.data.kind,
@@ -650,13 +657,22 @@ export function buildApp(opts: BuildAppOptions): Hono {
             ratings?: { dimension?: string; assessment?: string; source?: string }[]
           }[]
         }
-        // No invented citations: a per-cell "source" must name a source
-        // that was actually retrieved for this query.
-        const knownTitles = result.sources.map((s) => s.title.toLowerCase().trim())
+        // No invented citations: a per-cell "source" must name a source that
+        // was actually retrieved for this query - matched against both the
+        // merchandised title and the raw source name/filename (the model's
+        // own attribution more often echoes the corpus's raw naming than the
+        // merchandised headline). A cell that cannot be reliably attributed
+        // has its `source` field DROPPED entirely rather than shown as an
+        // empty string - an empty attribution is never presented as if it
+        // were a real one (BUG 4: prefer honest omission).
+        const knownTitles = result.sources
+          .flatMap((s) => [s.title, s.sourceName])
+          .filter((t): t is string => Boolean(t))
+          .map((t) => t.toLowerCase().trim())
         for (const item of object.items ?? []) {
           for (const rating of item.ratings ?? []) {
-            if (rating.source && !sourceIsKnown(rating.source, knownTitles)) {
-              rating.source = ''
+            if (!rating.source?.trim() || !sourceIsKnown(rating.source, knownTitles)) {
+              delete rating.source
             }
           }
         }
@@ -2060,7 +2076,19 @@ export function buildApp(opts: BuildAppOptions): Hono {
               data: JSON.stringify({ type: 'interpreted', query: interpreted }),
             })
           }
-          await stream.writeSSE({ data: JSON.stringify(event) })
+          // Merchandise the answer surface the same way /search, /catalog and
+          // /resources are: a source card or citation must show the real
+          // generated title, never the raw filename/project code the
+          // platform itself returns - see docs BUG 1 (the enrichment store
+          // lives only in this app layer, so the provider's own events carry
+          // baseline-only titles and need this overlay before they reach the
+          // client).
+          const merchandised = event.type === 'sources'
+            ? { ...event, resources: merchandiseSources(enrichments, config.slug, event.resources) }
+            : event.type === 'citation'
+            ? { ...event, citation: merchandiseCitation(enrichments, config.slug, event.citation) }
+            : event
+          await stream.writeSSE({ data: JSON.stringify(merchandised) })
         }
       } catch (err) {
         record.failed = true
