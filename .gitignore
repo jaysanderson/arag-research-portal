@@ -25,3 +25,4 @@ build/
 *.log
 npm-debug.log*
 data/
+.claude/worktrees/
