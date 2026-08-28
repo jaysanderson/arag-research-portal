@@ -1,13 +1,7 @@
-import {
-  appendFileSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import process from 'node:process'
+import { readJsonSafe, writeJsonAtomic } from './persist.ts'
 
 // ---------------------------------------------------------------------------
 // Volume-backed stores for the portal's own operational data: ask insights
@@ -19,16 +13,11 @@ import process from 'node:process'
 const DATA_DIR = process.env.DATA_DIR ?? './data'
 
 function readJson<T>(path: string, fallback: T): T {
-  try {
-    return JSON.parse(readFileSync(path, 'utf8')) as T
-  } catch {
-    return fallback
-  }
+  return readJsonSafe(path, fallback)
 }
 
 function writeJson(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, JSON.stringify(value, null, 2))
+  writeJsonAtomic(path, value)
 }
 
 function safeSegment(value: string): string {
@@ -71,14 +60,27 @@ export class InsightsStore {
   }
 
   private readAll(slug: string): AskInsight[] {
+    const path = this.pathFor(slug)
+    let raw: string
     try {
-      return readFileSync(this.pathFor(slug), 'utf8')
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as AskInsight)
+      raw = readFileSync(path, 'utf8')
     } catch {
+      // No insights recorded yet - not an error.
       return []
     }
+    // Append-only log: a crash mid-append can leave one truncated trailing
+    // line. Skip and log just that line rather than losing the whole file's
+    // history, the way a whole-file JSON.parse fallback would.
+    const insights: AskInsight[] = []
+    for (const line of raw.split('\n')) {
+      if (!line) continue
+      try {
+        insights.push(JSON.parse(line) as AskInsight)
+      } catch (err) {
+        console.error(`[stores] skipping corrupt insight line in ${path}:`, err)
+      }
+    }
+    return insights
   }
 
   summary(slug: string, days = 90): InsightsSummary {

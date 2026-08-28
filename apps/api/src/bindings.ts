@@ -1,8 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
 import process from 'node:process'
 import type { KnowledgeBoxStatus } from '@research-portal/core'
 import { envBindings, type KbBinding, regionalBase } from '@research-portal/retrieval'
+import { readJsonSafe, writeJsonAtomic } from './persist.ts'
 
 interface StoredBinding extends KbBinding {
   connectedAt: string
@@ -23,18 +22,14 @@ export class BindingStore {
   constructor(env: Record<string, string | undefined> = process.env) {
     this.demo = envBindings(env)
     this.path = env.BINDINGS_PATH ?? './data/bindings.json'
-    try {
-      this.connected = JSON.parse(readFileSync(this.path, 'utf8'))
-      // Legacy entries stored a bare kbId before bindings became URL-based.
-      const zone = env.ARAG_ZONE
-      for (const entry of Object.values(this.connected)) {
-        const legacy = entry as StoredBinding & { baseUrl?: string }
-        if (!legacy.baseUrl && legacy.kbId && zone) {
-          legacy.baseUrl = `${regionalBase(zone)}/kb/${legacy.kbId}`
-        }
+    this.connected = readJsonSafe<Record<string, StoredBinding>>(this.path, {})
+    // Legacy entries stored a bare kbId before bindings became URL-based.
+    const zone = env.ARAG_ZONE
+    for (const entry of Object.values(this.connected)) {
+      const legacy = entry as StoredBinding & { baseUrl?: string }
+      if (!legacy.baseUrl && legacy.kbId && zone) {
+        legacy.baseUrl = `${regionalBase(zone)}/kb/${legacy.kbId}`
       }
-    } catch {
-      this.connected = {}
     }
   }
 
@@ -58,8 +53,7 @@ export class BindingStore {
   }
 
   private persist(): void {
-    mkdirSync(dirname(this.path), { recursive: true })
-    writeFileSync(this.path, JSON.stringify(this.connected, null, 2))
+    writeJsonAtomic(this.path, this.connected)
   }
 
   status(slug: string): KnowledgeBoxStatus {

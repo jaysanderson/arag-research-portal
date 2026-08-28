@@ -1,9 +1,13 @@
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { expect } from '@std/expect'
 
 // DATA_DIR is read at module load, so point it at a temp dir before importing.
 const dir = await Deno.makeTempDir()
 Deno.env.set('DATA_DIR', dir)
 const { InsightsStore, SessionsStore, SourceStore, WatchStore } = await import('./stores.ts')
+const { readJsonSafe, writeFileAtomic, writeJsonAtomic } = await import('./persist.ts')
+const { BindingStore } = await import('./bindings.ts')
 
 Deno.test('insights summary aggregates asks and surfaces gaps', () => {
   const store = new InsightsStore()
@@ -73,4 +77,72 @@ Deno.test('sources dedupe by url and persist sync bookkeeping', () => {
   expect(store.list('t1')[0]!.lastAdded).toEqual(5)
   store.remove('t1', source.id)
   expect(store.list('t1').length).toEqual(0)
+})
+
+Deno.test('sources persist across a fresh store instance (read/write round-trip)', () => {
+  new SourceStore().add('roundtrip', 'https://example.org/roundtrip', false)
+  // A brand new instance has no in-memory state - this only passes if the
+  // add() above actually reached disk and this instance reads it back.
+  const reopened = new SourceStore().list('roundtrip')
+  expect(reopened.length).toEqual(1)
+  expect(reopened[0]!.url).toEqual('https://example.org/roundtrip')
+})
+
+// --- Atomic write helper (persist.ts) ---------------------------------------
+
+Deno.test('writeFileAtomic writes the exact content and leaves no .tmp file behind', async () => {
+  const target = join(await Deno.makeTempDir(), 'nested', 'file.json')
+  writeFileAtomic(target, '{"ok":true}')
+  expect(readFileSync(target, 'utf8')).toEqual('{"ok":true}')
+  expect(existsSync(`${target}.tmp`)).toEqual(false)
+})
+
+Deno.test('writeJsonAtomic round-trips through readJsonSafe', async () => {
+  const target = join(await Deno.makeTempDir(), 'value.json')
+  writeJsonAtomic(target, { a: 1, b: ['x', 'y'] })
+  expect(readJsonSafe(target, null)).toEqual({ a: 1, b: ['x', 'y'] })
+})
+
+Deno.test('readJsonSafe returns the fallback without quarantining a missing file', async () => {
+  const target = join(await Deno.makeTempDir(), 'missing.json')
+  expect(readJsonSafe(target, { fallback: true })).toEqual({ fallback: true })
+  expect(existsSync(target)).toEqual(false)
+})
+
+Deno.test('readJsonSafe quarantines a corrupted file and returns the fallback', async () => {
+  const tmp = await Deno.makeTempDir()
+  const target = join(tmp, 'bindings.json')
+  writeFileSync(target, '{"not valid json"')
+  const result = readJsonSafe(target, { fallback: true })
+  expect(result).toEqual({ fallback: true })
+  // The corrupt file is moved aside, not left in place or deleted outright.
+  expect(existsSync(target)).toEqual(false)
+  const quarantined = [...Deno.readDirSync(tmp)].find((e) =>
+    e.name.startsWith('bindings.json.corrupt-')
+  )
+  expect(quarantined).toBeDefined()
+  expect(readFileSync(join(tmp, quarantined!.name), 'utf8')).toEqual('{"not valid json"')
+})
+
+// --- Corruption handling at the store level (BindingStore) ------------------
+
+Deno.test('BindingStore quarantines a corrupted bindings file and falls back to demo bindings', () => {
+  const tmp = Deno.makeTempDirSync()
+  const bindingsPath = join(tmp, 'bindings.json')
+  writeFileSync(bindingsPath, '{"grdc": truncated')
+  const store = new BindingStore({
+    ARAG_ZONE: 'us1',
+    ARAG_KB_GRDC: 'demo-kb-id',
+    ARAG_KB_GRDC_TOKEN: 'demo-token',
+    BINDINGS_PATH: bindingsPath,
+  })
+  // Reverts to the seeded demo binding rather than throwing or losing state.
+  expect(store.isDemo('grdc')).toEqual(true)
+  expect(store.get('grdc')?.kbId).toEqual('demo-kb-id')
+  // The truncated file was moved aside, not silently overwritten in place.
+  expect(existsSync(bindingsPath)).toEqual(false)
+  const quarantined = [...Deno.readDirSync(tmp)].find((e) =>
+    e.name.startsWith('bindings.json.corrupt-')
+  )
+  expect(quarantined).toBeDefined()
 })

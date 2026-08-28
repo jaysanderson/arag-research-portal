@@ -1,7 +1,6 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
 import process from 'node:process'
 import { type TenantConfig, TenantConfigSchema, type TenantSummary } from '@research-portal/core'
+import { readJsonSafe, writeJsonAtomic } from './persist.ts'
 
 // ---------------------------------------------------------------------------
 // Seed tenant configs - the single source of truth for tenant-driven theming
@@ -171,22 +170,18 @@ export class TenantStore {
 
   constructor(env: Record<string, string | undefined> = process.env) {
     this.path = env.TENANTS_PATH ?? './data/tenants.json'
-    try {
-      const raw = JSON.parse(readFileSync(this.path, 'utf8')) as Record<string, unknown>
-      // v2 format: { custom, overrides, disabled }. v1 was a bare custom map.
-      const customSource = (raw.custom ?? raw) as Record<string, unknown>
-      for (const [slug, value] of Object.entries(customSource)) {
-        const parsed = TenantConfigSchema.safeParse(value)
-        if (parsed.success) this.custom[slug] = parsed.data
-      }
-      if (raw.overrides && typeof raw.overrides === 'object') {
-        this.overrides = raw.overrides as Record<string, TenantPatch>
-      }
-      if (Array.isArray(raw.disabled)) {
-        this.disabled = new Set(raw.disabled.filter((s): s is string => typeof s === 'string'))
-      }
-    } catch {
-      this.custom = {}
+    const raw = readJsonSafe<Record<string, unknown>>(this.path, {})
+    // v2 format: { custom, overrides, disabled }. v1 was a bare custom map.
+    const customSource = (raw.custom ?? raw) as Record<string, unknown>
+    for (const [slug, value] of Object.entries(customSource)) {
+      const parsed = TenantConfigSchema.safeParse(value)
+      if (parsed.success) this.custom[slug] = parsed.data
+    }
+    if (raw.overrides && typeof raw.overrides === 'object') {
+      this.overrides = raw.overrides as Record<string, TenantPatch>
+    }
+    if (Array.isArray(raw.disabled)) {
+      this.disabled = new Set(raw.disabled.filter((s): s is string => typeof s === 'string'))
     }
   }
 
@@ -298,14 +293,10 @@ export class TenantStore {
   }
 
   private persist(): void {
-    mkdirSync(dirname(this.path), { recursive: true })
-    writeFileSync(
-      this.path,
-      JSON.stringify(
-        { custom: this.custom, overrides: this.overrides, disabled: [...this.disabled] },
-        null,
-        2,
-      ),
-    )
+    writeJsonAtomic(this.path, {
+      custom: this.custom,
+      overrides: this.overrides,
+      disabled: [...this.disabled],
+    })
   }
 }

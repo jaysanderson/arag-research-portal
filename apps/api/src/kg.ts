@@ -1,9 +1,8 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
 import process from 'node:process'
 import type { KgImplementEvent, KgProposal, TenantConfig } from '@research-portal/core'
 import { KgProposalSchema } from '@research-portal/core'
 import type { AragProvider } from '@research-portal/retrieval'
+import { readJsonSafe, writeJsonAtomic } from './persist.ts'
 
 /**
  * Knowledge-graph strategy: interrogate the corpus, have the box's own model
@@ -93,14 +92,10 @@ export class KgProposalStore {
 
   constructor(env: Record<string, string | undefined> = process.env) {
     this.path = env.KG_PROPOSALS_PATH ?? './data/kg-proposals.json'
-    try {
-      const raw = JSON.parse(readFileSync(this.path, 'utf8')) as Record<string, unknown>
-      for (const [slug, value] of Object.entries(raw)) {
-        const parsed = KgProposalSchema.safeParse(value)
-        if (parsed.success) this.proposals[slug] = parsed.data
-      }
-    } catch {
-      this.proposals = {}
+    const raw = readJsonSafe<Record<string, unknown>>(this.path, {})
+    for (const [slug, value] of Object.entries(raw)) {
+      const parsed = KgProposalSchema.safeParse(value)
+      if (parsed.success) this.proposals[slug] = parsed.data
     }
   }
 
@@ -110,8 +105,7 @@ export class KgProposalStore {
 
   set(slug: string, proposal: KgProposal): void {
     this.proposals[slug] = proposal
-    mkdirSync(dirname(this.path), { recursive: true })
-    writeFileSync(this.path, JSON.stringify(this.proposals, null, 2))
+    writeJsonAtomic(this.path, this.proposals)
   }
 }
 

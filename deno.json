@@ -30,10 +30,10 @@
     "singleQuote": true,
     "lineWidth": 100,
     "semiColons": false,
-    "exclude": ["content/", "docs/", "README.md", "CLAUDE.md", "apps/web/dist/"]
+    "exclude": ["content/", "docs/", "README.md", "CLAUDE.md", "apps/web/dist/", ".claude/"]
   },
   "lint": {
-    "exclude": ["apps/web/dist/"],
+    "exclude": ["apps/web/dist/", ".claude/"],
     "rules": {
       "exclude": ["require-await"]
     }
