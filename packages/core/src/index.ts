@@ -232,8 +232,18 @@ export const GenerateKindSchema = z.enum([
 
 export const GenerateResultSchema = z.object({
   kind: GenerateKindSchema,
-  object: z.unknown(),
-  sources: z.lazy(() => ResourceSummarySchema.array()),
+  /** Absent when the corpus lacked sufficient grounding - see insufficientGrounding. */
+  object: z.unknown().optional(),
+  sources: z.lazy(() => ScoredResourceSchema.array()),
+  /**
+   * True when retrieval found no sufficiently relevant material for this
+   * topic and generation was refused rather than fabricated from
+   * background knowledge - the structured-artefact equivalent of `ask`'s
+   * honest refusal. `object` is absent in this case; `message` carries the
+   * reader-facing explanation.
+   */
+  insufficientGrounding: z.boolean().optional(),
+  message: z.string().optional(),
 })
 
 /** Full typed content of one resource, for the type-aware detail view. */
@@ -388,8 +398,10 @@ export type GraphData = z.infer<typeof GraphDataSchema>
 export type GenerateKind = z.infer<typeof GenerateKindSchema>
 export type GenerateResult = {
   kind: GenerateKind
-  object: unknown
-  sources: ResourceSummary[]
+  object?: unknown
+  sources: ScoredResource[]
+  insufficientGrounding?: boolean
+  message?: string
 }
 export type ResourceType = z.infer<typeof ResourceTypeSchema>
 export type ResourceSummary = z.infer<typeof ResourceSummarySchema>

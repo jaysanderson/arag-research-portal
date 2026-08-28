@@ -381,7 +381,19 @@ function ResultsView({
       </div>
 
       <div className='mt-4'>
-        {assessmentObject
+        {result.insufficientGrounding
+          ? (
+            <EmptyState
+              title='Not enough to work with'
+              description={result.message ??
+                `There is not enough source material in this portal to generate a grounded assessment on ${topic.label}. Try a broader topic or check the Library for coverage.`}
+            >
+              <button type='button' onClick={onTryAnother} className='rp-btn rp-btn-outline'>
+                Try another
+              </button>
+            </EmptyState>
+          )
+          : assessmentObject
           ? <AssessmentQuiz data={assessmentObject} onRetake={onTryAnother} />
           : (
             <div
@@ -398,20 +410,22 @@ function ResultsView({
           )}
       </div>
 
-      <div className='mt-6 border-t border-line pt-5'>
-        <p className='text-xs font-semibold uppercase tracking-wide text-ink-3'>
-          Grounded in {result.sources.length} {result.sources.length === 1 ? 'source' : 'sources'}
-        </p>
-        {result.sources.length > 0 && (
-          <div className='mt-2 flex flex-wrap gap-2'>
-            {result.sources.map((s) => (
-              <span key={s.id} title={s.title} className='rp-chip max-w-[16rem] truncate'>
-                {s.title}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
+      {!result.insufficientGrounding && (
+        <div className='mt-6 border-t border-line pt-5'>
+          <p className='text-xs font-semibold uppercase tracking-wide text-ink-3'>
+            Grounded in {result.sources.length} {result.sources.length === 1 ? 'source' : 'sources'}
+          </p>
+          {result.sources.length > 0 && (
+            <div className='mt-2 flex flex-wrap gap-2'>
+              {result.sources.map((s) => (
+                <span key={s.id} title={s.title} className='rp-chip max-w-[16rem] truncate'>
+                  {s.title}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   )
 }

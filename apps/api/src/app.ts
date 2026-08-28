@@ -239,6 +239,22 @@ const labelsetBodySchema = z.object({
 const cleanToken = (raw: string) =>
   raw.trim().replace(/^["']|["']$/g, '').replace(/^Bearer\s+/i, '').trim()
 
+/**
+ * Whether a model-written "source" label on a comparison cell actually names
+ * one of the sources retrieved for this query. Guards against the model
+ * reaching for a plausible-looking reference on thin grounding: an invented
+ * or unmatched source name is dropped (the cell keeps its assessment but
+ * loses the false attribution) rather than shown as if it were real.
+ */
+const sourceIsKnown = (source: string, knownTitles: string[]): boolean => {
+  const normalised = source.toLowerCase().trim()
+  if (normalised.length < 4) return false
+  return knownTitles.some((title) =>
+    title.length >= 4 && (title === normalised || title.includes(normalised) ||
+      normalised.includes(title))
+  )
+}
+
 export interface BuildAppOptions {
   provider: RetrievalProvider
   /** Tenant registry; a fresh store (seeds only) when omitted. */
@@ -571,13 +587,46 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
     const schema = GENERATE_SCHEMAS[parsed.data.kind]
     try {
-      const result = await opts.management.askStructured(config, schema, parsed.data.query)
+      // Grounding gate: the structured-artefact equivalent of /ask's honest
+      // refusal. Structured generation has no textual guardrail to detect
+      // (the model only ever returns valid JSON, fabricated or not), so the
+      // gate runs on retrieval relevance instead - see askStructured's
+      // requireGrounding. On a thin or broken corpus (e.g. a source that
+      // ingested cleanly as a resource but is actually a bot-check page)
+      // this refuses rather than producing a fluent, plausible artefact from
+      // background knowledge with real-looking citations to junk sources.
+      const result = await opts.management.askStructured(config, schema, parsed.data.query, {
+        requireGrounding: true,
+      })
+      if (result.insufficientGrounding) {
+        return c.json({
+          kind: parsed.data.kind,
+          insufficientGrounding: true,
+          message: `There is not enough source material in this portal to generate a grounded ${
+            GENERATE_SCHEMAS[parsed.data.kind].label
+          } on this topic. Try a broader topic or check the Library for coverage.`,
+          sources: result.sources,
+        })
+      }
       // Comparison cells that came back empty get one targeted second look -
       // "Not specified" must mean the corpus is silent, not that retrieval
       // for the broad query missed it.
       if (parsed.data.kind === 'comparison') {
         const object = result.object as {
-          items?: { name?: string; ratings?: { dimension?: string; assessment?: string }[] }[]
+          items?: {
+            name?: string
+            ratings?: { dimension?: string; assessment?: string; source?: string }[]
+          }[]
+        }
+        // No invented citations: a per-cell "source" must name a source
+        // that was actually retrieved for this query.
+        const knownTitles = result.sources.map((s) => s.title.toLowerCase().trim())
+        for (const item of object.items ?? []) {
+          for (const rating of item.ratings ?? []) {
+            if (rating.source && !sourceIsKnown(rating.source, knownTitles)) {
+              rating.source = ''
+            }
+          }
         }
         const empties: { item: string; rating: { assessment?: string }; dimension: string }[] = []
         for (const item of object.items ?? []) {

@@ -942,7 +942,17 @@ export function GeneratePage() {
         </div>
       )}
 
-      {mutation.data && !mutation.isPending && (
+      {mutation.data && !mutation.isPending && mutation.data.insufficientGrounding && (
+        <div className='mt-8'>
+          <EmptyState
+            title='Not enough to work with'
+            description={mutation.data.message ??
+              `There is not enough source material in this portal to generate a grounded ${activeMeta?.label.toLowerCase()} on this topic. Try a broader topic or check the Library for coverage.`}
+          />
+        </div>
+      )}
+
+      {mutation.data && !mutation.isPending && !mutation.data.insufficientGrounding && (
         <div className='mt-8'>
           <ArtifactBody
             key={resultVersion}

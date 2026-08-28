@@ -56,6 +56,62 @@ export function looksLikeReferenceChunk(text: string): boolean {
   return headerHit || frontMatter || density > 2.5 || (authorYear >= 4 && etAl >= 2)
 }
 
+/**
+ * Relevance floor for structured generation's grounding gate: a calibrated
+ * retrieval score below this is noise, not evidence - the same floor
+ * `search`'s MIN_SCORE already applies to /find results. Kept as its own
+ * constant because generate's grounding decision is a policy choice
+ * independent of search's, even though today the two agree.
+ */
+export const MIN_GENERATE_GROUNDING = 0.1
+
+/**
+ * Calibrates a raw retrieval score to [0, 1], comparable across queries:
+ * semantic scores are already 0-1; BM25 scores (>1) are squashed
+ * logistically. Never normalised to the top hit - a weak match must LOOK
+ * weak. `search` and `ask` each apply an equivalent formula inline; factored
+ * out here so structured generation's grounding gate agrees with them by
+ * construction rather than by three implementations happening to match.
+ */
+export function calibrateRelevance(score: number): number {
+  return score <= 1 ? Math.max(0, Math.min(1, score)) : score / (score + 2)
+}
+
+/**
+ * Best-scoring paragraph match for one retrieval hit, and whether it looks
+ * like reference-list/front-matter noise (downweighted, same heuristic
+ * `search` and `ask` use via `looksLikeReferenceChunk`). Shared scoring pass
+ * so structured generation's grounding gate judges a source's relevance the
+ * same way `ask` scores its grounding sources.
+ */
+function bestParagraphMatch(raw: {
+  fields?: Record<
+    string,
+    {
+      paragraphs?: Record<
+        string,
+        { score?: number; text?: string; position?: { page_number?: number } }
+      >
+    }
+  >
+}): { best: number; passage?: string; page?: number; reference: boolean } {
+  let best = 0
+  let passage: string | undefined
+  let page: number | undefined
+  for (const field of Object.values(raw.fields ?? {})) {
+    for (const paragraph of Object.values(field.paragraphs ?? {})) {
+      const score = paragraph.score ?? 0
+      if (score >= best) {
+        best = score
+        passage = paragraph.text ?? passage
+        page = paragraph.position?.page_number
+      }
+    }
+  }
+  const reference = passage ? looksLikeReferenceChunk(passage) : false
+  return { best: reference ? best * 0.4 : best, passage, page, reference }
+}
+
 /** The extra.metadata payload the provisioning script stores on every resource. */
 interface PortalMetadata {
   summary?: string
@@ -617,14 +673,36 @@ export class AragProvider implements RetrievalProvider {
     return { primary, secondary, nodes, edges }
   }
 
-  /** Query-time structured generation. Citations must stay OFF here - the
+  /**
+   * Query-time structured generation. Citations must stay OFF here - the
    * platform 500s when citations and answer_json_schema are combined; sources
-   * come from the retrieval event instead. */
+   * come from the retrieval event instead.
+   *
+   * `requireGrounding` gates fabrication on a thin or broken corpus.
+   * Structured generation has no textual guardrail to detect the way `ask`
+   * detects the platform's "not enough data to answer this." sentence - the
+   * model only ever returns valid JSON, whether fabricated from background
+   * knowledge or not. When set, retrieval hits are scored and calibrated the
+   * same way `ask` scores its grounding sources (`bestParagraphMatch` +
+   * `calibrateRelevance`, floored at `MIN_GENERATE_GROUNDING` - the same
+   * floor `search` applies), and if nothing survives, the model's JSON is
+   * discarded and `insufficientGrounding: true` is returned instead - the
+   * structured-artefact equivalent of `ask`'s honest refusal. When grounding
+   * is weak but present, `sources` is filtered to the surviving (real,
+   * relevant) sources only, so a caller emitting per-item citations never
+   * has anything below the floor to cite.
+   *
+   * Off by default: callers that don't produce user-facing factual
+   * artefacts (sub-question decomposition, source verdicts, investigation
+   * synthesis - which already grounds strictly on the researcher's own kept
+   * evidence, corpus analysis) keep their existing behaviour unchanged.
+   */
   async askStructured(
     tenant: TenantConfig,
     schema: { name: string; description: string; parameters: unknown },
     query: string,
-  ): Promise<{ object: unknown; sources: ResourceSummary[] }> {
+    opts: { requireGrounding?: boolean } = {},
+  ): Promise<{ object: unknown; sources: ScoredResource[]; insufficientGrounding: boolean }> {
     const client = this.client(tenant)
     const catalogue = await this.listResources(tenant).catch(() => [] as ResourceSummary[])
     const byId = new Map(catalogue.map((r) => [r.id, r]))
@@ -638,23 +716,56 @@ export class AragProvider implements RetrievalProvider {
       max_tokens: 4096,
     })
     let object: unknown = null
-    let sources: ResourceSummary[] = []
+    let sources: ScoredResource[] = []
     for await (const line of ndjson(res)) {
       const item = (line as { item?: { type?: string } & Record<string, unknown> }).item
       if (!item?.type) continue
       if (item.type === 'retrieval') {
-        const results = item.results as { resources?: Record<string, RawResource> } | undefined
+        const results = item.results as {
+          resources?: Record<
+            string,
+            RawResource & {
+              fields?: Record<
+                string,
+                {
+                  paragraphs?: Record<
+                    string,
+                    { score?: number; text?: string; position?: { page_number?: number } }
+                  >
+                }
+              >
+            }
+          >
+        } | undefined
         sources = Object.entries(results?.resources ?? {})
-          .map(([id, raw]) => byId.get(id) ?? this.toSummary(id, raw))
+          .map(([id, raw]) => {
+            const match = bestParagraphMatch(raw)
+            return {
+              ...(byId.get(id) ?? this.toSummary(id, raw)),
+              relevance: Math.round(calibrateRelevance(match.best) * 100) / 100,
+              citedCount: 0,
+              matchedPassage: match.passage,
+              ...(match.page ? { matchedPage: match.page } : {}),
+              ...(match.reference ? { referenceChunk: true } : {}),
+            }
+          })
           .slice(0, 12)
       } else if (item.type === 'answer_json' && item.object !== undefined) {
         object = item.object
       }
     }
+    const grounded = sources.filter((s) => s.relevance >= MIN_GENERATE_GROUNDING)
+    if (opts.requireGrounding && grounded.length === 0) {
+      return { object: null, sources: grounded, insufficientGrounding: true }
+    }
     if (object === null) {
       throw new Error('The platform returned no structured answer - try a narrower request')
     }
-    return { object, sources }
+    return {
+      object,
+      sources: opts.requireGrounding ? grounded : sources,
+      insufficientGrounding: false,
+    }
   }
 
   /** Replace a resource's classifications (used by corpus analysis). */

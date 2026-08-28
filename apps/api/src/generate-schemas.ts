@@ -19,11 +19,12 @@ const strArray = { type: 'array', items: str }
 
 export const GENERATE_SCHEMAS: Record<
   GenerateKind,
-  { name: string; description: string; parameters: unknown }
+  { name: string; description: string; parameters: unknown; label: string }
 > = {
   comparison: {
     name: 'comparison_matrix',
     description: 'Structured comparison of items across assessment dimensions',
+    label: 'comparison',
     parameters: strict(
       {
         dimensions: strArray,
@@ -59,6 +60,7 @@ export const GENERATE_SCHEMAS: Record<
   briefing: {
     name: 'research_briefing',
     description: 'A structured research briefing document',
+    label: 'briefing',
     parameters: strict(
       {
         title: str,
@@ -75,6 +77,7 @@ export const GENERATE_SCHEMAS: Record<
   timeline: {
     name: 'timeline',
     description: 'A chronological timeline of events',
+    label: 'timeline',
     parameters: strict(
       {
         title: str,
@@ -93,6 +96,7 @@ export const GENERATE_SCHEMAS: Record<
   proscons: {
     name: 'pros_cons',
     description: 'A balanced pros and cons analysis of a subject',
+    label: 'pros and cons analysis',
     parameters: strict(
       {
         subject: str,
@@ -111,6 +115,7 @@ export const GENERATE_SCHEMAS: Record<
   faq: {
     name: 'faq',
     description: 'Frequently asked questions with grounded answers',
+    label: 'FAQ',
     parameters: strict(
       {
         title: str,
@@ -125,6 +130,7 @@ export const GENERATE_SCHEMAS: Record<
   assessment: {
     name: 'assessment_quiz',
     description: 'A knowledge-check quiz grounded in the corpus',
+    label: 'assessment quiz',
     parameters: strict(
       {
         questions: {
