@@ -145,7 +145,9 @@ function ResultCard(
                 className='mt-3 border-l-2 bg-surface-2 py-2 pl-3 pr-2 text-sm italic leading-relaxed text-ink-2'
                 style={{ borderColor: 'var(--rp-accent)' }}
               >
-                &ldquo;{resource.matchedPassage}&rdquo;
+                &ldquo;{resource.matchedPassage.length > 340
+                  ? `${resource.matchedPassage.slice(0, 340).replace(/\s\S*$/, '')}…`
+                  : resource.matchedPassage}&rdquo;
               </blockquote>
             )
             : null}
