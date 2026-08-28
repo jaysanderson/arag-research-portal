@@ -195,20 +195,111 @@ export function merchandiseContent(
 }
 
 // ---------------------------------------------------------------------------
-// Generation: app-side, one resource at a time, via the verified query-time
-// answer_json_schema path scoped to that resource. The platform DA
-// page-summary is reused as the summary source when present (work already paid
-// for at ingest), so the generator focuses on the richer fields.
+// Generation: app-side, one resource at a time. Earlier this scoped the
+// query-time answer_json_schema call to the resource with `resource_filters`,
+// which depends on that resource being fully settled server-side (status
+// PROCESSED) and turned out to be unreliable in combination with
+// answer_json_schema - verified live on the frdc-2 box: every resource
+// returned "no structured answer" while a corpus reprocess left resources
+// "pending", and a plain per-document /ask (no schema) worked the whole time.
+// So generation now embeds the resource's OWN already-fetched text directly
+// in the query and calls askStructured with NO resourceId/resource_filters -
+// the embedded text is the grounding, not a second scoped retrieval, so it
+// has no dependency on ingest status. The platform DA page-summary is reused
+// as the summary source when present (work already paid for at ingest), and
+// also preferred as the embedded grounding text when present (short, clean,
+// already paid for) - the fuller extracted body text is the fallback.
 // ---------------------------------------------------------------------------
 
+/** Cap on embedded document text - a sane generation budget, not a full-document dump. */
+const DOCUMENT_TEXT_BUDGET = 8000
+
+/**
+ * The resource's own text to embed as grounding: the platform DA page
+ * summary when present (short, clean, already paid for at ingest), otherwise
+ * the extracted body text joined and truncated to a sane budget. Empty when
+ * neither is available (e.g. a scanned document with no OCR and no DA
+ * summary) - callers should skip structured generation in that case rather
+ * than asking the model to answer with nothing to ground on.
+ */
+export function documentTextFor(
+  content: ResourceContent | null,
+  pageSummary: string | undefined,
+): string {
+  if (pageSummary) return pageSummary
+  if (!content) return ''
+  const joined = content.texts.map((t) => t.text).join('\n\n').trim()
+  return joined.slice(0, DOCUMENT_TEXT_BUDGET)
+}
+
 /** Build the generator instruction from the agent's field descriptors (programmatic). */
-export function buildEnrichmentQuery(agent: EnrichmentAgent): string {
+export function buildEnrichmentQuery(agent: EnrichmentAgent, documentText?: string): string {
   const fields = agent.fields.map((f) => `${f.label}: ${f.description}`).join(' ')
-  return (
-    'You are writing a catalogue entry for a SINGLE research document, using only this document. ' +
+  const instruction = 'You are writing a catalogue entry for a SINGLE research document. ' +
     `Produce these fields. ${fields} ` +
-    'Base everything strictly on the document; do not invent. Australian English.'
-  )
+    'Base everything strictly on the document text provided below; do not invent, and do not ' +
+    'draw on any outside or background knowledge. Australian English.'
+  if (!documentText) return instruction
+  return `${instruction}\n\n--- DOCUMENT TEXT (use only this) ---\n${documentText}\n--- END DOCUMENT TEXT ---`
+}
+
+/**
+ * A short, sentence-based title from a longer passage of prose: the first
+ * sentence, capped to a sane title length. Falls back to the whole passage
+ * (also capped) when no sentence break is found, and to '' when the passage
+ * is too thin to yield anything useful.
+ */
+function deriveTitleFromText(text: string): string {
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+  const firstSentence = trimmed.split(/(?<=[.!?])\s+/)[0]?.trim() ?? ''
+  const candidate = firstSentence.length >= 8 ? firstSentence : trimmed
+  const capped = candidate.length > 120 ? `${candidate.slice(0, 117).trim()}...` : candidate
+  return capped.replace(/[.]+$/, '').trim()
+}
+
+/**
+ * Graceful degradation when structured generation returns nothing (a
+ * platform hiccup, a resource mid-reprocess, or text too thin/garbled to
+ * generate from - see the scanned-document/OCR note below). Rather than
+ * failing the resource outright, build a partial enrichment from what the
+ * platform already gave us: the DA page summary (or the baseline
+ * merchandised summary) as the summary field, and a title derived from it
+ * (or the baseline cleaned name). List/quotes fields are left empty - there
+ * is no verbatim source to draw them from without a real generation pass.
+ *
+ * Returns null only when there is genuinely nothing to work with (the
+ * resource fetch itself failed, or it resolved with no usable summary text
+ * at all) - that is the one case generateEnrichment still treats as an
+ * error.
+ *
+ * KNOWN LIMITATION: a scanned PDF with no OCR layer has no extracted body
+ * text and, if the DA page-summary agent also could not read it, no
+ * pageSummary either - this path then has nothing better than the raw
+ * filename to title from. OCR ingestion is the real fix; out of scope here.
+ */
+function degradedEnrichment(
+  agent: EnrichmentAgent,
+  content: ResourceContent | null,
+  pageSummary: string | undefined,
+): Enrichment | null {
+  if (!content) return null
+  const summaryText = pageSummary || content.summary
+  if (!summaryText) return null
+  const derivedTitle = pageSummary ? deriveTitleFromText(pageSummary) : ''
+  const data: Record<string, unknown> = {}
+  for (const field of agent.fields) {
+    if (field.kind === 'title') data[field.key] = derivedTitle || content.title
+    else if (field.kind === 'summary') data[field.key] = summaryText
+    else data[field.key] = []
+  }
+  return {
+    schemaId: agent.id,
+    generatedAt: new Date().toISOString(),
+    data,
+    ...(pageSummary ? { usedPageSummary: true } : {}),
+    degraded: true,
+  }
 }
 
 export async function generateEnrichment(
@@ -217,33 +308,52 @@ export async function generateEnrichment(
   resourceId: string,
   agent: EnrichmentAgent = DEFAULT_RESEARCH_ENRICHMENT,
 ): Promise<Enrichment> {
-  // Read the resource first so we can reuse the DA page-summary for the
-  // summary field rather than paying to regenerate it.
+  // Read the resource first: this is both the grounding text for generation
+  // and the fallback source for graceful degradation.
   const content = await management.resourceContent(config, resourceId).catch(() => null)
   const pageSummary = content?.pageSummary?.trim()
+  const documentText = documentTextFor(content, pageSummary)
 
   const schema = enrichmentJsonSchema(agent)
-  const result = await management.askStructured(config, schema, buildEnrichmentQuery(agent), {
-    resourceId,
-  })
-  const data = parseEnrichmentData(agent, result.object)
-
-  // Prefer the platform's already-generated page summary for the summary field
-  // when it exists and is substantial - cheaper, and a real per-resource
-  // summary paid for at ingest.
-  let usedPageSummary = false
-  const summaryField = agent.fields.find((f) => f.kind === 'summary')
-  if (summaryField && pageSummary && pageSummary.length >= 40) {
-    data[summaryField.key] = pageSummary
-    usedPageSummary = true
+  let data: Record<string, unknown> | null = null
+  if (documentText) {
+    try {
+      const result = await management.askStructured(
+        config,
+        schema,
+        buildEnrichmentQuery(agent, documentText),
+      )
+      data = result.object != null ? parseEnrichmentData(agent, result.object) : null
+    } catch {
+      // A platform hiccup (a transient 5xx, "no structured answer") is not a
+      // hard failure while we have the resource's own content to fall back
+      // on - see degradedEnrichment below.
+      data = null
+    }
   }
 
-  return {
-    schemaId: agent.id,
-    generatedAt: new Date().toISOString(),
-    data,
-    ...(usedPageSummary ? { usedPageSummary: true } : {}),
+  if (data) {
+    // Prefer the platform's already-generated page summary for the summary
+    // field when it exists and is substantial - cheaper, and a real
+    // per-resource summary paid for at ingest.
+    let usedPageSummary = false
+    const summaryField = agent.fields.find((f) => f.kind === 'summary')
+    if (summaryField && pageSummary && pageSummary.length >= 40) {
+      data[summaryField.key] = pageSummary
+      usedPageSummary = true
+    }
+    return {
+      schemaId: agent.id,
+      generatedAt: new Date().toISOString(),
+      data,
+      ...(usedPageSummary ? { usedPageSummary: true } : {}),
+    }
   }
+
+  const partial = degradedEnrichment(agent, content, pageSummary)
+  if (partial) return partial
+
+  throw new Error('No content available to generate an enrichment for this resource')
 }
 
 /** Concurrency for corpus runs - bounded so a run never hammers the ARAG account. */

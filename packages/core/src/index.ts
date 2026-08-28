@@ -222,6 +222,13 @@ export const EnrichmentSchema = z.object({
   data: z.record(z.string(), z.unknown()),
   /** Provenance flag: summary reused the platform's DA page-summary field. */
   usedPageSummary: z.boolean().optional(),
+  /**
+   * Provenance flag: structured generation returned nothing usable (a
+   * pending resource, thin/garbled text, a transient platform error), so
+   * this is a graceful-degradation fallback - the page summary (or baseline
+   * cleaned name) rather than a full generated title/summary/takeaways/quotes.
+   */
+  degraded: z.boolean().optional(),
 })
 
 export type EnrichmentFieldKind = z.infer<typeof EnrichmentFieldKindSchema>

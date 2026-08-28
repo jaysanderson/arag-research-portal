@@ -129,9 +129,21 @@ function json(body: unknown): Response {
  * A management double: /catalog lists two resources, each /resource carries a
  * DA page-summary field, /ask returns a structured answer_json object. `answer`
  * overrides the generated object; `pageSummary` seeds the DA field.
+ *
+ * `askBodies`, when passed, collects the parsed JSON body of every /ask call -
+ * so a test can assert what generation actually sent (no resource_filters,
+ * the document text embedded in the query).
  */
 function management(
-  opts: { answer?: Record<string, unknown>; pageSummary?: string; askShouldFail?: boolean } = {},
+  opts: {
+    answer?: Record<string, unknown>
+    pageSummary?: string
+    bodyText?: string
+    askShouldFail?: boolean
+    noAnswer?: boolean
+    resourceShouldFail?: boolean
+  } = {},
+  askBodies?: Record<string, unknown>[],
 ): AragProvider {
   const pageSummary = opts.pageSummary ??
     'This document outlines a series of courses for professional fishers in 1985.'
@@ -143,7 +155,7 @@ function management(
   }
   return new AragProvider({
     resolveBinding: (slug) => slug === 'frdc-2' ? { baseUrl: KB, token: 't' } : undefined,
-    fetchImpl: (input: string | URL | Request) => {
+    fetchImpl: (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString()
       if (url.includes('/catalog')) {
         return Promise.resolve(json({
@@ -154,20 +166,25 @@ function management(
         }))
       }
       if (url.includes('/resource/')) {
+        if (opts.resourceShouldFail) return Promise.resolve(new Response('boom', { status: 500 }))
         return Promise.resolve(json({
           title: '1981-071-DLD.pdf',
           data: {
             texts: {
-              'da-pagesummary-f-file': { extracted: { text: { text: pageSummary } } },
+              ...(pageSummary
+                ? { 'da-pagesummary-f-file': { extracted: { text: { text: pageSummary } } } }
+                : {}),
+              ...(opts.bodyText ? { body: { extracted: { text: { text: opts.bodyText } } } } : {}),
             },
           },
         }))
       }
       if (url.endsWith('/ask')) {
+        if (askBodies && init?.body) askBodies.push(JSON.parse(init.body as string))
         if (opts.askShouldFail) return Promise.resolve(new Response('boom', { status: 500 }))
         return Promise.resolve(ndjson([
           { item: { type: 'retrieval', results: { resources: {} } } },
-          { item: { type: 'answer_json', object: answer } },
+          ...(opts.noAnswer ? [] : [{ item: { type: 'answer_json', object: answer } }]),
         ]))
       }
       throw new Error(`unexpected fetch ${url}`)
@@ -221,6 +238,8 @@ describe('generateEnrichment', () => {
     const e = await generateEnrichment(
       management({
         pageSummary: '', // no DA page summary on this resource
+        bodyText: 'The extracted body text of the document, used as grounding when there is no ' +
+          'page summary to embed instead.',
         answer: {
           title: 'A real title',
           summary: 'A full generated summary of at least forty characters in length here.',
@@ -234,6 +253,82 @@ describe('generateEnrichment', () => {
     expect(e.data.summary).toContain('full generated summary')
     expect(e.usedPageSummary).toBeUndefined()
   })
+
+  it("embeds the resource's own text in the query and generates WITHOUT resource_filters", async () => {
+    const askBodies: Record<string, unknown>[] = []
+    const e = await generateEnrichment(management({}, askBodies), config, 'r1')
+    expect(askBodies.length).toBe(1)
+    const body = askBodies[0]!
+    // The document's own text is embedded in the query - no dependency on
+    // scoped retrieval, so no resource_filters and no reliance on ingest status.
+    expect(body.resource_filters).toBeUndefined()
+    expect(String(body.query)).toContain('courses for professional fishers')
+    expect(e.data.title).toContain('Echo-sounder')
+  })
+
+  it('prefers the platform page summary as the embedded grounding text when present', async () => {
+    const askBodies: Record<string, unknown>[] = []
+    await generateEnrichment(
+      management({ bodyText: 'Some other extracted body text, not the page summary.' }, askBodies),
+      config,
+      'r1',
+    )
+    const body = askBodies[0]!
+    expect(String(body.query)).toContain('courses for professional fishers')
+    expect(String(body.query)).not.toContain('Some other extracted body text')
+  })
+
+  it('falls back to the extracted body text as grounding when there is no page summary', async () => {
+    const askBodies: Record<string, unknown>[] = []
+    await generateEnrichment(
+      management({
+        pageSummary: '',
+        bodyText: 'This is the full extracted body text used as grounding instead.',
+      }, askBodies),
+      config,
+      'r1',
+    )
+    const body = askBodies[0]!
+    expect(String(body.query)).toContain('full extracted body text used as grounding')
+  })
+
+  it(
+    'returns a partial (degraded) enrichment from the page summary when structured ' +
+      'generation returns nothing, rather than erroring',
+    async () => {
+      const e = await generateEnrichment(management({ noAnswer: true }), config, 'r1')
+      expect(e.degraded).toBe(true)
+      expect(e.data.summary).toBe(
+        'This document outlines a series of courses for professional fishers in 1985.',
+      )
+      // Title derived from the page summary's first sentence, not empty/an error.
+      expect(typeof e.data.title).toBe('string')
+      expect((e.data.title as string).length).toBeGreaterThan(0)
+      expect(e.usedPageSummary).toBe(true)
+    },
+  )
+
+  it(
+    'also degrades gracefully on a hard platform error (5xx) when a page summary is available',
+    async () => {
+      const e = await generateEnrichment(management({ askShouldFail: true }), config, 'r1')
+      expect(e.degraded).toBe(true)
+      expect(e.data.summary).toContain('courses for professional fishers')
+    },
+  )
+
+  it(
+    'throws only when there is genuinely nothing to work with (no content, no page summary)',
+    async () => {
+      let threw = false
+      try {
+        await generateEnrichment(management({ resourceShouldFail: true }), config, 'r1')
+      } catch {
+        threw = true
+      }
+      expect(threw).toBe(true)
+    },
+  )
 })
 
 describe('runEnrichmentOverCorpus', () => {
@@ -270,15 +365,40 @@ describe('runEnrichmentOverCorpus', () => {
     expect(events[0]).toEqual({ type: 'start', total: 1 })
   })
 
-  it('reports per-item errors without aborting the run', async () => {
-    const store = new EnrichmentStore(tmp())
-    const events = await collect(
-      runEnrichmentOverCorpus(management({ askShouldFail: true }), store, config, { scope: 'all' }),
-    )
-    const done = events.at(-1)
-    if (done?.type === 'done') {
-      expect(done.errors).toBe(2)
-      expect(done.enriched).toBe(0)
-    }
-  })
+  it(
+    'a structured-generation failure degrades gracefully rather than erroring the run ' +
+      '(the page summary is still available)',
+    async () => {
+      const store = new EnrichmentStore(tmp())
+      const events = await collect(
+        runEnrichmentOverCorpus(management({ askShouldFail: true }), store, config, {
+          scope: 'all',
+        }),
+      )
+      const done = events.at(-1)
+      if (done?.type === 'done') {
+        expect(done.errors).toBe(0)
+        expect(done.enriched).toBe(2)
+      }
+      expect(store.get('frdc-2', 'r1')?.degraded).toBe(true)
+    },
+  )
+
+  it(
+    'reports per-item errors without aborting the run, only when there is genuinely ' +
+      'nothing to work with',
+    async () => {
+      const store = new EnrichmentStore(tmp())
+      const events = await collect(
+        runEnrichmentOverCorpus(management({ resourceShouldFail: true }), store, config, {
+          scope: 'all',
+        }),
+      )
+      const done = events.at(-1)
+      if (done?.type === 'done') {
+        expect(done.errors).toBe(2)
+        expect(done.enriched).toBe(0)
+      }
+    },
+  )
 })
