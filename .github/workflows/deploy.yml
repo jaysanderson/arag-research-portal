@@ -58,6 +58,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Deploy
-        run: flyctl deploy --remote-only
+        run: flyctl deploy --remote-only --env BUILD_SHA=${GITHUB_SHA}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

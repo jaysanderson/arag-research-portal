@@ -11,7 +11,8 @@
       "Wheel-track area fell from about 30% to under 15% of the paddock under controlled traffic.",
       "Water infiltration on permanent traffic lanes improved by roughly 40%.",
       "Machinery-matching costs paid back within six seasons."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "grdc",
@@ -25,7 +26,8 @@
       "Early cut-for-hay decisions preserved more equity than holding failing crops to harvest.",
       "Below-median rainfall cash flow modelling changed input timing for two-thirds of case studies.",
       "Case studies were drawn from the 2018-19 eastern states drought."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "grdc",
@@ -39,7 +41,8 @@
       "Only around one in three family farm businesses had a documented succession plan.",
       "Staged transitions over 5-7 years reduced reported family conflict versus a single handover.",
       "Off-farm equity for non-farming siblings was the most commonly unresolved issue reviewed."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "grdc",
@@ -53,7 +56,8 @@
       "72% of surveyed populations were resistant to at least one Group 1 herbicide.",
       "Group 15 pre-emergent resistance was confirmed for the first time, at 14 of 96 WA sites.",
       "Diversifying modes of action across a rotation halved resistance build-up over five years."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "grdc",
@@ -67,7 +71,8 @@
       "Harvest weed seed control removed most ryegrass seed set escaping in-crop herbicides.",
       "Narrower row spacing and higher seeding rates improved early crop competition against weeds.",
       "Full integrated systems reported lower herbicide spend per hectare over three seasons."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "grdc",
@@ -81,7 +86,8 @@
       "A thorough silo cleandown before filling removes residual grain carrying over insect infestations.",
       "Fortnightly probe sampling caught insect activity before it was visible in surface grain.",
       "Correctly set aeration held stored wheat below 15\u00b0C through summer in the demonstration system."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "grdc",
@@ -95,7 +101,8 @@
       "Frost risk varied by up to 3\u00b0C within a single paddock due to cold-air drainage.",
       "Zone-matched sowing windows cut frost-affected screenings by an average of 22%.",
       "Maps were built from a ten-year, 40-site on-farm temperature logging network."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "grdc",
@@ -109,7 +116,8 @@
       "Split nitrogen timing lifted average grain protein by 0.6 percentage points with no yield loss.",
       "Nitrogen use efficiency improved by up to 15% under split timing on sandy loam soils.",
       "The protein benefit fell to 0.2 percentage points in the one season with a wet finish."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "grdc",
@@ -123,7 +131,8 @@
       "The new pathotype reached 23 of 25 trap nursery sites within four months of first detection.",
       "No commercially available variety tested carried complete resistance to the new pathotype.",
       "Pathotype confirmation to grower notification averaged a six-day turnaround."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "grdc",
@@ -137,7 +146,8 @@
       "Subsoil acidity below pH 4.8 cut wheat yield by an average of 18% on affected sites.",
       "Deep-banded lime lifted subsoil pH from 4.4 to 5.1 at 20-30cm within three seasons.",
       "Deep liming returned 2.3:1 on investment over a seven-year cropping sequence."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "frdc",
@@ -151,7 +161,8 @@
       "Juvenile recruitment in two sub-blocks fell to under 40% of the long-term average.",
       "Fishery-independent surveys covered 85 permanent monitoring sites across the southern zone.",
       "A precautionary TAC reduction was recommended for the affected sub-blocks."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "frdc",
@@ -165,7 +176,8 @@
       "Retail buyers indicated willingness to pay a premium of up to 8% for verified provenance.",
       "At-sea data entry burden was the most cited barrier to full operator adoption.",
       "The pilot tracked product from vessel through to retail across three supply chains."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "frdc",
@@ -179,7 +191,8 @@
       "Super-chilled product retained acceptable sensory quality roughly four days longer than ice slurry.",
       "Export rejection rates on arrival fell after super-chilling was adopted by trial exporters.",
       "Modified atmosphere packaging extended shelf life but reduced initial texture scores."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "frdc",
@@ -193,7 +206,8 @@
       "An estimated one in five Australian households included at least one recreational fisher.",
       "Snapper and whiting were the most retained finfish species by weight nationally.",
       "Participation rates varied more than twofold between the highest and lowest regions."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "frdc",
@@ -207,7 +221,8 @@
       "Standardised bait quantities allow comparison of relative abundance across sites and years.",
       "Camera stations were deployed at consistent depth and habitat strata to control for survey bias.",
       "The dataset forms part of a long-term reef fish habitat monitoring program."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "frdc",
@@ -221,7 +236,8 @@
       "The framework defines four biosecurity risk tiers based on stock movement and site proximity.",
       "Recommended fallowing periods reduced pathogen carryover in trial sites.",
       "Protocols were aligned with national emergency animal disease response arrangements."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "frdc",
@@ -235,7 +251,8 @@
       "Circle hooks reduced deep-hooking rates in incidentally caught sharks compared with J-hooks.",
       "Shark excluder devices were trialled across 12 commercial longline vessels over one season.",
       "Crew reported minimal change to target catch handling time after fitting excluder devices."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "frdc",
@@ -249,7 +266,8 @@
       "Ten years of tag-recapture data informed revised natural mortality estimates.",
       "Spawning biomass remained above the limit reference point under moderate effort scenarios.",
       "Effort modelling tested three catch scenarios reflecting different market demand outlooks."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "frdc",
@@ -263,7 +281,8 @@
       "Triploid oysters reached market size on average one growing season sooner than diploid stock.",
       "Diploid stock showed a marked condition index dip through the summer spawning period.",
       "Trials spanned three growing regions with differing water temperature profiles."
-    ]
+    ],
+    "synthetic": true
   },
   {
     "tenant": "frdc",
@@ -277,6 +296,7 @@
       "Guidelines followed a confirmed white spot disease incursion in an eastern prawn farming region.",
       "Restricted pond water exchange during high-risk periods reduced modelled transmission risk.",
       "An early warning checklist was distributed to all licensed prawn farms in the catchment."
-    ]
+    ],
+    "synthetic": true
   }
 ]

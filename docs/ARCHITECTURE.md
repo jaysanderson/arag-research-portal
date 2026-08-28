@@ -6,10 +6,10 @@ decisions) and `PARITY.md` (the feature floor).
 ## Shape of the system
 
 ```
-research-portal/                      pnpm workspace monorepo
+research-portal/                      Deno workspace (no package manager, no node_modules)
   apps/
-    web/                              React + TS + Vite SPA (the portal)
-    api/                              Fastify + TS + Zod (thin typed API server)
+    web/                              React + TS SPA, built with esbuild + Tailwind standalone
+    api/                              Deno + Hono + Zod (thin typed API server)
   packages/
     core/                             shared types & Zod schemas (Tenant, Answer,
                                       Citation, Entity, Relation, Assessment, ...)
@@ -20,10 +20,10 @@ research-portal/                      pnpm workspace monorepo
   docs/
 ```
 
-One run target: `npm run dev` against live knowledge boxes (`ARAG_*` env in the repo-root
+One run target: `deno task dev` against live knowledge boxes (`ARAG_*` env in the repo-root
 `.env`, gitignored). **There is no mock mode** - Jay's directive (2026-08-21): nothing faked,
 ever. Sample content exists only as real documents uploaded into real knowledge boxes by
-`npm run provision`. Test doubles are permitted strictly inside test files.
+`deno task provision`. Test doubles are permitted strictly inside test files.
 
 ## The three load-bearing ideas
 
@@ -35,8 +35,9 @@ tokens, nav labels, hero copy, graph legend, topic rows - renders from it. Nothi
 FRDC-specific or GRDC-specific ever appears in a component.
 
 Server-side, a tenant record also holds the knowledge-box binding: zone, KB id, service-account
-token (minted at provision time, never sent to the client). Storage: **SQLite via Drizzle ORM**
-- one file, typed queries, trivially resettable for demos, no infrastructure to hand over.
+token (minted at provision time, never sent to the client). Storage: **plain JSON on the Fly
+volume**, written atomically via `apps/api/src/persist.ts` (see "Persistence rule" below) - no
+database, trivially resettable for demos, no infrastructure to hand over.
 Routing: path-based (`/t/grdc/...`, `/t/frdc/...`), with a tenant picker at `/`. Subdomains can
 come later at the reverse proxy without code changes.
 
@@ -80,13 +81,14 @@ a live checklist):
    applied to the KB via the management API.
 4. **Seed the corpus** - upload the sample documents, poll to PROCESSED, verify with a smoke
    `ask`.
-5. **Save the tenant** - config + binding written to SQLite; portal is live at `/t/:slug`.
+5. **Save the tenant** - config + binding written to the JSON tenant/binding stores; portal is
+   live at `/t/:slug`.
 
 Every step is idempotent and re-runnable, which also gives the factory its 30-second reset.
 The same machinery backs the ongoing **admin surfaces**: corpus upload, label management, graph
 config, agents, suggested questions - "expose the things people need to manage, in the app".
 
-## API surface (Fastify + Zod, all typed end-to-end)
+## API surface (Deno + Hono + Zod, all typed end-to-end)
 
 ```
 GET  /api/tenants                      tenant list (picker)
@@ -97,37 +99,50 @@ GET  /api/t/:slug/suggest              suggested questions
 GET  /api/t/:slug/resources[/:id]      library + document detail
 POST /api/t/:slug/resources/:id/ask    per-document chat (SSE)
 GET  /api/t/:slug/graph                entities + relations
-CRUD /api/t/:slug/sessions             research sessions (SQLite)
+CRUD /api/t/:slug/sessions             research sessions (JSON store)
 POST /api/t/:slug/assessments          generate + grade knowledge checks
 POST /api/admin/tenants                provision (SSE progress)  - admin-authed
 CRUD /api/admin/t/:slug/*              corpus, labels, graph, agents, questions
 ```
 
-`@fastify/type-provider-zod` gives one schema per route shared by server validation, the client
-SDK and tests. Sessions/assessments live in SQLite so the portal, not the browser, owns them.
+Zod schemas shared between server validation and the client. Sessions/assessments live in the
+JSON stores under `apps/api/src/stores.ts` so the portal, not the browser, owns them.
 
 ## Front end
 
-- **React 18 + TypeScript + Vite**, React Router (routes mirror the parity sections:
-  explore, search, research, library, graph, agentic, assess, admin).
-- **TanStack Query** for data; native `fetch` + `EventSource`-style reader for SSE streams.
+- **React 18 + TypeScript**, loaded via an `esm.sh` import map (`apps/web/index.html`), bundled
+  by the esbuild standalone binary (`deno task build:js`) - no Vite, no bundler-managed
+  dependency graph. React Router (routes mirror the parity sections: explore, search, research,
+  library, graph, agentic, assess, admin).
+- **TanStack Query** for data; native `fetch` + a streamed-response reader for SSE.
 - **Design system**: our own, tenant-themed via CSS custom properties emitted from
-  `TenantConfig` (colour, type scale, radius, logo). Tailwind CSS v4 + Radix UI primitives +
-  Framer Motion for the streaming/answer choreography. Every view ships real empty, loading,
-  error and offline states; 390 px and WCAG AA are acceptance criteria, not afterthoughts.
-- **Graph**: d3-force via `react-force-graph` (canvas renderer for performance), driven by the
-  tenant's entity/relation types for legend and filters.
-- **PDF**: pdf.js viewer, lazy-loaded route chunk.
+  `TenantConfig` (colour, type scale, radius, logo). Tailwind CSS v4 (standalone CLI, `deno task
+  build:css`) plus a small in-house component set (`apps/web/src/components/ui.tsx`) - no Radix
+  UI, no Framer Motion; the streaming/answer choreography is done with CSS transitions. Every
+  view ships real empty, loading, error and offline states; 390 px and WCAG AA are acceptance
+  criteria, not afterthoughts.
+- **Graph**: `d3-force` used directly (not `react-force-graph`) to drive a hand-built SVG force
+  layout (`apps/web/src/pages/GraphPage.tsx`) with drag, pan and zoom, driven by the tenant's
+  entity/relation types for legend and filters.
+- **PDF**: no pdf.js - a PDF resource is shown in a plain `<iframe>` pointed at the file URL
+  (`ResourceDetailPage.tsx`'s `PdfBody`), with an "open in a new tab" fallback. A richer in-page
+  viewer (e.g. pdf.js) is a roadmap item, not yet built.
 
 ## Quality loop
-- Vitest + Testing Library (unit/component), Playwright (smoke journeys per tenant: ask,
-  cite-click-through, library, graph), `tsc --noEmit`, ESLint + Prettier - one `pnpm check`
-  gate before anything is called done.
-- Tests use in-file stub doubles only; no stub ships in product code. CI needs no credentials
-  for unit tests; live smoke tests run against the provisioned knowledge boxes.
+- Deno's built-in test runner (`deno test`, with `@std/testing/bdd` and `@std/expect`) for
+  unit/integration tests, `deno check` for typechecking, `deno lint` and `deno fmt --check` for
+  lint/format - one `deno task check` gate before anything is called done (see `deno.json`'s
+  `tasks` key and `CONTRIBUTING.md`).
+- Tests use in-file stub doubles only; no stub ships in product code. CI needs no ARAG
+  credentials for the current test suite, which runs entirely against the JSON-file stores and
+  in-file doubles.
+- **Not yet built**: there is no component-testing library and no browser-driven smoke suite in
+  this repo today. Playwright smoke journeys per tenant (ask, cite-click-through, library, graph)
+  remain a valid target and stay on the roadmap, but nothing currently exercises the app in a
+  real browser as part of the gate.
 
 ## Build order (small, reviewable increments)
-1. **Scaffold** - workspace, CI loop (`pnpm check`), design tokens, app shells.
+1. **Scaffold** - workspace, CI loop (`deno task check`), design tokens, app shells.
 2. **Tenant core + live provider** - config-driven theming, tenant picker, explore page,
    provisioned GRDC + FRDC knowledge boxes with seed corpora uploaded.
 3. **Ask experience** - streamed cited answer + evidence panel against the live KBs.

@@ -7,7 +7,7 @@
  * processed, and append the resulting bindings to the repo-root .env.
  *
  * Idempotent - safe to re-run; existing KBs, tokens and resources are
- * left alone. Usage: npm run provision [-- grdc frdc]
+ * left alone. Usage: deno task provision [-- grdc frdc]
  */
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
