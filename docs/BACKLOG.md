@@ -21,6 +21,15 @@ Owner-tracked so nothing drops. Status: DONE (live) | MERGED (deploying) | IN BU
 - GRDC purge-failed endpoint. MERGED/deploying. NEXT: dry-run on gdrc, confirm count, execute.
 
 ## Queued (larger)
+- Merchandising data-augmentation agent (Jay, high value): a DA generator agent configured in
+  Management with a JSON schema that writes per-resource "merchandising" fields, so cards show a
+  real title + summary + scannable fields instead of the raw filename (1981-071-DLD.pdf). Schema:
+  clean title, one-line hook, summary, 3 key takeaways, a standout statistic, year/authors/org,
+  species/region/method tags, doc-type, read length. Then display them on Explore/Library/Search
+  cards and the resource page. PLATFORM RISK: ARAG-DEV.md records the json-output DA generator is
+  buggy (422s) - verify the working path first, do not assume. Starts right after the resource-
+  page redesign lands (shares provider toSummary + card code - sequenced to avoid conflicts).
+
 - User documentation stored in a knowledge box + a dedicated help chatbot scoped ONLY to the
   docs, excluded from all normal search/ask. QUEUED - separate help KB approach.
 

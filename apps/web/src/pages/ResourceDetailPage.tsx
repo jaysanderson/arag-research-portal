@@ -13,7 +13,6 @@ import { Link, useOutletContext, useParams, useSearchParams } from 'react-router
 import type { ResourceContent, ResourceSummary, ScoredResource } from '@research-portal/core'
 import {
   ApiError,
-  getRelationsGraph,
   getResource,
   getResourceContent,
   resourceFileUrl,
@@ -23,7 +22,15 @@ import { AnswerStream } from '../components/AnswerStream.tsx'
 import { PdfReader } from '../components/PdfReader.tsx'
 import { ResourceThumb } from '../components/ResourceThumb.tsx'
 import { SaveEvidenceButton } from '../components/SaveEvidence.tsx'
-import { ErrorCard, prettyLabel, Skeleton, TypeBadge } from '../components/ui.tsx'
+import { EmptyState, ErrorCard, prettyLabel, Skeleton, TypeBadge } from '../components/ui.tsx'
+import {
+  blockPlainText,
+  buildRelatedQuery,
+  type DocBlock,
+  parseDocBlocks,
+  selectRecommendations,
+  selectViewerVariant,
+} from '../lib/resource-view.ts'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
 /** Publish year from an ISO date, or null when the date is missing/unparseable. */
@@ -64,62 +71,213 @@ function formatTimestamp(seconds: number): string {
   return `${mm}:${ss.toString().padStart(2, '0')}`
 }
 
-/** Split a resource's extracted-text fields into paragraphs, joined across fields. */
-function useJoinedParagraphs(texts: { fieldId: string; text: string }[]): string[] {
-  return useMemo(() => {
-    const joined = texts.map((field) => field.text).join('\n\n')
-    return joined
-      .split(/\n+/)
-      .map((paragraph) => paragraph.trim())
-      .filter((paragraph) => paragraph.length > 0)
-  }, [texts])
-}
-
-/** Small square section label used on every panel in this view. */
+/** Small eyebrow section label used on every panel in this view. */
 function PanelHeading({ children }: { children: ReactNode }) {
   return <h2 className='rp-eyebrow text-ink-3'>{children}</h2>
 }
 
-function DetailSkeleton() {
-  return (
-    <div className='rp-card p-5'>
-      <div className='flex items-center justify-between'>
-        <Skeleton className='h-5 w-16' />
-        <Skeleton className='h-4 w-24' />
-      </div>
-      <Skeleton className='mt-4 h-7 w-3/4' />
-      <Skeleton className='mt-3 h-4 w-full' />
-      <Skeleton className='mt-1 h-4 w-5/6' />
-      <Skeleton className='mt-1 h-4 w-2/3' />
-    </div>
-  )
+/**
+ * Inline markdown (bold, italic, inline code, links) rendered as React nodes -
+ * never as raw HTML, so authored emphasis reads correctly without an injection
+ * surface. Anything it does not recognise is passed straight through as text.
+ */
+function renderInline(text: string, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = []
+  const pattern = /(\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_|`[^`]+`|\[[^\]]+\]\([^)]+\))/g
+  let last = 0
+  let match: RegExpExecArray | null
+  let key = 0
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > last) nodes.push(text.slice(last, match.index))
+    const token = match[0]
+    const k = `${keyPrefix}-${key++}`
+    if (token.startsWith('**') || token.startsWith('__')) {
+      nodes.push(<strong key={k}>{token.slice(2, -2)}</strong>)
+    } else if (token.startsWith('`')) {
+      nodes.push(
+        <code key={k} className='rounded-[4px] bg-surface-2 px-1 py-0.5 text-[0.85em]'>
+          {token.slice(1, -1)}
+        </code>,
+      )
+    } else if (token.startsWith('[')) {
+      const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token)
+      if (link) {
+        nodes.push(
+          <a
+            key={k}
+            href={link[2]}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='rp-focus rounded-[3px] underline decoration-dotted underline-offset-2'
+            style={{ color: 'var(--rp-accent)' }}
+          >
+            {link[1]}
+          </a>,
+        )
+      } else {
+        nodes.push(token)
+      }
+    } else {
+      nodes.push(<em key={k}>{token.slice(1, -1)}</em>)
+    }
+    last = match.index + token.length
+  }
+  if (last < text.length) nodes.push(text.slice(last))
+  return nodes
 }
 
-function BodySkeleton() {
-  return (
-    <div className='rp-card mt-6 p-5'>
-      <Skeleton className='h-72 w-full' />
-    </div>
-  )
+const HEADING_CLASSES: Record<number, string> = {
+  1: 'rp-display text-xl text-ink mt-6 first:mt-0',
+  2: 'rp-display text-lg text-ink mt-6 first:mt-0',
+  3: 'font-semibold text-base text-ink mt-5',
+  4: 'font-semibold text-sm text-ink mt-4',
+  5: 'font-semibold text-sm text-ink mt-4',
+  6: 'font-semibold text-sm text-ink-2 mt-4',
 }
 
 /**
- * Extracted-text paragraphs with optional passage highlighting and a transient
- * "flash" highlight for a paragraph the reader just jumped to from the Matches
- * rail. Shared by the web, PDF, text and file bodies. Each paragraph carries a
- * stable id (`doc-para-{index}`) so the rail can scroll straight to it.
+ * Renders one parsed document block, anchored `doc-block-{index}` so the
+ * "Matches" rail and passage highlighting can scroll to it, with a transient
+ * flash and a persistent passage highlight when this block is the target.
  */
-function ExtractedTextPanel(
-  { paragraphs, passage, flashIndex }: {
-    paragraphs: string[]
+function DocBlockView(
+  { block, emphasised, setRef }: {
+    block: DocBlock
+    emphasised: boolean
+    setRef: ((el: HTMLElement | null) => void) | undefined
+  },
+) {
+  const emphasisClass = emphasised ? 'rounded-[4px] border-l-2 py-1.5 pl-3 pr-2 text-ink' : ''
+  const emphasisStyle = emphasised
+    ? {
+      borderColor: 'var(--rp-accent)',
+      backgroundColor: 'color-mix(in srgb, var(--rp-accent) 14%, var(--rp-surface))',
+    }
+    : undefined
+  const base = `doc-block scroll-mt-24 transition-colors duration-700 ${emphasisClass}`
+  const id = `doc-block-${block.index}`
+
+  switch (block.kind) {
+    case 'heading': {
+      const level = Math.min(6, Math.max(1, block.level))
+      const Tag = `h${level}` as 'h2'
+      return (
+        <Tag
+          id={id}
+          ref={setRef}
+          style={emphasisStyle}
+          className={`${HEADING_CLASSES[level]} ${base}`}
+        >
+          {renderInline(block.text, `h-${block.index}`)}
+        </Tag>
+      )
+    }
+    case 'list':
+      return block.ordered
+        ? (
+          <ol
+            id={id}
+            ref={setRef}
+            style={emphasisStyle}
+            className={`${base} list-decimal space-y-1.5 pl-6`}
+          >
+            {block.items.map((item, i) => (
+              <li key={i} className='pl-1'>{renderInline(item, `li-${block.index}-${i}`)}</li>
+            ))}
+          </ol>
+        )
+        : (
+          <ul
+            id={id}
+            ref={setRef}
+            style={emphasisStyle}
+            className={`${base} list-disc space-y-1.5 pl-6`}
+          >
+            {block.items.map((item, i) => (
+              <li key={i} className='pl-1'>{renderInline(item, `li-${block.index}-${i}`)}</li>
+            ))}
+          </ul>
+        )
+    case 'table':
+      return (
+        <div id={id} ref={setRef} style={emphasisStyle} className={`${base} overflow-x-auto`}>
+          <table className='w-full border-collapse text-sm'>
+            <thead>
+              <tr>
+                {block.headers.map((h, i) => (
+                  <th
+                    key={i}
+                    className='border-b border-line px-3 py-2 text-left font-semibold text-ink'
+                  >
+                    {renderInline(h, `th-${block.index}-${i}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, r) => (
+                <tr key={r}>
+                  {row.map((cell, c) => (
+                    <td key={c} className='border-b border-line px-3 py-2 align-top text-ink-2'>
+                      {renderInline(cell, `td-${block.index}-${r}-${c}`)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
+    case 'code':
+      return (
+        <pre
+          id={id}
+          ref={setRef}
+          style={emphasisStyle}
+          className={`${base} overflow-x-auto rounded-[6px] bg-surface-2 p-3 text-xs leading-relaxed text-ink-2`}
+        >
+          <code>{block.text}</code>
+        </pre>
+      )
+    case 'quote':
+      return (
+        <blockquote
+          id={id}
+          ref={setRef}
+          style={emphasisStyle}
+          className={`${base} border-l-2 border-line pl-3 italic text-ink-2`}
+        >
+          {renderInline(block.text, `q-${block.index}`)}
+        </blockquote>
+      )
+    default:
+      return (
+        <p id={id} ref={setRef} style={emphasisStyle} className={`${base} leading-relaxed`}>
+          {renderInline(block.text, `p-${block.index}`)}
+        </p>
+      )
+  }
+}
+
+/**
+ * The structured reading pane for an authored/extracted document body. Renders
+ * parsed markdown blocks (headings, lists, tables, quotes) rather than a
+ * flattened text dump, while keeping the passage/`?q=` highlight and the
+ * jump-to-block behaviour. A leading level-1 heading equal to the resource
+ * title is dropped, since the page shows the title in its own header.
+ */
+function DocumentReader(
+  { blocks, title, passage, flashIndex }: {
+    blocks: DocBlock[]
+    title: string
     passage: string | null
     flashIndex: number | null
   },
 ) {
-  const highlightRef = useRef<HTMLParagraphElement | null>(null)
+  const highlightRef = useRef<HTMLElement | null>(null)
   const needle = passageNeedle(passage)
   const highlightIndex = needle
-    ? paragraphs.findIndex((paragraph) => normalise(paragraph).includes(needle))
+    ? blocks.findIndex((block) => normalise(blockPlainText(block)).includes(needle))
     : -1
 
   useEffect(() => {
@@ -128,55 +286,32 @@ function ExtractedTextPanel(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightIndex])
 
-  if (paragraphs.length === 0) {
-    return <p className='text-sm text-ink-3'>No extracted text is available for this document.</p>
+  if (blocks.length === 0) {
+    return <p className='text-sm text-ink-3'>No readable text is available for this document.</p>
   }
 
+  const titleNorm = normalise(title)
   return (
-    <div className='rp-prose space-y-3 text-sm text-ink-2'>
-      {paragraphs.map((paragraph, index) => {
-        const isHighlighted = index === highlightIndex
-        const isFlashed = index === flashIndex
-        const emphasised = isHighlighted || isFlashed
+    <div className='rp-prose max-w-none text-sm text-ink-2'>
+      {blocks.map((block, i) => {
+        if (
+          i === 0 && block.kind === 'heading' && block.level === 1 &&
+          normalise(block.text) === titleNorm
+        ) {
+          return null
+        }
+        const emphasised = block.index === highlightIndex || block.index === flashIndex
         return (
-          <p
-            key={index}
-            id={`doc-para-${index}`}
-            ref={isHighlighted ? highlightRef : undefined}
-            className={`scroll-mt-24 transition-colors duration-700 ${
-              emphasised ? 'rounded-[4px] border-l-2 py-1.5 pl-3 pr-2 text-ink' : ''
-            }`}
-            style={emphasised
-              ? {
-                borderColor: 'var(--rp-accent)',
-                backgroundColor: 'color-mix(in srgb, var(--rp-accent) 14%, var(--rp-surface))',
-              }
+          <DocBlockView
+            key={block.index}
+            block={block}
+            emphasised={emphasised}
+            setRef={block.index === highlightIndex
+              ? (el) => (highlightRef.current = el)
               : undefined}
-          >
-            {paragraph}
-          </p>
+          />
         )
       })}
-    </div>
-  )
-}
-
-/** Extracted text wrapped in its own card, used by the web and file/text bodies. */
-function ExtractedTextCard(
-  { texts, passage, flashIndex, title = 'Extracted text' }: {
-    texts: { fieldId: string; text: string }[]
-    passage: string | null
-    flashIndex: number | null
-    title?: string
-  },
-) {
-  const paragraphs = useJoinedParagraphs(texts)
-  return (
-    <div className='rp-card p-5'>
-      <PanelHeading>{title}</PanelHeading>
-      <div className='mt-3'>
-        <ExtractedTextPanel paragraphs={paragraphs} passage={passage} flashIndex={flashIndex} />
-      </div>
     </div>
   )
 }
@@ -286,35 +421,10 @@ function TranscriptPanel(
   )
 }
 
-function WebBody(
-  { content, resourceSummary, passage, flashIndex }: {
-    content: ResourceContent
-    resourceSummary: string
-    passage: string | null
-    flashIndex: number | null
-  },
-) {
-  const pageSummary = content.summary ?? resourceSummary
-  return (
-    <div className='space-y-5'>
-      {pageSummary
-        ? (
-          <div className='rp-card p-5'>
-            <PanelHeading>Page summary</PanelHeading>
-            <p className='mt-2 text-sm leading-relaxed text-ink-2'>{pageSummary}</p>
-          </div>
-        )
-        : null}
-
-      <ExtractedTextCard texts={content.texts} passage={passage} flashIndex={flashIndex} />
-    </div>
-  )
-}
-
 /**
- * The matched passage in its own quiet card, quoted above the PDF viewer -
- * PDFs bury the same highlight far below a tall iframe, so the reader would
- * otherwise never see it without scrolling past the embed first.
+ * The matched passage quoted above the PDF viewer - PDFs bury the same
+ * highlight far below a tall canvas, so the reader would otherwise never see
+ * it without scrolling past the embed first.
  */
 function MatchedPassageCard({ passage, page }: { passage: string; page: number | null }) {
   return (
@@ -333,128 +443,96 @@ function MatchedPassageCard({ passage, page }: { passage: string; page: number |
   )
 }
 
-function PdfBody(
-  { content, fileUrl, passage, page, flashIndex, forceOpen }: {
-    content: ResourceContent
-    fileUrl: string | undefined
-    passage: string | null
-    page: number | null
-    flashIndex: number | null
-    forceOpen: boolean
-  },
+/** A prominent link to download or open the original stored file. */
+function OriginalFileActions(
+  { fileUrl, label }: { fileUrl: string; label: string },
 ) {
-  const paragraphs = useJoinedParagraphs(content.texts)
   return (
-    <div className='space-y-4'>
-      {passage ? <MatchedPassageCard passage={passage} page={page} /> : null}
-
-      {fileUrl
-        ? <PdfReader fileUrl={fileUrl} title={content.title} initialPage={page} />
-        : <p className='text-sm text-ink-3'>This PDF file is not available.</p>}
-
-      {paragraphs.length > 0
-        ? (
-          <details className='rp-card p-5' open={forceOpen}>
-            <summary className='rp-eyebrow cursor-pointer text-ink-3'>
-              Extracted text
-            </summary>
-            <div className='mt-3'>
-              <ExtractedTextPanel
-                paragraphs={paragraphs}
-                passage={passage}
-                flashIndex={flashIndex}
-              />
-            </div>
-          </details>
-        )
-        : null}
+    <div className='flex flex-wrap gap-2'>
+      <a href={fileUrl} download className='rp-btn rp-btn-primary font-semibold'>
+        {label}
+      </a>
+      <a
+        href={fileUrl}
+        target='_blank'
+        rel='noopener noreferrer'
+        className='rp-btn rp-btn-outline'
+      >
+        Open in a new tab
+      </a>
     </div>
   )
 }
 
-function MediaBody(
-  { content, fileUrl, passage, kind }: {
-    content: ResourceContent
-    fileUrl: string | undefined
-    passage: string | null
-    kind: 'video' | 'audio'
-  },
-) {
-  const mediaRef = useRef<HTMLMediaElement | null>(null)
-
-  return (
-    <div className='space-y-5'>
-      {fileUrl
-        ? kind === 'video'
-          ? (
-            <video
-              ref={(el) => {
-                mediaRef.current = el
-              }}
-              controls
-              preload='metadata'
-              className='w-full rounded-[8px] border border-line'
-              src={fileUrl}
-            />
-          )
-          : (
-            <audio
-              ref={(el) => {
-                mediaRef.current = el
-              }}
-              controls
-              className='w-full'
-              src={fileUrl}
-            />
-          )
-        : <p className='text-sm text-ink-3'>This {kind} file is not available.</p>}
-
-      {content.transcript.length > 0
-        ? <TranscriptPanel transcript={content.transcript} mediaRef={mediaRef} passage={passage} />
-        : null}
-    </div>
-  )
-}
-
-function ImageBody({ fileUrl, title }: { fileUrl: string | undefined; title: string }) {
-  return fileUrl
-    ? <img src={fileUrl} className='max-h-[70vh] rounded-[8px] border border-line' alt={title} />
-    : <p className='text-sm text-ink-3'>This image is not available.</p>
-}
-
-function TextFileBody(
-  { content, passage, flashIndex, fileUrl }: {
-    content: ResourceContent
-    passage: string | null
-    flashIndex: number | null
-    fileUrl: string | undefined
-  },
-) {
-  return (
-    <div className='space-y-4'>
-      {fileUrl
-        ? (
-          <a
-            href={fileUrl}
-            target='_blank'
-            rel='noopener noreferrer'
-            className='rp-btn rp-btn-outline'
-          >
-            Download file
-          </a>
-        )
-        : null}
-      <ExtractedTextCard texts={content.texts} passage={passage} flashIndex={flashIndex} />
-    </div>
-  )
-}
-
-/** Dispatches to the type-aware body for the resource's content kind. */
-function ResourceBody(
-  { slug, content, resourceSummary, passage, page, flashIndex, hasTextMatches }: {
+/**
+ * Honest viewer for an Office document (Word/PowerPoint/Excel), which browsers
+ * cannot render natively. When the platform generated a browser-renderable
+ * rendition (a PDF/image preview) it is shown inline; otherwise the original
+ * is offered for download alongside its thumbnail, and the extracted text is
+ * shown clearly labelled as a text extraction - never passed off as the
+ * document itself.
+ */
+function OfficeBody(
+  { slug, content, fileUrl }: {
     slug: string
     content: ResourceContent
-    resourceSummary: string
+    fileUrl: string | undefined
+  },
+) {
+  const preview = content.preview
+  const previewUrl = preview ? resourceFileUrl(slug, content.id, preview.fieldId) : undefined
+
+  if (previewUrl && preview?.contentType === 'application/pdf') {
+    return (
+      <div className='space-y-4'>
+        <p className='text-xs text-ink-3'>
+          Showing a PDF rendition of the original document.
+        </p>
+        <PdfReader fileUrl={previewUrl} title={content.title} initialPage={null} />
+        {fileUrl ? <OriginalFileActions fileUrl={fileUrl} label='Download original' /> : null}
+      </div>
+    )
+  }
+
+  return (
+    <div className='space-y-4'>
+      <div className='flex flex-col gap-4 rounded-[8px] border border-line bg-surface-2 p-5 sm:flex-row sm:items-center'>
+        <div className='h-28 w-40 shrink-0 overflow-hidden rounded-[6px] border border-line'>
+          {previewUrl
+            ? (
+              <img
+                src={previewUrl}
+                alt={`Preview of ${content.title}`}
+                className='h-full w-full object-cover'
+              />
+            )
+            : <ResourceThumb slug={slug} id={content.id} type='document' />}
+        </div>
+        <div className='min-w-0 flex-1'>
+          <p className='text-sm font-semibold text-ink'>Original document</p>
+          <p className='mt-1 text-sm leading-relaxed text-ink-2'>
+            This is an Office document. Browsers cannot display it in place, so download the
+            original to read it exactly as authored.
+          </p>
+          {fileUrl
+            ? (
+              <div className='mt-3'>
+                <OriginalFileActions fileUrl={fileUrl} label='Download original' />
+              </div>
+            )
+            : <p className='mt-3 text-sm text-ink-3'>The original file is not available.</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Dispatches to the type-aware primary viewer for the resource's content. */
+function ResourceViewer(
+  { slug, content, blocks, passage, page, flashIndex, hasTextMatches }: {
+    slug: string
+    content: ResourceContent
+    blocks: DocBlock[]
     passage: string | null
     page: number | null
     flashIndex: number | null
@@ -463,59 +541,123 @@ function ResourceBody(
 ) {
   const primaryFile = content.files[0]
   const fileUrl = primaryFile ? resourceFileUrl(slug, content.id, primaryFile.fieldId) : undefined
+  const variant = selectViewerVariant(content.kind)
+  const mediaRef = useRef<HTMLMediaElement | null>(null)
 
-  switch (content.kind) {
-    case 'web':
-      return (
-        <WebBody
-          content={content}
-          resourceSummary={resourceSummary}
-          passage={passage}
-          flashIndex={flashIndex}
-        />
-      )
+  switch (variant) {
     case 'pdf':
       return (
-        <PdfBody
-          content={content}
-          fileUrl={fileUrl}
-          passage={passage}
-          page={page}
-          flashIndex={flashIndex}
-          forceOpen={passage != null || hasTextMatches}
-        />
+        <div className='space-y-4'>
+          {passage ? <MatchedPassageCard passage={passage} page={page} /> : null}
+          {fileUrl
+            ? <PdfReader fileUrl={fileUrl} title={content.title} initialPage={page} />
+            : (
+              <EmptyState
+                title='This PDF is not available'
+                description='The original file could not be loaded. The extracted text below is a machine reading of the document.'
+              />
+            )}
+          {blocks.length > 0
+            ? (
+              <details className='rp-card p-5' open={passage != null || hasTextMatches}>
+                <summary className='rp-eyebrow cursor-pointer text-ink-3'>
+                  Extracted text
+                </summary>
+                <div className='mt-3'>
+                  <DocumentReader
+                    blocks={blocks}
+                    title={content.title}
+                    passage={passage}
+                    flashIndex={flashIndex}
+                  />
+                </div>
+              </details>
+            )
+            : null}
+        </div>
       )
     case 'video':
-      return <MediaBody content={content} fileUrl={fileUrl} passage={passage} kind='video' />
+      return (
+        <div className='space-y-5'>
+          {fileUrl
+            ? (
+              <video
+                ref={(el) => (mediaRef.current = el)}
+                controls
+                preload='metadata'
+                className='w-full rounded-[8px] border border-line bg-black'
+                src={fileUrl}
+              />
+            )
+            : <EmptyState title='This video is not available' />}
+          {content.transcript.length > 0
+            ? (
+              <TranscriptPanel
+                transcript={content.transcript}
+                mediaRef={mediaRef}
+                passage={passage}
+              />
+            )
+            : null}
+        </div>
+      )
     case 'audio':
-      return <MediaBody content={content} fileUrl={fileUrl} passage={passage} kind='audio' />
+      return (
+        <div className='space-y-5'>
+          {fileUrl
+            ? (
+              <audio
+                ref={(el) => (mediaRef.current = el)}
+                controls
+                className='w-full'
+                src={fileUrl}
+              />
+            )
+            : <EmptyState title='This audio is not available' />}
+          {content.transcript.length > 0
+            ? (
+              <TranscriptPanel
+                transcript={content.transcript}
+                mediaRef={mediaRef}
+                passage={passage}
+              />
+            )
+            : null}
+        </div>
+      )
     case 'image':
-      return <ImageBody fileUrl={fileUrl} title={content.title} />
-    case 'text':
-      return (
-        <TextFileBody
-          content={content}
-          passage={passage}
-          flashIndex={flashIndex}
-          fileUrl={undefined}
-        />
-      )
-    case 'file':
-      return (
-        <TextFileBody
-          content={content}
-          passage={passage}
-          flashIndex={flashIndex}
-          fileUrl={fileUrl}
-        />
-      )
+      return fileUrl
+        ? (
+          <img
+            src={fileUrl}
+            className='max-h-[75vh] w-full rounded-[8px] border border-line object-contain'
+            alt={content.title}
+          />
+        )
+        : <EmptyState title='This image is not available' />
+    case 'office':
+      return <OfficeBody slug={slug} content={content} fileUrl={fileUrl} />
     default:
-      return null
+      // web / text / file - the structured reading pane. A downloadable file
+      // (a non-office attachment) gets a download action above the reader.
+      return (
+        <div className='space-y-4'>
+          {content.kind === 'file' && fileUrl
+            ? <OriginalFileActions fileUrl={fileUrl} label='Download file' />
+            : null}
+          <DocumentReader
+            blocks={blocks}
+            title={content.title}
+            passage={passage}
+            flashIndex={flashIndex}
+          />
+        </div>
+      )
   }
 }
 
-/** Metadata the reader actually has to show - kind, topics, publish date, origin link. */
-function AboutPanel(
+/** Title, badges, description and actions below the viewer ("description down below"). */
+function DescriptionPanel(
   { slug, resource, content, topicLabel, organisation }: {
     slug: string
     resource: ResourceSummary
@@ -529,10 +671,8 @@ function AboutPanel(
   const projectNumber = frdcProjectNumber(resource.title)
 
   return (
-    <div className='rp-card p-4'>
-      <PanelHeading>About this document</PanelHeading>
-
-      <div className='mt-3 flex flex-wrap items-center gap-2'>
+    <article className='rp-card p-5 sm:p-6'>
+      <div className='flex flex-wrap items-center gap-2'>
         <TypeBadge type={resource.type} />
         {resource.kind
           ? (
@@ -553,161 +693,258 @@ function AboutPanel(
           : null}
       </div>
 
+      <h1 className='rp-display mt-3 text-2xl text-ink'>{resource.title}</h1>
+      <p className='mt-3 text-sm leading-relaxed text-ink-2'>{resource.summary}</p>
+
       {resource.topicIds.length > 0
         ? (
-          <div className='mt-3 flex flex-wrap gap-1'>
+          <div className='mt-4 flex flex-wrap gap-1.5'>
             {resource.topicIds.map((topicId) => {
               const label = topicLabel(topicId)
               if (!label) return null
               return (
-                <span
+                <Link
                   key={topicId}
-                  className='rounded-[4px] bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-2'
+                  to={`/t/${slug}/library?topics=${encodeURIComponent(topicId)}`}
+                  className='rp-focus rounded-[4px] bg-surface-2 px-2 py-1 text-[11px] font-medium text-ink-2 transition-colors duration-150 hover:text-ink'
                 >
                   {label}
-                </span>
+                </Link>
               )
             })}
           </div>
         )
         : null}
 
-      {originUrl
+      {resource.keyFacts.length > 0
         ? (
-          <a
-            href={originUrl}
-            target='_blank'
-            rel='noopener noreferrer'
-            className='rp-focus mt-3 flex items-center gap-1.5 rounded-[4px] text-sm font-medium underline decoration-dotted underline-offset-2'
-            style={{ color: 'var(--rp-accent)' }}
-          >
-            View original <span aria-hidden='true'>&rarr;</span>
-          </a>
+          <div className='mt-5 border-t border-line pt-4'>
+            <PanelHeading>Key facts</PanelHeading>
+            <ol className='mt-2 space-y-1.5'>
+              {resource.keyFacts.map((fact, index) => (
+                <li key={index} className='flex gap-2 text-sm text-ink-2'>
+                  <span className='font-medium tabular-nums text-ink-3'>{index + 1}.</span>
+                  <span>{fact}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
         )
         : null}
 
-      <div className='mt-3 border-t border-line pt-3'>
+      <div className='mt-5 flex flex-wrap items-center gap-3 border-t border-line pt-4'>
         <SaveEvidenceButton
           slug={slug}
-          label='Save document to investigation'
+          label='Save to investigation'
           evidence={{
             passage: resource.summary,
             resourceId: resource.id,
             resourceTitle: resource.title,
           }}
         />
+        {originUrl
+          ? (
+            <a
+              href={originUrl}
+              target='_blank'
+              rel='noopener noreferrer'
+              className='rp-focus flex items-center gap-1.5 rounded-[4px] text-sm font-medium underline decoration-dotted underline-offset-2'
+              style={{ color: 'var(--rp-accent)' }}
+            >
+              View original source <span aria-hidden='true'>&rarr;</span>
+            </a>
+          )
+          : null}
       </div>
-    </div>
+    </article>
   )
 }
 
 /**
- * Related work for the right rail. First choice: the entity relations graph -
- * an edge whose source or target name appears in this document's title links
- * to that entity's dossier. If the graph has nothing to say, fall back to a
- * semantic search on the title and link to the top matching documents
- * instead. The section renders nothing at all when neither yields a result -
- * an honest omission beats a fake "related" list.
+ * The per-resource chat, scoped to this one document (its `resourceId` is
+ * passed to `/ask`, which filters retrieval to this resource server-side).
+ * Surfaced prominently, always available, with starter prompts as an empty
+ * state rather than a blank box.
  */
-function useRelatedWork(slug: string, title: string, excludeId: string) {
-  const relationsQuery = useQuery({
-    queryKey: ['relations-graph', slug],
-    queryFn: () => getRelationsGraph(slug),
+function DocumentChat({ slug, resource }: { slug: string; resource: ResourceSummary }) {
+  const [draft, setDraft] = useState('')
+  const [query, setQuery] = useState('')
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const trimmed = draft.trim()
+    if (trimmed.length === 0) return
+    setQuery(trimmed)
+  }
+
+  function askStarter(text: string) {
+    setDraft(text)
+    setQuery(text)
+  }
+
+  const starters = [
+    'Summarise the key findings',
+    'What are the main recommendations?',
+    'What methods were used?',
+  ]
+
+  return (
+    <section className='rp-card p-5 sm:p-6' aria-labelledby='chat-heading'>
+      <div className='flex items-center gap-2'>
+        <svg
+          viewBox='0 0 24 24'
+          fill='none'
+          stroke='currentColor'
+          strokeWidth={1.8}
+          strokeLinecap='round'
+          strokeLinejoin='round'
+          aria-hidden='true'
+          className='h-4 w-4 text-ink-3'
+        >
+          <path d='M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z' />
+        </svg>
+        <h2 id='chat-heading' className='text-sm font-semibold text-ink'>
+          Chat with this document
+        </h2>
+      </div>
+      <p className='mt-1 text-sm text-ink-3'>
+        Answers are grounded in this document only, with citations.
+      </p>
+
+      <form onSubmit={submit} className='mt-4'>
+        <label htmlFor='ask-document' className='sr-only'>
+          Ask a question about {resource.title}
+        </label>
+        <div className='flex items-center gap-2 rounded-[8px] border border-line bg-surface p-1.5 pl-3'>
+          <input
+            id='ask-document'
+            type='text'
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder='Ask a question about this document'
+            className='min-w-0 flex-1 border-0 bg-transparent py-1.5 text-sm text-ink placeholder:text-[var(--rp-ink-3)] focus:outline-none'
+          />
+          <button type='submit' className='rp-btn rp-btn-primary shrink-0 font-semibold'>
+            Ask
+          </button>
+        </div>
+      </form>
+
+      {query.trim().length > 0
+        ? (
+          <div className='mt-4'>
+            <AnswerStream
+              slug={slug}
+              request={{ query, resourceId: resource.id }}
+              onRetry={() => setQuery(query)}
+            />
+          </div>
+        )
+        : (
+          <div className='mt-3 flex flex-wrap gap-2'>
+            {starters.map((text) => (
+              <button
+                key={text}
+                type='button'
+                onClick={() => askStarter(text)}
+                className='rp-focus rounded-full border border-line bg-surface-2 px-3 py-1.5 text-xs font-medium text-ink-2 transition-colors duration-150 hover:text-ink'
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+        )}
+    </section>
+  )
+}
+
+/** One recommendation card: thumbnail + title + type, linking onward. */
+function RecommendationCard(
+  { slug, resource }: { slug: string; resource: ScoredResource },
+) {
+  return (
+    <li>
+      <Link
+        to={`/t/${slug}/library/${resource.id}`}
+        className='rp-focus group flex gap-3 rounded-[8px] p-1.5 transition-colors duration-150 hover:bg-[var(--rp-surface-2)]'
+      >
+        <div className='h-16 w-24 shrink-0 overflow-hidden rounded-[6px] border border-line'>
+          <ResourceThumb slug={slug} id={resource.id} type={resource.type} />
+        </div>
+        <div className='min-w-0 flex-1'>
+          <p className='rp-clamp-2 text-sm font-medium leading-snug text-ink-2 transition-colors duration-150 group-hover:text-ink'>
+            {resource.title}
+          </p>
+          <span className='mt-1 inline-block text-[11px] uppercase tracking-[0.06em] text-ink-3'>
+            {resource.type}
+          </span>
+        </div>
+      </Link>
+    </li>
+  )
+}
+
+/**
+ * The right-hand "you might also want" rail: a semantic find on this
+ * document's title + summary, cleaned of the current resource and any
+ * system/junk files, presented as onward links for continuous
+ * resource-to-resource browsing.
+ */
+function RecommendationsRail(
+  { slug, resource }: { slug: string; resource: ResourceSummary },
+) {
+  const relatedQuery = buildRelatedQuery(resource.title, resource.summary)
+  const query = useQuery({
+    queryKey: ['related-search', slug, resource.id, relatedQuery],
+    queryFn: () => searchTenantFull(slug, relatedQuery, { mode: 'semantic' }),
+    enabled: relatedQuery.length > 0,
     staleTime: 5 * 60 * 1000,
   })
 
-  const graphMatches = useMemo(() => {
-    if (!relationsQuery.data) return []
-    const haystack = title.toLowerCase()
-    const names = new Set<string>()
-    for (const edge of relationsQuery.data.edges) {
-      const source = edge.source.trim()
-      const target = edge.target.trim()
-      if (source.length > 0 && haystack.includes(source.toLowerCase())) names.add(target)
-      else if (target.length > 0 && haystack.includes(target.toLowerCase())) names.add(source)
-    }
-    return Array.from(names).filter((n) => n.length > 0).slice(0, 5)
-  }, [relationsQuery.data, title])
-
-  const fallbackEnabled = relationsQuery.isSuccess && graphMatches.length === 0 &&
-    title.trim().length > 0
-
-  const searchQuery = useQuery({
-    queryKey: ['related-search', slug, title],
-    queryFn: () => searchTenantFull(slug, title, { mode: 'semantic' }),
-    enabled: fallbackEnabled,
-  })
-
-  const fallbackResults = useMemo(() => {
-    if (!searchQuery.data) return []
-    return searchQuery.data.resources.filter((r) => r.id !== excludeId).slice(0, 5)
-  }, [searchQuery.data, excludeId])
-
-  const loading = relationsQuery.isLoading || (fallbackEnabled && searchQuery.isLoading)
-  const kind: 'graph' | 'search' | null = graphMatches.length > 0
-    ? 'graph'
-    : fallbackResults.length > 0
-    ? 'search'
-    : null
-
-  return { loading, kind, graphMatches, fallbackResults }
-}
-
-function RelatedPanel(
-  { slug, title, excludeId }: { slug: string; title: string; excludeId: string },
-) {
-  const { loading, kind, graphMatches, fallbackResults } = useRelatedWork(slug, title, excludeId)
-
-  if (loading) {
-    return (
-      <div className='rp-card p-4'>
-        <PanelHeading>Related</PanelHeading>
-        <div className='mt-3 space-y-2' aria-hidden='true'>
-          <div className='rp-shimmer bg-surface-3 h-3.5 w-full rounded-[4px]' />
-          <div className='rp-shimmer bg-surface-3 h-3.5 w-5/6 rounded-[4px]' />
-          <div className='rp-shimmer bg-surface-3 h-3.5 w-2/3 rounded-[4px]' />
-        </div>
-      </div>
-    )
-  }
-
-  if (!kind) return null
+  const recommendations = useMemo(
+    () => query.data ? selectRecommendations(query.data.resources, resource.id) : [],
+    [query.data, resource.id],
+  )
 
   return (
     <div className='rp-card p-4'>
-      <PanelHeading>Related</PanelHeading>
-      <ul className='mt-3 space-y-2'>
-        {kind === 'graph'
-          ? graphMatches.map((name) => (
-            <li key={name}>
-              <Link
-                to={`/t/${slug}/entity/${encodeURIComponent(name)}`}
-                className='rp-focus block truncate rounded-[4px] text-sm font-medium text-[var(--rp-ink-2)] underline decoration-dotted underline-offset-2 transition-colors duration-150 hover:text-[var(--rp-ink)]'
-              >
-                {name}
-              </Link>
-            </li>
-          ))
-          : fallbackResults.map((r: ScoredResource) => (
-            <li key={r.id}>
-              <Link
-                to={`/t/${slug}/library/${r.id}`}
-                className='rp-focus block truncate rounded-[4px] text-sm font-medium text-[var(--rp-ink-2)] transition-colors duration-150 hover:text-[var(--rp-ink)]'
-              >
-                {r.title}
-              </Link>
-            </li>
-          ))}
-      </ul>
+      <PanelHeading>You might also want</PanelHeading>
+      {query.isLoading
+        ? (
+          <div className='mt-3 space-y-3' aria-hidden='true'>
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className='flex gap-3'>
+                <Skeleton className='h-16 w-24 shrink-0 rounded-[6px]' />
+                <div className='flex-1 space-y-1.5 py-1'>
+                  <Skeleton className='h-3.5 w-full' />
+                  <Skeleton className='h-3.5 w-2/3' />
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+        : query.isError
+        ? (
+          <p className='mt-3 text-sm text-ink-3'>
+            Related resources could not be loaded right now.
+          </p>
+        )
+        : recommendations.length === 0
+        ? <p className='mt-3 text-sm text-ink-3'>No related resources found yet.</p>
+        : (
+          <ul className='mt-2 space-y-1'>
+            {recommendations.map((r) => <RecommendationCard key={r.id} slug={slug} resource={r} />)}
+          </ul>
+        )}
     </div>
   )
 }
 
 /** The "Matches in this document" jump list, driven by a `?q=` search query. */
 function MatchesPanel(
-  { indices, paragraphs, onJump }: {
+  { indices, blockTexts, onJump }: {
     indices: number[]
-    paragraphs: string[]
+    blockTexts: string[]
     onJump: (index: number) => void
   },
 ) {
@@ -724,7 +961,7 @@ function MatchesPanel(
               onClick={() => onJump(index)}
               className='rp-focus block w-full rounded-[4px] px-2 py-1.5 text-left text-xs leading-relaxed text-ink-2 transition-colors duration-150 hover:bg-[var(--rp-surface-2)]'
             >
-              <span className='rp-clamp-2'>{paragraphs[index]}</span>
+              <span className='rp-clamp-2'>{blockTexts[index]}</span>
             </button>
           </li>
         ))}
@@ -735,9 +972,8 @@ function MatchesPanel(
 
 /**
  * Floating "Save selection" action that appears near a text selection made
- * inside the extracted content, so a passage can be promoted to Evidence
- * without leaving the reader. Dismissed on scroll, Escape, or a click outside
- * both the selection and the popover itself.
+ * inside the reading pane, so a passage can be promoted to Evidence without
+ * leaving the reader. Dismissed on scroll, Escape, or a click outside.
  */
 function SelectionSaveBar(
   { slug, resourceId, resourceTitle, selection, onDismiss }: {
@@ -791,6 +1027,14 @@ function SelectionSaveBar(
   )
 }
 
+function ViewerSkeleton() {
+  return (
+    <div className='rp-card p-5'>
+      <Skeleton className='h-[55vh] w-full' />
+    </div>
+  )
+}
+
 export function ResourceDetailPage() {
   const { config } = useOutletContext<TenantOutletContext>()
   const { id } = useParams<{ id: string }>()
@@ -799,9 +1043,6 @@ export function ResourceDetailPage() {
   const qParam = searchParams.get('q')
   const pageParam = Number(searchParams.get('page'))
   const page = Number.isInteger(pageParam) && pageParam > 0 ? pageParam : null
-
-  const [askDraft, setAskDraft] = useState('')
-  const [askQuery, setAskQuery] = useState('')
 
   const contentRef = useRef<HTMLDivElement | null>(null)
   const [selection, setSelection] = useState<{ text: string; top: number; left: number } | null>(
@@ -841,18 +1082,23 @@ export function ResourceDetailPage() {
 
   const notFound = error instanceof ApiError && error.status === 404
 
-  const paragraphs = useJoinedParagraphs(content?.texts ?? [])
+  const blocks = useMemo(() => {
+    const joined = (content?.texts ?? []).map((t) => t.text).join('\n\n')
+    return parseDocBlocks(joined)
+  }, [content])
+  const blockTexts = useMemo(() => blocks.map(blockPlainText), [blocks])
+
   const matchTerms = useMemo(() => queryTerms(qParam), [qParam])
   const matchIndices = useMemo(() => {
     if (matchTerms.length === 0) return []
-    return paragraphs
-      .map((paragraph, index) => ({ normalised: normalise(paragraph), index }))
+    return blockTexts
+      .map((text, index) => ({ normalised: normalise(text), index }))
       .filter(({ normalised }) => matchTerms.some((term) => normalised.includes(term)))
       .map(({ index }) => index)
-  }, [paragraphs, matchTerms])
+  }, [blockTexts, matchTerms])
 
-  function jumpToParagraph(index: number) {
-    document.getElementById(`doc-para-${index}`)?.scrollIntoView({
+  function jumpToBlock(index: number) {
+    document.getElementById(`doc-block-${index}`)?.scrollIntoView({
       behavior: 'smooth',
       block: 'center',
     })
@@ -876,17 +1122,10 @@ export function ResourceDetailPage() {
     setSelection({ text: sel.toString(), top: rect.top, left: rect.left })
   }
 
-  function handleAskSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const trimmed = askDraft.trim()
-    if (trimmed.length === 0) return
-    setAskQuery(trimmed)
-  }
-
   const topicLabel = (topicId: string) => config.topics.find((topic) => topic.id === topicId)?.label
 
   return (
-    <main className='mx-auto max-w-5xl px-6 py-8'>
+    <main className='mx-auto max-w-6xl px-4 py-8 sm:px-6'>
       <Link
         to={`/t/${config.slug}/library`}
         className='text-sm font-medium text-[var(--rp-ink-3)] transition-colors duration-150 hover:text-[var(--rp-ink)]'
@@ -895,22 +1134,18 @@ export function ResourceDetailPage() {
       </Link>
 
       <div className='mt-4'>
-        {isLoading ? <DetailSkeleton /> : null}
+        {isLoading ? <ViewerSkeleton /> : null}
 
         {isError && notFound
           ? (
-            <div className='rounded-[10px] border border-dashed border-line bg-surface-2 p-6'>
-              <p className='text-sm font-semibold text-ink'>This document does not exist</p>
-              <p className='mt-1 text-sm text-ink-2'>
-                It may have been removed, or the link is out of date.
-              </p>
-              <Link
-                to={`/t/${config.slug}/library`}
-                className='rp-btn rp-btn-primary mt-4'
-              >
+            <EmptyState
+              title='This document does not exist'
+              description='It may have been removed, or the link is out of date.'
+            >
+              <Link to={`/t/${config.slug}/library`} className='rp-btn rp-btn-primary'>
                 Back to library
               </Link>
-            </div>
+            </EmptyState>
           )
           : null}
 
@@ -925,127 +1160,45 @@ export function ResourceDetailPage() {
 
         {!isLoading && !isError && resource
           ? (
-            <div className='grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_280px]'>
-              <div className='min-w-0'>
-                <article className='rp-card p-5'>
-                  <div className='flex items-start justify-between gap-5'>
-                    <div className='min-w-0 flex-1'>
-                      <h1 className='rp-display text-2xl text-ink'>
-                        {resource.title}
-                      </h1>
-                      <p className='mt-2 text-sm leading-relaxed text-ink-2'>
-                        {resource.summary}
-                      </p>
-
-                      {resource.keyFacts.length > 0
-                        ? (
-                          <div className='mt-5 border-t border-line pt-4'>
-                            <PanelHeading>Key facts</PanelHeading>
-                            <ol className='mt-2 space-y-1.5'>
-                              {resource.keyFacts.map((fact, index) => (
-                                <li key={index} className='flex gap-2 text-sm text-ink-2'>
-                                  <span className='font-medium tabular-nums text-ink-3'>
-                                    {index + 1}.
-                                  </span>
-                                  <span>{fact}</span>
-                                </li>
-                              ))}
-                            </ol>
-                          </div>
-                        )
-                        : null}
-                    </div>
-
-                    <div className='hidden h-24 w-36 shrink-0 overflow-hidden rounded-[8px] border border-line sm:block'>
-                      <ResourceThumb slug={config.slug} id={resource.id} type={resource.type} />
-                    </div>
-                  </div>
-                </article>
-
-                {contentLoading ? <BodySkeleton /> : null}
-
-                {!contentLoading && content
-                  ? (
-                    <div
-                      className='relative mt-6'
-                      ref={contentRef}
-                      onMouseUp={handleContentMouseUp}
-                    >
-                      <ResourceBody
-                        slug={config.slug}
-                        content={content}
-                        resourceSummary={resource.summary}
-                        passage={passage}
-                        page={page}
-                        flashIndex={flashIndex}
-                        hasTextMatches={matchIndices.length > 0}
-                      />
-                    </div>
-                  )
-                  : null}
-
-                {!contentLoading && !content
-                  ? (
-                    <div className='mt-6 rounded-[10px] border border-dashed border-line bg-surface-2 p-5'>
-                      <p className='text-sm text-ink-2'>
-                        Full content is unavailable for this resource.
-                      </p>
-                    </div>
-                  )
-                  : null}
-
-                <section className='rp-card mt-6 p-5'>
-                  <PanelHeading>Ask this document</PanelHeading>
-                  <form onSubmit={handleAskSubmit} className='mt-3'>
-                    <label htmlFor='ask-document' className='sr-only'>
-                      Ask a question about {resource.title}
-                    </label>
-                    <div className='flex items-center gap-2 rounded-[8px] border border-line bg-surface p-1.5 pl-3'>
-                      <input
-                        id='ask-document'
-                        type='text'
-                        value={askDraft}
-                        onChange={(event) => setAskDraft(event.target.value)}
-                        placeholder='Ask a question about this document'
-                        className='min-w-0 flex-1 border-0 bg-transparent py-1.5 text-sm text-ink placeholder:text-[var(--rp-ink-3)] focus:outline-none'
-                      />
-                      <button
-                        type='submit'
-                        className='rp-btn rp-btn-primary shrink-0 font-semibold'
-                      >
-                        Ask
-                      </button>
-                    </div>
-                  </form>
-
-                  {askQuery.trim().length > 0
+            <div className='grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]'>
+              <div className='min-w-0 space-y-6'>
+                <div className='relative' ref={contentRef} onMouseUp={handleContentMouseUp}>
+                  {contentLoading ? <ViewerSkeleton /> : content
                     ? (
-                      <div className='mt-4'>
-                        <AnswerStream
+                      <div className='rp-card p-4 sm:p-5'>
+                        <ResourceViewer
                           slug={config.slug}
-                          request={{ query: askQuery, resourceId: resource.id }}
-                          onRetry={() => setAskQuery(askQuery)}
+                          content={content}
+                          blocks={blocks}
+                          passage={passage}
+                          page={page}
+                          flashIndex={flashIndex}
+                          hasTextMatches={matchIndices.length > 0}
                         />
                       </div>
                     )
-                    : null}
-                </section>
-              </div>
+                    : (
+                      <EmptyState
+                        title='This document cannot be displayed'
+                        description='The full content is unavailable for this resource right now.'
+                      />
+                    )}
+                </div>
 
-              <aside className='space-y-5 lg:sticky lg:top-20 lg:self-start'>
-                <AboutPanel
+                <DescriptionPanel
                   slug={config.slug}
                   resource={resource}
                   content={content}
                   topicLabel={topicLabel}
                   organisation={config.branding.organisation}
                 />
-                <MatchesPanel
-                  indices={matchIndices}
-                  paragraphs={paragraphs}
-                  onJump={jumpToParagraph}
-                />
-                <RelatedPanel slug={config.slug} title={resource.title} excludeId={resource.id} />
+
+                <DocumentChat slug={config.slug} resource={resource} />
+              </div>
+
+              <aside className='space-y-5 lg:sticky lg:top-20 lg:self-start'>
+                <RecommendationsRail slug={config.slug} resource={resource} />
+                <MatchesPanel indices={matchIndices} blockTexts={blockTexts} onJump={jumpToBlock} />
               </aside>
             </div>
           )

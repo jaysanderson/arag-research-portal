@@ -250,7 +250,7 @@ export const GenerateResultSchema = z.object({
 export const ResourceContentSchema = z.object({
   id: z.string(),
   title: z.string(),
-  kind: z.enum(['web', 'pdf', 'video', 'audio', 'image', 'text', 'file']),
+  kind: z.enum(['web', 'pdf', 'video', 'audio', 'image', 'office', 'text', 'file']),
   originUrl: z.string().optional(),
   summary: z.string().optional(),
   /** Extracted text per field. */
@@ -263,6 +263,15 @@ export const ResourceContentSchema = z.object({
   files: z
     .object({ group: z.string(), fieldId: z.string(), contentType: z.string().optional() })
     .array(),
+  /**
+   * A browser-renderable rendition (PDF or image) of an original the browser
+   * cannot display natively - an Office document - when the platform generated
+   * one. Absent when there is no rendition; the viewer then shows the honest
+   * thumbnail + download fallback rather than pretending.
+   */
+  preview: z
+    .object({ fieldId: z.string(), contentType: z.string().optional() })
+    .optional(),
 })
 
 /** A data-augmentation agent registered on the knowledge box. */

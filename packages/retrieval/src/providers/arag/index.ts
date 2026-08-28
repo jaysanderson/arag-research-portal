@@ -80,6 +80,69 @@ export function looksLikeBotChallengeTitle(value: string): boolean {
 }
 
 /**
+ * System/housekeeping file names that are never a real document - a dotfile
+ * (`.uploaded.log`, `.DS_Store`) or a log/temp/backup artefact that slipped
+ * into the box during ingestion. These must never surface in a user-facing
+ * list or as a "related" recommendation.
+ */
+export function looksLikeSystemFileTitle(value: string): boolean {
+  const v = value.trim()
+  if (!v) return false
+  if (v.startsWith('.')) return true
+  return /\.(log|tmp|temp|bak|swp|ds_store)$/i.test(v)
+}
+
+/** Office/OpenDocument mime types the browser cannot render natively. */
+export function isOfficeMime(mime: string | undefined): boolean {
+  if (!mime) return false
+  const m = mime.toLowerCase()
+  return m.includes('officedocument') || // .docx/.pptx/.xlsx (OpenXML)
+    m.includes('msword') || m.includes('ms-powerpoint') || m.includes('ms-excel') ||
+    m.includes('vnd.oasis.opendocument') // .odt/.odp/.ods
+}
+
+/**
+ * The viewer kind for a resource, derived from every mime hint the platform
+ * gives (its `icon` plus the content-type of any attached file field), not
+ * `icon` alone - a scanned/older PDF whose `icon` never populated still
+ * renders as a PDF when its file field reports `application/pdf`. Pure and
+ * order-sensitive (PDF/media/image win over the generic `file`/`office`
+ * fallbacks); shared by `resourceContent` and its tests.
+ */
+export function detectContentKind(
+  input: { icon: string; isLink: boolean; fileMimes: string[] },
+): 'web' | 'pdf' | 'video' | 'audio' | 'image' | 'office' | 'text' | 'file' {
+  if (input.isLink) return 'web'
+  const mimes = [input.icon, ...input.fileMimes]
+    .map((m) => (m ?? '').toLowerCase())
+    .filter((m) => m.length > 0)
+  const has = (pred: (m: string) => boolean) => mimes.some(pred)
+  if (has((m) => m === 'application/pdf' || m.endsWith('/pdf'))) return 'pdf'
+  if (has((m) => m.startsWith('video/'))) return 'video'
+  if (has((m) => m.startsWith('audio/'))) return 'audio'
+  if (has((m) => m.startsWith('image/'))) return 'image'
+  if (has((m) => isOfficeMime(m))) return 'office'
+  return input.fileMimes.length > 0 ? 'file' : 'text'
+}
+
+/**
+ * A renderable stand-in for an original the browser can't display (an Office
+ * document), when the platform generated one: a PDF or image rendition among
+ * the resource's file fields, distinct from the primary Office file itself.
+ * Returns nothing when no such rendition exists - the caller then falls back
+ * to the honest thumbnail + download panel rather than pretending.
+ */
+export function selectPreviewFile(
+  files: { fieldId: string; contentType?: string }[],
+  primaryFieldId: string | undefined,
+): { fieldId: string; contentType?: string } | undefined {
+  return files.find((f) =>
+    f.fieldId !== primaryFieldId &&
+    (f.contentType === 'application/pdf' || (f.contentType ?? '').startsWith('image/'))
+  )
+}
+
+/**
  * A resource's best available human title, never a raw platform id/hash and
  * never a bot-challenge string. Falls back to a clean, generic label rather
  * than the id itself - a bare FRDC-style project code is fine to show as-is,
@@ -112,6 +175,7 @@ export function isDisplayableResource(raw: DisplayabilityInput): boolean {
   const title = (raw.title ?? '').trim()
   if (looksLikeRawHashTitle(title)) return false
   if (looksLikeBotChallengeTitle(title)) return false
+  if (looksLikeSystemFileTitle(title)) return false
   return true
 }
 
@@ -1790,14 +1854,19 @@ export class AragProvider implements RetrievalProvider {
     const transcript: { text: string; startSec?: number }[] = []
     for (const [group, fields] of Object.entries(raw.data ?? {})) {
       for (const [fieldId, field] of Object.entries(fields ?? {})) {
-        const text = field.extracted?.text?.text ?? field.value?.body ?? ''
+        // Prefer the authored body (a text field's original markdown, with its
+        // real paragraph breaks and headings) over the platform's flattened
+        // extracted text; fall back to extracted text for crawled links and
+        // uploaded files, which have no authored body. See docs/ARAG-DEV.md on
+        // the extracted text flattening markdown line breaks into whitespace.
+        const text = field.value?.body ?? field.extracted?.text?.text ?? ''
         if (text.trim()) texts.push({ fieldId: `${group}/${fieldId}`, text })
-        if (group === 'files') {
-          files.push({
-            group: 'file',
-            fieldId,
-            contentType: field.value?.file?.content_type,
-          })
+        // Detect a downloadable file field by the presence of a stored file
+        // value, not by the group name alone - the file-proxy route
+        // (`/resource/{id}/file/{fieldId}/download/field`) resolves the bare
+        // field id regardless of which data group it lives under.
+        if (field.value?.file) {
+          files.push({ group, fieldId, contentType: field.value.file.content_type })
         }
         const paragraphs = field.extracted?.metadata?.metadata?.paragraphs ?? []
         for (const p of paragraphs) {
@@ -1809,19 +1878,13 @@ export class AragProvider implements RetrievalProvider {
       }
     }
     const originUrl = raw.origin?.url
-    const kind: ResourceContent['kind'] = originUrl && Object.keys(raw.data?.links ?? {}).length
-      ? 'web'
-      : icon === 'application/pdf'
-      ? 'pdf'
-      : icon.startsWith('video/')
-      ? 'video'
-      : icon.startsWith('audio/')
-      ? 'audio'
-      : icon.startsWith('image/')
-      ? 'image'
-      : files.length > 0
-      ? 'file'
-      : 'text'
+    const kind: ResourceContent['kind'] = detectContentKind({
+      icon,
+      isLink: Boolean(originUrl) && Object.keys(raw.data?.links ?? {}).length > 0,
+      fileMimes: files.map((f) => f.contentType ?? ''),
+    })
+    const primaryFile = files[0]
+    const preview = kind === 'office' ? selectPreviewFile(files, primaryFile?.fieldId) : undefined
     return {
       id,
       title: displayTitle(raw.title, id),
@@ -1831,6 +1894,7 @@ export class AragProvider implements RetrievalProvider {
       texts,
       transcript,
       files,
+      ...(preview ? { preview } : {}),
     }
   }
 
