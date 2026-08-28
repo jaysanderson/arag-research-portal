@@ -12,11 +12,20 @@ ARG TAILWINDCSS_VERSION=4.3.3
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends curl ca-certificates \
-  && rm -rf /var/lib/apt/lists/* \
-  && curl -fsSL -o /usr/local/bin/esbuild \
-    "https://unpkg.com/@esbuild/linux-x64@${ESBUILD_VERSION}/bin/esbuild" \
-  && chmod +x /usr/local/bin/esbuild \
-  && curl -fsSL -o /usr/local/bin/tailwindcss \
+  && rm -rf /var/lib/apt/lists/*
+
+# esbuild: the npm registry tarball is the canonical source; unpkg mirrors the
+# same content and stays as a fallback (either host can be flaky or blocked
+# from a given network - unpkg 500'd from Fly's builder on 2026-08-28).
+RUN { curl -fsSL --retry 3 --retry-all-errors -o /tmp/esbuild.tgz \
+      "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-${ESBUILD_VERSION}.tgz" \
+    && tar -xzf /tmp/esbuild.tgz -C /tmp \
+    && mv /tmp/package/bin/esbuild /usr/local/bin/esbuild \
+    && rm -rf /tmp/esbuild.tgz /tmp/package ; } \
+  || curl -fsSL --retry 3 --retry-all-errors -o /usr/local/bin/esbuild \
+    "https://unpkg.com/@esbuild/linux-x64@${ESBUILD_VERSION}/bin/esbuild"
+RUN chmod +x /usr/local/bin/esbuild \
+  && curl -fsSL --retry 3 --retry-all-errors -o /usr/local/bin/tailwindcss \
     "https://github.com/tailwindlabs/tailwindcss/releases/download/v${TAILWINDCSS_VERSION}/tailwindcss-linux-x64" \
   && chmod +x /usr/local/bin/tailwindcss
 
