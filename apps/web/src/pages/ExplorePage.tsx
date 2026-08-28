@@ -1,7 +1,7 @@
-import { type FormEvent, useCallback, useMemo, useRef, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useOutletContext } from 'react-router-dom'
-import type { KbCounters, ResourceSummary, TenantConfig } from '@research-portal/core'
+import type { KbCounters, Question, ResourceSummary, TenantConfig } from '@research-portal/core'
 import { getCounters, getFacets, getResources } from '../api/client.ts'
 import { prettyLabel } from '../components/ui.tsx'
 import { EmptyState, ErrorCard, Skeleton, TypeBadge } from '../components/ui.tsx'
@@ -31,6 +31,92 @@ function askPlaceholder(searchPlaceholder: string): string {
  * the gradient, lifted by a radial bloom and a faint dot grid so it reads as a
  * designed surface rather than a flat colour field.
  */
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false)
+
+  useEffect(() => {
+    const query = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')
+    if (!query) return
+    setReduced(query.matches)
+    const onChange = () => setReduced(query.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+
+  return reduced
+}
+
+const SUGGESTED_WINDOW = 4
+const SUGGESTED_ROTATE_MS = 8000
+
+/**
+ * The hero's suggested-question chips, rotating a window of four through the
+ * tenant's full list every ~8 seconds with a gentle crossfade. Rotation pauses
+ * on hover/focus of the group, on pointerover of a chip (so a click never has
+ * its target swapped out from under it), and entirely under
+ * prefers-reduced-motion. The chips stay clickable throughout - pausing never
+ * disables them, it only stops the timer.
+ */
+function SuggestedQuestions({
+  questions,
+  onAsk,
+}: {
+  questions: Question[]
+  onAsk: (text: string) => void
+}) {
+  const [start, setStart] = useState(0)
+  const [paused, setPaused] = useState(false)
+  const reducedMotion = usePrefersReducedMotion()
+  const rotates = questions.length > SUGGESTED_WINDOW
+
+  useEffect(() => {
+    if (!rotates || paused || reducedMotion) return
+    const timer = setInterval(() => {
+      setStart((prev) => (prev + SUGGESTED_WINDOW) % questions.length)
+    }, SUGGESTED_ROTATE_MS)
+    return () => clearInterval(timer)
+  }, [rotates, paused, reducedMotion, questions.length])
+
+  const visible = useMemo(() => {
+    if (!rotates) return questions
+    return Array.from(
+      { length: SUGGESTED_WINDOW },
+      (_, index) => questions[(start + index) % questions.length],
+    ).filter((question): question is Question => Boolean(question))
+  }, [questions, rotates, start])
+
+  if (visible.length === 0) return null
+
+  const pause = () => setPaused(true)
+  const resume = () => setPaused(false)
+
+  return (
+    <div
+      className='rp-anim-rise rp-delay-4 mt-5'
+      onMouseEnter={pause}
+      onMouseLeave={resume}
+      onFocus={pause}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) resume()
+      }}
+    >
+      <div key={start} className='rp-anim-fade flex flex-wrap justify-center gap-2'>
+        {visible.map((question) => (
+          <button
+            key={question.id}
+            type='button'
+            onClick={() => onAsk(question.text)}
+            onPointerOver={pause}
+            className='rp-focus-inverse rounded-[6px] bg-white/12 px-3 py-1.5 text-sm text-white ring-1 ring-inset ring-white/25 backdrop-blur-sm transition-colors duration-150 hover:bg-white/25'
+          >
+            {question.text}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function HeroBackdrop({ imageUrl }: { imageUrl?: string }) {
   const [imageFailed, setImageFailed] = useState(false)
   const showImage = Boolean(imageUrl) && !imageFailed
@@ -77,7 +163,6 @@ function Hero({
 }) {
   const [query, setQuery] = useState('')
   const inputRef = useRef<HTMLInputElement | null>(null)
-  const suggested = config.suggestedQuestions.slice(0, 4)
 
   // An entity folds back into the question being written; a resource title is
   // a destination, so it goes straight to the results for that title.
@@ -157,22 +242,7 @@ function Hero({
           </div>
         </form>
 
-        {suggested.length > 0
-          ? (
-            <div className='rp-anim-rise rp-delay-4 mt-5 flex flex-wrap justify-center gap-2'>
-              {suggested.map((question) => (
-                <button
-                  key={question.id}
-                  type='button'
-                  onClick={() => onAsk(question.text)}
-                  className='rp-focus-inverse rounded-[6px] bg-white/12 px-3 py-1.5 text-sm text-white ring-1 ring-inset ring-white/25 backdrop-blur-sm transition-colors duration-150 hover:bg-white/25'
-                >
-                  {question.text}
-                </button>
-              ))}
-            </div>
-          )
-          : null}
+        <SuggestedQuestions questions={config.suggestedQuestions} onAsk={onAsk} />
       </div>
     </section>
   )
@@ -286,12 +356,20 @@ function ResourceCard({ slug, resource }: { slug: string; resource: ResourceSumm
   )
 }
 
-function SectionHeading({ label, count }: { label: string; count: number }) {
+function SectionHeading(
+  { slug, topicId, label, count }: { slug: string; topicId: string; label: string; count: number },
+) {
   return (
     <div className='flex items-center gap-2.5'>
       <h2 className='rp-display text-xl text-ink sm:text-[1.375rem]'>{label}</h2>
       <span className='rp-badge rp-badge-quiet tabular-nums'>{count}</span>
       <span className='h-px flex-1 bg-[var(--rp-line)]' aria-hidden='true' />
+      <Link
+        to={`/t/${slug}/library?topic=${encodeURIComponent(topicId)}`}
+        className='rp-focus shrink-0 rounded-[4px] text-sm font-medium text-[var(--rp-ink-3)] transition-colors duration-150 hover:text-[var(--rp-ink)]'
+      >
+        See all<span aria-hidden='true'>&rarr;</span>
+      </Link>
     </div>
   )
 }
@@ -424,7 +502,12 @@ export function ExplorePage() {
 
             return (
               <div key={topic.id}>
-                <SectionHeading label={topic.label} count={items.length} />
+                <SectionHeading
+                  slug={config.slug}
+                  topicId={topic.id}
+                  label={topic.label}
+                  count={items.length}
+                />
                 <div className='rp-scroll-row rp-no-scrollbar -mx-6 mt-3.5 flex gap-3 overflow-x-auto px-6 pb-4 pt-1'>
                   {items.map((resource) => (
                     <ResourceCard key={resource.id} slug={config.slug} resource={resource} />

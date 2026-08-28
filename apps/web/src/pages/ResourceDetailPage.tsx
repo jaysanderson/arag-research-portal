@@ -20,6 +20,7 @@ import {
   searchTenantFull,
 } from '../api/client.ts'
 import { AnswerStream } from '../components/AnswerStream.tsx'
+import { PdfReader } from '../components/PdfReader.tsx'
 import { ResourceThumb } from '../components/ResourceThumb.tsx'
 import { SaveEvidenceButton } from '../components/SaveEvidence.tsx'
 import { ErrorCard, prettyLabel, Skeleton, TypeBadge } from '../components/ui.tsx'
@@ -343,29 +344,12 @@ function PdfBody(
   },
 ) {
   const paragraphs = useJoinedParagraphs(content.texts)
-  const pdfSrc = fileUrl ? (page ? `${fileUrl}#page=${page}` : fileUrl) : undefined
   return (
     <div className='space-y-4'>
       {passage ? <MatchedPassageCard passage={passage} page={page} /> : null}
 
       {fileUrl
-        ? (
-          <div>
-            <iframe
-              src={pdfSrc}
-              className='h-[60vh] w-full rounded-[8px] border border-line bg-surface sm:h-[75vh]'
-              title='PDF preview'
-            />
-            <a
-              href={pdfSrc}
-              target='_blank'
-              rel='noopener noreferrer'
-              className='mt-2 inline-block text-sm font-medium text-[var(--rp-ink-3)] transition-colors duration-150 hover:text-[var(--rp-ink)]'
-            >
-              Open PDF in a new tab
-            </a>
-          </div>
-        )
+        ? <PdfReader fileUrl={fileUrl} title={content.title} initialPage={page} />
         : <p className='text-sm text-ink-3'>This PDF file is not available.</p>}
 
       {paragraphs.length > 0

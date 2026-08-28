@@ -15,6 +15,7 @@ import {
 } from '../api/client.ts'
 import { ResourceThumb } from '../components/ResourceThumb.tsx'
 import { SaveEvidenceButton } from '../components/SaveEvidence.tsx'
+import { SearchAnswer, type SearchAnswerResult } from '../components/SearchAnswer.tsx'
 import { TypeaheadDropdown, type TypeaheadItem, useTypeahead } from '../components/Typeahead.tsx'
 import { EmptyState, ErrorCard, prettyLabel, Skeleton, TypeBadge } from '../components/ui.tsx'
 import type { TenantOutletContext } from './TenantLayout.tsx'
@@ -85,11 +86,13 @@ function resourceLink(slug: string, resource: ScoredResource): string {
  * in context, which is why this view needs no synthesised answer above it.
  */
 function ResultCard(
-  { resource, slug, query, kindLabel }: {
+  { resource, slug, query, kindLabel, citedIndex }: {
     resource: ScoredResource
     slug: string
     query: string
     kindLabel: (id: string) => string
+    /** Lowest `[n]` marker the AI answer cites this resource under, when it is cited at all. */
+    citedIndex?: number
   },
 ) {
   const keyFacts = resource.keyFacts.slice(0, 3)
@@ -108,6 +111,16 @@ function ResultCard(
               <TypeBadge type={resource.type} />
               {resource.kind
                 ? <span className='rp-badge rp-badge-quiet'>{kindLabel(resource.kind)}</span>
+                : null}
+              {citedIndex !== undefined
+                ? (
+                  <span
+                    className='rp-badge font-semibold text-white'
+                    style={{ backgroundColor: 'var(--rp-accent)', borderColor: 'var(--rp-accent)' }}
+                  >
+                    Cited [{citedIndex}]
+                  </span>
+                )
                 : null}
               {year
                 ? <span className='text-xs font-medium tabular-nums text-ink-3'>{year}</span>
@@ -523,6 +536,42 @@ export function SearchPage() {
     return results.resources.filter((r) => r.relevance >= STRONG_MATCH_THRESHOLD)
   }, [results, strength])
 
+  // The AI Answer panel's citations/sources, reported up so the results list
+  // can badge cited cards and power the Resources/Citations toggle. Reset to
+  // 'resources' whenever the query changes - a fresh answer has no citations
+  // yet, so a lingering Citations view would just show an empty state.
+  const [answer, setAnswer] = useState<SearchAnswerResult>({ citations: [], sources: [] })
+  const [resultView, setResultView] = useState<'resources' | 'citations'>('resources')
+  useEffect(() => {
+    setResultView('resources')
+  }, [q])
+
+  // Lowest `[n]` marker each cited resource id appears under - used both for
+  // the "Cited [n]" badge and to order the Citations view the same way the
+  // markers read in the answer above.
+  const citationIndexByResource = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const citation of answer.citations) {
+      const existing = map.get(citation.resourceId)
+      if (existing === undefined || citation.index < existing) {
+        map.set(citation.resourceId, citation.index)
+      }
+    }
+    return map
+  }, [answer.citations])
+
+  // Only resources the answer cited AND that are still in the current
+  // (filtered) result set - a citation to a resource this filter excludes
+  // simply does not appear here, consistent with every other client-side
+  // filter on this page.
+  const citedResults = useMemo(
+    () =>
+      filteredResults
+        .filter((resource) => citationIndexByResource.has(resource.id))
+        .sort((a, b) => citationIndexByResource.get(a.id)! - citationIndexByResource.get(b.id)!),
+    [filteredResults, citationIndexByResource],
+  )
+
   const activeFilters = useMemo(() => {
     const chips: { key: string; label: string; onRemove: () => void }[] = selectedTopics.map(
       (id) => ({
@@ -655,17 +704,6 @@ export function SearchPage() {
         </div>
       </form>
 
-      <p className='mt-2 text-xs text-ink-3'>
-        Looking for a synthesised answer?{' '}
-        <Link
-          to='../assistant'
-          className='font-medium underline decoration-dotted underline-offset-2'
-          style={{ color: 'var(--rp-accent)' }}
-        >
-          Ask the Assistant
-        </Link>
-      </p>
-
       <div className='mt-4 flex flex-wrap items-center gap-2.5'>
         <div
           className='inline-flex overflow-hidden rounded-[6px] border border-line bg-surface'
@@ -734,7 +772,9 @@ export function SearchPage() {
         {hasQuery && !isLoading && !isError && results
           ? (
             <p className='ml-auto text-sm font-medium tabular-nums text-ink-3'>
-              {filteredResults.length} {filteredResults.length === 1 ? 'result' : 'results'}
+              {filteredResults.length} {filteredResults.length === 1 ? 'resource' : 'resources'}
+              {' · '}
+              {citedResults.length} cited
               {activeFilters.length > 0
                 ? ` · filters: ${activeFilters.map((f) => f.label).join(', ')}`
                 : ''}
@@ -893,6 +933,14 @@ export function SearchPage() {
             )
             : null}
 
+          {hasQuery
+            ? (
+              <div className='mb-4'>
+                <SearchAnswer slug={config.slug} query={q} onResult={setAnswer} />
+              </div>
+            )
+            : null}
+
           {!hasQuery
             ? (
               <div className='rp-card p-5'>
@@ -988,7 +1036,46 @@ export function SearchPage() {
                   )
                   : (
                     <>
-                      <div className='flex justify-end'>
+                      <div className='flex flex-wrap items-center justify-between gap-2'>
+                        <div
+                          className='inline-flex overflow-hidden rounded-[6px] border border-line bg-surface'
+                          role='radiogroup'
+                          aria-label='Results view'
+                        >
+                          {[
+                            {
+                              value: 'resources' as const,
+                              label: `Resources (${filteredResults.length})`,
+                            },
+                            {
+                              value: 'citations' as const,
+                              label: `Citations (${citedResults.length})`,
+                            },
+                          ].map((option, index) => {
+                            const active = resultView === option.value
+                            return (
+                              <button
+                                key={option.value}
+                                type='button'
+                                role='radio'
+                                aria-checked={active}
+                                onClick={() => setResultView(option.value)}
+                                className={`rp-focus px-3 py-1.5 text-xs font-medium transition-colors duration-150 ${
+                                  index > 0 ? 'border-l border-line' : ''
+                                } ${
+                                  active
+                                    ? 'text-white'
+                                    : 'text-[var(--rp-ink-2)] hover:bg-[var(--rp-surface-2)] hover:text-[var(--rp-ink)]'
+                                }`}
+                                style={active
+                                  ? { backgroundColor: 'var(--rp-primary)' }
+                                  : undefined}
+                              >
+                                {option.label}
+                              </button>
+                            )
+                          })}
+                        </div>
                         <button
                           type='button'
                           onClick={summariseResults}
@@ -997,17 +1084,42 @@ export function SearchPage() {
                           Summarise these results
                         </button>
                       </div>
-                      <div className='mt-2 space-y-3'>
-                        {filteredResults.map((resource) => (
-                          <ResultCard
-                            key={resource.id}
-                            resource={resource}
-                            slug={config.slug}
-                            query={trimmedQuery}
-                            kindLabel={kindLabel}
-                          />
-                        ))}
-                      </div>
+
+                      {resultView === 'citations' && citedResults.length === 0
+                        ? (
+                          <div className='mt-2'>
+                            <EmptyState
+                              title='No results have been cited yet'
+                              description={answer.citations.length > 0
+                                ? 'The AI answer cited resources outside the current filters.'
+                                : 'The AI answer above has not cited any of these results.'}
+                            >
+                              <button
+                                type='button'
+                                onClick={() => setResultView('resources')}
+                                className='rp-btn rp-btn-outline'
+                              >
+                                Show all resources
+                              </button>
+                            </EmptyState>
+                          </div>
+                        )
+                        : (
+                          <div className='mt-2 space-y-3'>
+                            {(resultView === 'citations' ? citedResults : filteredResults).map((
+                              resource,
+                            ) => (
+                              <ResultCard
+                                key={resource.id}
+                                resource={resource}
+                                slug={config.slug}
+                                query={trimmedQuery}
+                                kindLabel={kindLabel}
+                                citedIndex={citationIndexByResource.get(resource.id)}
+                              />
+                            ))}
+                          </div>
+                        )}
                     </>
                   )}
 

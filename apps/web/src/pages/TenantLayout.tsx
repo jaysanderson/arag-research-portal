@@ -1,11 +1,12 @@
 import { type CSSProperties, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Link, NavLink, Outlet, useLocation, useParams } from 'react-router-dom'
 import type { TenantConfig } from '@research-portal/core'
 import { ApiError, getKnowledgeBoxStatus, getTenantConfig } from '../api/client.ts'
 import { KbSwitcher } from '../components/KbSwitcher.tsx'
 import { ThemeToggle } from '../components/ThemeToggle.tsx'
+import { ChatFab } from '../components/ChatFab.tsx'
+import { CommandPalette } from '../components/CommandPalette.tsx'
 
 export type TenantOutletContext = {
   config: TenantConfig
@@ -31,32 +32,39 @@ const NAV_ITEMS: { path: string; label: string; end: boolean }[] = [
   { path: '/assistant', label: 'Assistant', end: false },
   { path: '/investigations', label: 'Investigations', end: false },
   { path: '/generate', label: 'Generate', end: false },
+  { path: '/assessment', label: 'Assessment', end: false },
   { path: '/graph', label: 'Graph', end: false },
   { path: '/manage', label: 'Manage', end: false },
 ]
 
 export function TenantLayout() {
   const { slug } = useParams<{ slug: string }>()
-  const navigate = useNavigate()
   const location = useLocation()
   const [navOpen, setNavOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
-  // Cmd/Ctrl+K jumps to search from anywhere in the portal.
+  // Cmd/Ctrl+K opens the search-or-ask palette from anywhere in the portal.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
-        if (slug) navigate(`/t/${slug}/search`)
+        setPaletteOpen(true)
       }
     }
     globalThis.addEventListener('keydown', onKey)
     return () => globalThis.removeEventListener('keydown', onKey)
-  }, [slug, navigate])
+  }, [])
 
   // The mobile nav sheet closes on navigation, on Escape, and locks page
   // scroll behind it while open.
   useEffect(() => {
     setNavOpen(false)
+  }, [location.pathname])
+
+  // The palette closes itself once it navigates - this only catches a route
+  // change from elsewhere (e.g. browser back) while it happens to be open.
+  useEffect(() => {
+    setPaletteOpen(false)
   }, [location.pathname])
 
   useEffect(() => {
@@ -296,6 +304,18 @@ export function TenantLayout() {
       <div key={location.pathname} className='rp-page-enter'>
         <Outlet context={{ config } satisfies TenantOutletContext} />
       </div>
+
+      <ChatFab slug={config.slug} />
+
+      {paletteOpen
+        ? (
+          <CommandPalette
+            slug={config.slug}
+            suggestedQuestions={config.suggestedQuestions}
+            onClose={() => setPaletteOpen(false)}
+          />
+        )
+        : null}
     </div>
   )
 }

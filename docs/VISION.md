@@ -101,6 +101,20 @@ in-app admin surface, not by hand.
 - **2026-08-28** - Jay reviewed and agreed with the full state-of-the-nation program review
   (four audits, five-wave roadmap). Wave 0 (outage + credential exposure) executed same day:
   admin passcode rotated by Jay after `/api/admin-prefill` was found serving it publicly.
+- **2026-08-28** - Delivery directive (Jay): number one goal is handover to the client (FRDC +
+  GRDC, who have both seen the bolt reference) **today**. Bolt parity is the delivery baseline.
+- **2026-08-28** - Platform directive (Jay): exploit Progress Agentic RAG to the fullest -
+  anything it can do, the portal should use it for. For state that cannot or should not live in
+  the knowledge box, use **SQLite** for basic administration data. This supersedes the earlier
+  "no SQLite" persistence rule (JSON-on-volume stays only until the migration lands, scheduled
+  immediately after today's handover - not before, to protect the deadline). Deno 2's built-in
+  node:sqlite keeps this registry-free.
+- **2026-08-28** - Parity direction (Jay): the bolt demo's feature set is to be netted out and
+  folded into the short-term roadmap. This settles the open question from the product audit:
+  the **search-page cited AI answer returns** (AI Answer panel, resources/cited header,
+  Resources-Citations toggle, Cited badges), alongside the PDF reader, Self Assessment route,
+  and the parity tail (rotating questions, see-all rows, command palette, floating chat button,
+  language picker, agentic event rail).
 - **2026-08-28** - MVP acceptance (Jay): Jay personally tests the portal at MVP, supported by
   release notes / "what's been done" presentation. A user-facing "What's new" release-notes
   surface becomes part of the portal itself (roadmap Wave 3).

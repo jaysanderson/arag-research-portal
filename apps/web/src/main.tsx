@@ -15,6 +15,7 @@ import { InvestigationsPage } from './pages/InvestigationsPage.tsx'
 import { InvestigationDetailPage } from './pages/InvestigationDetailPage.tsx'
 import { AgenticPage } from './pages/AgenticPage.tsx'
 import { GeneratePage } from './pages/GeneratePage.tsx'
+import { AssessmentPage } from './pages/AssessmentPage.tsx'
 import { GraphPage } from './pages/GraphPage.tsx'
 import { TaxonomyPage } from './pages/TaxonomyPage.tsx'
 import { EntityPage } from './pages/EntityPage.tsx'
@@ -79,6 +80,7 @@ createRoot(container).render(
               <Route path='investigations/:id' element={<InvestigationDetailPage />} />
               <Route path='agentic' element={<AgenticPage />} />
               <Route path='generate' element={<GeneratePage />} />
+              <Route path='assessment' element={<AssessmentPage />} />
               <Route path='graph' element={<GraphPage />} />
               <Route path='entity/:name' element={<EntityPage />} />
               <Route path='taxonomy' element={<TaxonomyPage />} />

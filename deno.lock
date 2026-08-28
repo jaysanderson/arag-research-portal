@@ -56,6 +56,7 @@
   "remote": {
     "https://esm.sh/@tanstack/react-query@5.62.11?deps=react@18.3.1": "efef7d4c0279e8c61d9b2506bafa45206c3d2dedf4b9795dc41a8ca01fc296b1",
     "https://esm.sh/d3-force@3.0.0": "1a35f3dd1ff127dc27f2b009574d90304693b0a516eac9583df8d0333d61fd8e",
+    "https://esm.sh/pdfjs-dist@4.9.155": "23ada0915aa7113c963cfc6175cfac060147cdd996abf9accb37e280f9805952",
     "https://esm.sh/react-dom@18.3.1": "3352732344c5b11264f40d467ac8be1124cf462b05bf691864663b7887c20003",
     "https://esm.sh/react-dom@18.3.1/client": "21721a0da8572c9017131699230e73bd29b31cae9763948f5a7e3966315d07a2",
     "https://esm.sh/react-router-dom@7.1.1?deps=react@18.3.1,react-dom@18.3.1": "9b027751a84b0084b987bffee543d4ee4dd9bc42586d5c72af033a4b9cd16d02",
