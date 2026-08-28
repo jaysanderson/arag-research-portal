@@ -453,6 +453,22 @@ label.rp-btn:has(input:focus-visible) {
 
 html[data-theme='dark'] {
   --rp-thumb-l: 22%;
+  /* Flip the paper base and the whole neutral ramp - body background uses
+   * --rp-paper and body text uses --rp-n-900, so without these the page
+   * itself never darkened even though the semantic tokens below did. */
+  --rp-paper: #0e1013;
+  --rp-n-0: #16181d;
+  --rp-n-25: #1a1d23;
+  --rp-n-50: #1d2026;
+  --rp-n-100: #262a32;
+  --rp-n-200: #2f333c;
+  --rp-n-300: #3a3f49;
+  --rp-n-400: #565c68;
+  --rp-n-500: #7c828e;
+  --rp-n-600: #969ba7;
+  --rp-n-700: #a2a8b4;
+  --rp-n-800: #cbcfd6;
+  --rp-n-900: #eceef2;
   --rp-app: #0e1013;
   --rp-surface: #16181d;
   --rp-surface-2: #1d2026;

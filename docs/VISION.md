@@ -142,6 +142,11 @@ in-app admin surface, not by hand.
   never see it) OR docs stored under a reserved label filtered out of tenant retrieval and
   filtered IN for the help widget. Deliverable: written user docs + ingestion + a scoped help
   assistant widget. Larger workstream, tracked for post-hero delivery.
+- **2026-08-28** - SCOPE FREEZE for shipment 1 (Jay): complete EVERYTHING discussed so far, then
+  ship; no new concepts or features go into the first shipment; roadmap is discussed AFTER ship.
+  Ship scope (the frozen list) is in docs/BACKLOG.md "SHIP SCOPE". Anything not on that list is
+  roadmap (v2), including: custom enrichment lenses / multi-schema chooser (Phase 2), memory-agent
+  wiring into ask, graph shortest-path, and any newly-surfaced ideas.
 - **2026-08-28** - Large-screen directive (Jay): the app must use the full screen real estate on
   large displays (27-inch, maximised windows are common) - a responsive strategy that scales UP,
   not only down to mobile. Wider containers, more columns, content that breathes on 2xl+ screens,

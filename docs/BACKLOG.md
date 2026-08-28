@@ -2,6 +2,27 @@
 
 Owner-tracked so nothing drops. Status: DONE (live) | MERGED (deploying) | IN BUILD | QUEUED.
 
+## SHIP SCOPE (frozen 2026-08-28) - complete ALL of this, then ship. No new features.
+Done + verified: passcode; GRDC purge; assessment fix; logo header; generate chips; search
+Find/Ask; graph full-screen redesign; stat-tile + menu-bleed light-mode fixes; cache-busting;
+resource-page layout (title top, viewer hero, sticky rail); explore topics; confidence
+transparency; reranker + accuracy baseline; box config (FRDC + GRDC); persona test gate.
+Remaining to complete before ship:
+1. Merchandising / default enrichment - real title+summary+key-takeaways everywhere (cards +
+   resource page + recommendations), the generator agent + JSON schema visible in Management,
+   read back the already-generated da-pagesummary + synthetic questions. (IN BUILD)
+2. Large-screen responsive pass - use the full width on 2xl+; no stranded columns. (QUEUED)
+3. OCR / visual extract strategy + re-ingest the scanned PDFs (corpus quality). (QUEUED)
+4. Documentation section - authored docs pages, ingested + labelled "documentation", a docs link
+   in the header, AI search/answer scoped to docs via label-isolated stored search configs
+   (portal-doc-*), research configs exclude the documentation label. (QUEUED)
+5. Theme toggle - verify/fix (light/dark did not visibly switch in a spot check). (QUEUED)
+6. FULL FUNCTIONAL ACCEPTANCE SWEEP - every feature on the real FRDC corpus, green, VISUALLY
+   verified by the orchestrator in light+dark, wide+390px. + answer-accuracy scorecard. This is
+   the ship gate. (QUEUED)
+ROADMAP (v2, NOT this ship): custom enrichment lenses / schema chooser; memory-agent into ask;
+graph shortest-path; page-image/table grounding; anything new.
+
 ## Done / live
 - Admin passcode set to `abc123` on production. DONE.
 - Explore topic rows now read the box label index (topics populate). MERGED/live.
@@ -38,6 +59,24 @@ Owner-tracked so nothing drops. Status: DONE (live) | MERGED (deploying) | IN BU
 
 - User documentation stored in a knowledge box + a dedicated help chatbot scoped ONLY to the
   docs, excluded from all normal search/ask. QUEUED - separate help KB approach.
+
+## ARAG exploitation roadmap (from the 2026-08-28 capability audit)
+We already use: reranker, answer_json_schema, REMi, citations, rag_strategies (neighbouring,
+full_resource, graph_beta, prequeries), labellers + classifier + graph + summaries + question-gen
++ memory agents, hidden-resources, KB/token provisioning. Top UNEXPLOITED, ranked by value:
+1. **OCR / visual extract strategy on the scanned-PDF corpus (HIGHEST VALUE).** Uploads send no
+   `X-Extract-Strategy`; scanned/image PDFs extract thin/empty text, starving search/ask/REMi/
+   labels/graph. Register a visual/OCR (and table-aware) extract strategy and re-ingest the
+   thin/challenge resources. Unlocks page-image/table grounding too. Needs a corpus re-ingest.
+2. **Documentation-label isolation via stored search configs** (the CLAUDE.md directive) - not yet
+   implemented; add `filter_expression` to portal-search/ask excluding `documentation`, add
+   portal-doc-search/ask including only it, plus the server-side citation-vs-filter cross-check.
+3. **Read back DA enrichments already generated** - the pagesummary DA summary and synthetic
+   questions are written per resource but never read (toSummary reads metadata.summary, not
+   `da-pagesummary-f-*`). Free merchandised summaries + real per-doc "people also ask". (Fed into
+   the merchandising work.)
+4. Page-image + `tables` grounding once OCR lands. 5. Wire the memory agent into /ask or drop it.
+   6. Graph shortest-path "how is X connected to Y" explainer.
 
 ## Standing
 - GRDC real content: Jay is loading it. FRDC is the demo hero.
