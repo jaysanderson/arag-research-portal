@@ -55,7 +55,9 @@ export function ManagePage() {
   const [renaming, setRenaming] = useState(false)
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['admin-overview'],
+    // Passcode in the key so a corrected entry re-checks instead of replaying
+    // a cached 401 (invalidateQueries below matches by prefix, so it still hits).
+    queryKey: ['admin-overview', passcode],
     queryFn: () => getAdminOverview(passcode),
     enabled: passcode.length > 0,
     retry: false,

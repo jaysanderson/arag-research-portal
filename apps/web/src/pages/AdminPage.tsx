@@ -24,7 +24,9 @@ export function AdminPage() {
   const [expandedSlug, setExpandedSlug] = useState<string | null>(null)
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['admin-overview'],
+    // The passcode is part of the key: submitting a new one must run a fresh
+    // check, not replay the cached 401 from an earlier wrong entry.
+    queryKey: ['admin-overview', passcode],
     queryFn: () => getAdminOverview(passcode),
     enabled: passcode.length > 0,
     retry: false,
