@@ -135,6 +135,13 @@ in-app admin surface, not by hand.
   openable source, and honest refusal over bluffing - measured with a scored rubric across
   dozens of scientist questions, not claimed as infallible. The acceptance sweep runs AFTER the
   in-flight fixes land, so it tests the fixed portal, and its green result is part of the go.
+- **2026-08-28** - In-app help directive (Jay): the portal needs full user documentation
+  ("how to use the application"), stored IN a knowledge box, served by a dedicated help chatbot
+  that ONLY retrieves from that documentation - and every normal search/ask must EXCLUDE the
+  docs. Approach: a separate help knowledge box (cleanest isolation - normal tenant searches
+  never see it) OR docs stored under a reserved label filtered out of tenant retrieval and
+  filtered IN for the help widget. Deliverable: written user docs + ingestion + a scoped help
+  assistant widget. Larger workstream, tracked for post-hero delivery.
 - **2026-08-28** - Design directive (Jay): the portal must not look "vibe coded" - no generic
   AI-generated design tells. A judgment-tier design-craft pass joins the roadmap: considered
   typography and spacing, distinct per-tenant identity, purposeful motion, nothing templated.

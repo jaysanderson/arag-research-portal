@@ -1,10 +1,11 @@
-import { type CSSProperties, type FormEvent, useState } from 'react'
+import { type CSSProperties, type FormEvent, useMemo, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useOutletContext } from 'react-router-dom'
 import type { GenerateKind, ResourceSummary } from '@research-portal/core'
 import { generateArtifact } from '../api/client.ts'
 import { EmptyState } from '../components/ui.tsx'
 import { SaveArtefactButton } from '../components/SaveEvidence.tsx'
+import { suggestedTopicChips } from '../lib/generate-suggestions.ts'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
 // ---------------------------------------------------------------------------
@@ -831,6 +832,45 @@ const EMPTY_DRAFTS: Record<GenerateKind, string> = {
 }
 
 /**
+ * A row of suggested-topic chips for the artefact kind currently selected,
+ * grounded in the tenant's real topics rather than generic examples.
+ * Clicking a chip fills the prompt with its exact text and focuses the
+ * input, so a request is ready to send without knowing what to type.
+ * Hidden entirely when the tenant has no topics that can be phrased for
+ * this kind (e.g. fewer than two topics for a comparison).
+ */
+function SuggestedTopicChips({
+  kind,
+  topics,
+  onPick,
+}: {
+  kind: GenerateKind
+  topics: { id: string; label: string }[]
+  onPick: (text: string) => void
+}) {
+  const chips = useMemo(() => suggestedTopicChips(kind, topics), [kind, topics])
+  if (chips.length === 0) return null
+
+  return (
+    <div className='mt-3'>
+      <p className='text-xs font-medium text-ink-3'>Try one of these</p>
+      <div className='mt-1.5 flex flex-wrap gap-1.5'>
+        {chips.map((chip) => (
+          <button
+            key={chip.key}
+            type='button'
+            onClick={() => onPick(chip.text)}
+            className='rp-chip h-9 sm:h-7'
+          >
+            {chip.text}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
  * Generate: schema-enforced research artifacts, grounded in the knowledge
  * box. Six kinds of artifact, each rendered with a purpose-built layout
  * rather than a generic document view.
@@ -840,6 +880,12 @@ export function GeneratePage() {
   const [kind, setKind] = useState<GenerateKind>('comparison')
   const [drafts, setDrafts] = useState<Record<GenerateKind, string>>(EMPTY_DRAFTS)
   const [resultVersion, setResultVersion] = useState(0)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const pickSuggestion = (text: string) => {
+    setDrafts((prev) => ({ ...prev, [kind]: text }))
+    textareaRef.current?.focus()
+  }
 
   const mutation = useMutation({
     mutationFn: (vars: { kind: GenerateKind; query: string }) =>
@@ -895,12 +941,14 @@ export function GeneratePage() {
         </label>
         <textarea
           id='generate-query'
+          ref={textareaRef}
           rows={3}
           value={drafts[kind]}
           onChange={(e) => setDrafts((prev) => ({ ...prev, [kind]: e.target.value }))}
           placeholder={activeMeta?.placeholder}
           className='rp-input'
         />
+        <SuggestedTopicChips kind={kind} topics={config.topics} onPick={pickSuggestion} />
         <button
           type='submit'
           disabled={mutation.isPending || drafts[kind].trim().length === 0}

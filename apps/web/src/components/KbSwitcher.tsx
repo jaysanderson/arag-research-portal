@@ -132,10 +132,21 @@ export function KbSwitcher({ config }: { config: TenantConfig }) {
         aria-expanded={open}
         className='rp-focus flex max-w-[15rem] items-center gap-2.5 rounded-[6px] px-2 py-1 text-left transition-colors duration-150 hover:bg-[var(--rp-surface-2)] sm:max-w-none'
       >
-        {logoUrl ? <TenantMark src={logoUrl} alt={config.branding.organisation} /> : null}
-        <span className='truncate text-[1.0625rem] font-semibold tracking-[-0.02em] text-ink'>
-          {config.branding.productName}
-        </span>
+        {logoUrl
+          ? (
+            // A logo carries the brand on its own, so it replaces the wordmark
+            // rather than sitting beside it (avoids the logo-plus-name doubling
+            // up). The product name stays for screen readers and the tab title.
+            <>
+              <TenantMark src={logoUrl} alt={config.branding.productName} />
+              <span className='sr-only'>{config.branding.productName}</span>
+            </>
+          )
+          : (
+            <span className='truncate text-[1.0625rem] font-semibold tracking-[-0.02em] text-ink'>
+              {config.branding.productName}
+            </span>
+          )}
         <svg
           className={`h-4 w-4 shrink-0 text-ink-3 transition-transform duration-200 ${
             open ? 'rotate-180' : ''
