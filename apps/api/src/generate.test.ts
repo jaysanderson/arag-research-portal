@@ -51,6 +51,9 @@ class UnusedProvider implements RetrievalProvider {
   catalog(): Promise<CatalogPage> {
     throw new Error('not used by /generate tests')
   }
+  topicResources(): Promise<ResourceSummary[]> {
+    throw new Error('not used by /generate tests')
+  }
   facets(): Promise<FacetCounts> {
     throw new Error('not used by /generate tests')
   }

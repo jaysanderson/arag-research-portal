@@ -88,6 +88,10 @@ class StubProvider implements RetrievalProvider {
     return first ? { [first]: { 'stock-assessment': 1 } } : {}
   }
 
+  async topicResources(_tenant: TenantConfig, topicId: string): Promise<ResourceSummary[]> {
+    return this.resources.filter((resource) => resource.topicIds.includes(topicId))
+  }
+
   async labelsets(_tenant: TenantConfig): Promise<Labelset[]> {
     return [{ id: 'topic', title: 'Topic', multiple: false, labels: ['stock-assessment'] }]
   }

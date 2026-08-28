@@ -140,6 +140,19 @@ export function getCatalog(
   return request<CatalogPage>(`/api/t/${encodeURIComponent(slug)}/catalog?${params.toString()}`)
 }
 
+/** Top resources filed under one topic - drives Explore's topic rows. */
+export function getTopicResources(
+  slug: string,
+  topicId: string,
+  limit = 12,
+): Promise<ResourceSummary[]> {
+  return request<ResourceSummary[]>(
+    `/api/t/${encodeURIComponent(slug)}/topics/${
+      encodeURIComponent(topicId)
+    }/resources?limit=${limit}`,
+  )
+}
+
 export function getFacets(slug: string, labelsets: string[] = ['topic']): Promise<FacetCounts> {
   return request<FacetCounts>(
     `/api/t/${encodeURIComponent(slug)}/facets?ls=${labelsets.join(',')}`,

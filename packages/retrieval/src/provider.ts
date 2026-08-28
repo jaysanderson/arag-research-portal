@@ -61,6 +61,8 @@ export interface RetrievalProvider {
   suggest(tenant: TenantConfig): Promise<Question[]>
   ask(tenant: TenantConfig, query: string, opts?: AskOptions): AsyncIterable<AskEvent>
   catalog(tenant: TenantConfig, opts?: CatalogOptions): Promise<CatalogPage>
+  /** Top resources filed under one topic (Explore's topic rows) - via the classification index, not per-resource topicIds. */
+  topicResources(tenant: TenantConfig, topicId: string, limit?: number): Promise<ResourceSummary[]>
   facets(tenant: TenantConfig, labelsets: string[], filters?: string[]): Promise<FacetCounts>
   labelsets(tenant: TenantConfig): Promise<Labelset[]>
 }

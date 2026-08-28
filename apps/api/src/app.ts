@@ -452,6 +452,13 @@ export function buildApp(opts: BuildAppOptions): Hono {
     )
   })
 
+  app.get('/api/t/:slug/topics/:topicId/resources', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const limit = Math.min(Math.max(1, Math.floor(Number(c.req.query('limit') ?? 12) || 12)), 24)
+    return c.json(await provider.topicResources(config, c.req.param('topicId'), limit))
+  })
+
   app.get('/api/t/:slug/facets', async (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)

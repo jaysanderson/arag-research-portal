@@ -195,8 +195,47 @@ interface RawResource {
   summary?: string
   created?: string
   usermetadata?: { classifications?: { labelset?: string; label?: string }[] }
+  /**
+   * Platform-computed metadata (DA classifier output etc). NucliaDB's own
+   * shape carries computed labels per-field here rather than in
+   * `usermetadata` (which is reserved for user-applied ones), and/or a
+   * top-level `classifications` fallback on some deployments - see
+   * `classificationLabels` below and the final report's probe notes for what
+   * was and wasn't confirmed live on this box.
+   */
+  computedmetadata?: {
+    field_classifications?: {
+      classifications?: { labelset?: string; label?: string; cancelled_by_user?: boolean }[]
+    }[]
+    classifications?: { labelset?: string; label?: string; cancelled_by_user?: boolean }[]
+  }
   extra?: { metadata?: PortalMetadata }
   metadata?: { status?: string }
+}
+
+/**
+ * A raw resource's labels for one labelset - user-applied
+ * (`usermetadata.classifications`) union platform-computed
+ * (`computedmetadata`), deduplicated. Shared by `catalogItemFromRaw` and
+ * `toSummary` so every user-facing surface picks up computed (DA classifier)
+ * labels the moment the platform includes them in a payload, with no further
+ * code change. A computed label the user has since removed
+ * (`cancelled_by_user: true`) is excluded.
+ */
+function classificationLabels(raw: RawResource, labelset: string): string[] {
+  const labels = new Set<string>()
+  for (const c of raw.usermetadata?.classifications ?? []) {
+    if (c.labelset === labelset && c.label) labels.add(c.label)
+  }
+  for (const field of raw.computedmetadata?.field_classifications ?? []) {
+    for (const c of field.classifications ?? []) {
+      if (c.labelset === labelset && c.label && !c.cancelled_by_user) labels.add(c.label)
+    }
+  }
+  for (const c of raw.computedmetadata?.classifications ?? []) {
+    if (c.labelset === labelset && c.label && !c.cancelled_by_user) labels.add(c.label)
+  }
+  return [...labels]
 }
 
 /** Shape of a /find response's resources map - shared by `search` and `catalogByQuery`. */
@@ -217,11 +256,8 @@ function catalogItemFromRaw(id: string, r: RawResource): CatalogItem {
     title: displayTitle(r.title, id),
     status: status === 'PROCESSED' ? 'processed' : status === 'ERROR' ? 'error' : 'pending',
     created: r.created,
-    topicIds: (r.usermetadata?.classifications ?? [])
-      .filter((c) => c.labelset === 'topic' && c.label)
-      .map((c) => c.label as string),
-    kind: (r.usermetadata?.classifications ?? []).find((c) => c.labelset === 'kind' && c.label)
-      ?.label,
+    topicIds: classificationLabels(r, 'topic'),
+    kind: classificationLabels(r, 'kind')[0],
     published: r.extra?.metadata?.published,
   }
 }
@@ -347,11 +383,8 @@ export class AragProvider implements RetrievalProvider {
 
   private toSummary(id: string, raw: RawResource): ResourceSummary {
     const meta = raw.extra?.metadata ?? {}
-    const topicFromLabels = (raw.usermetadata?.classifications ?? [])
-      .filter((c) => c.labelset === 'topic' && c.label)
-      .map((c) => c.label as string)
-    const kindLabel = (raw.usermetadata?.classifications ?? [])
-      .find((c) => c.labelset === 'kind' && c.label)?.label
+    const topicFromLabels = classificationLabels(raw, 'topic')
+    const kindLabel = classificationLabels(raw, 'kind')[0]
     const type: ResourceType = ((): ResourceType => {
       const t = meta.type
       return t === 'video' || t === 'web' || t === 'pdf' ? t : 'document'
@@ -735,6 +768,44 @@ export class AragProvider implements RetrievalProvider {
     const entries = Object.entries(raw.resources ?? {}).filter(([, r]) => isDisplayableResource(r))
     const items: CatalogItem[] = entries.map(([id, r]) => catalogItemFromRaw(id, r))
     return { items, total: raw.fulltext?.total ?? raw.total ?? items.length }
+  }
+
+  /**
+   * Top resources filed under one topic - drives Explore's topic rows. Reads
+   * the box's classification INDEX via `/catalog`'s param-based `filters=`
+   * (the same call `catalog()`'s unfiltered/topic-filtered browse above
+   * makes), not `/find`'s JSON-body `filters` array - docs/ARAG-DEV.md
+   * records that legacy array silently returning zero for label paths, and
+   * this `/catalog` param form is verified live to return real, non-empty
+   * results filtered by `/classification.labels/topic/{id}` even though a
+   * resource's own `usermetadata.classifications` can be empty for the same
+   * resource (the classifier's labels live in the index, not necessarily in
+   * that field - see the final report). Deliberately independent of
+   * `listResources`'s per-resource `topicIds`, which the DA classifier's
+   * labels don't reliably populate.
+   */
+  async topicResources(
+    tenant: TenantConfig,
+    topicId: string,
+    limit = 12,
+  ): Promise<ResourceSummary[]> {
+    const params = new URLSearchParams()
+    params.set('page_number', '0')
+    params.set('page_size', String(limit))
+    params.append('show', 'basic')
+    params.append('show', 'extra')
+    params.set('sort_field', 'created')
+    params.set('sort_order', 'desc')
+    params.set('hidden', 'false')
+    params.append('filters', `/classification.labels/topic/${topicId}`)
+    const raw = await this.client(tenant).getJson<{ resources?: Record<string, RawResource> }>(
+      `/catalog?${params.toString()}`,
+    )
+    // Failed ingests and junk (hash/bot-challenge) titles never surface in a
+    // topic row - see isDisplayableResource.
+    return Object.entries(raw.resources ?? {})
+      .filter(([, r]) => isDisplayableResource(r))
+      .map(([id, r]) => this.toSummary(id, r))
   }
 
   /**

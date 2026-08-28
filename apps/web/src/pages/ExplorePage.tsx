@@ -1,8 +1,9 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useOutletContext } from 'react-router-dom'
 import type { KbCounters, Question, ResourceSummary, TenantConfig } from '@research-portal/core'
-import { getCounters, getFacets, getResources } from '../api/client.ts'
+import { getCounters, getFacets, getTopicResources } from '../api/client.ts'
+import { topicsWithFacetCounts } from '../lib/topic-rows.ts'
 import { prettyLabel } from '../components/ui.tsx'
 import { EmptyState, ErrorCard, Skeleton, TypeBadge } from '../components/ui.tsx'
 import { ResourceThumb } from '../components/ResourceThumb.tsx'
@@ -397,6 +398,9 @@ function TopicRowSkeleton() {
   )
 }
 
+/** Resources shown per topic row - a horizontal scroll row's worth. */
+const TOPIC_ROW_LIMIT = 12
+
 /* -------------------------------------------------------------------------
  * Page
  * ---------------------------------------------------------------------- */
@@ -405,28 +409,34 @@ export function ExplorePage() {
   const { config } = useOutletContext<TenantOutletContext>()
   const navigate = useNavigate()
 
+  // The box's real classification index, not per-resource topicIds (the DA
+  // classifier's labels don't reliably land in a listed resource's own
+  // usermetadata - see the provider's `topicResources` doc comment). Facet
+  // counts say which topics are non-empty; each non-empty topic's row is
+  // then fetched from the same index via `topicResources`.
   const {
-    data: resources,
+    data: facets,
     isLoading,
     isError,
     error,
     refetch,
   } = useQuery({
-    queryKey: ['resources', config.slug],
-    queryFn: () => getResources(config.slug),
+    queryKey: ['topic-facets', config.slug],
+    queryFn: () => getFacets(config.slug, ['topic']),
   })
 
-  const resourcesByTopic = useMemo(() => {
-    const map = new Map<string, ResourceSummary[]>()
-    if (!resources) return map
-    for (const topic of config.topics) {
-      const matches = resources.filter((resource) => resource.topicIds.includes(topic.id))
-      if (matches.length > 0) {
-        map.set(topic.id, matches)
-      }
-    }
-    return map
-  }, [resources, config.topics])
+  const nonEmptyTopics = useMemo(
+    () => topicsWithFacetCounts(config.topics, facets ?? {}),
+    [facets, config.topics],
+  )
+
+  const topicRowQueries = useQueries({
+    queries: nonEmptyTopics.map(({ topic }) => ({
+      queryKey: ['topic-resources', config.slug, topic.id],
+      queryFn: () => getTopicResources(config.slug, topic.id, TOPIC_ROW_LIMIT),
+      staleTime: 5 * 60 * 1000,
+    })),
+  })
 
   const {
     data: counters,
@@ -450,7 +460,9 @@ export function ExplorePage() {
     [navigate, config.slug],
   )
 
-  const hasRows = resourcesByTopic.size > 0
+  // Genuinely empty only when the box's classification index has zero topic
+  // facets - never because a per-resource topicIds field came back empty.
+  const hasRows = nonEmptyTopics.length > 0
 
   return (
     <main>
@@ -496,8 +508,13 @@ export function ExplorePage() {
           : null}
 
         {!isLoading && !isError
-          ? config.topics.map((topic) => {
-            const items = resourcesByTopic.get(topic.id)
+          ? nonEmptyTopics.map(({ topic, count }, index) => {
+            const rowQuery = topicRowQueries[index]
+            if (rowQuery?.isLoading) return <TopicRowSkeleton key={topic.id} />
+            // A row's own fetch failing, or resolving empty (e.g. every
+            // matching resource is hidden/junk), quietly drops that one row
+            // rather than mislabelling the whole portal empty.
+            const items = rowQuery?.data
             if (!items || items.length === 0) return null
 
             return (
@@ -506,7 +523,7 @@ export function ExplorePage() {
                   slug={config.slug}
                   topicId={topic.id}
                   label={topic.label}
-                  count={items.length}
+                  count={count}
                 />
                 <div className='rp-scroll-row rp-no-scrollbar -mx-6 mt-3.5 flex gap-3 overflow-x-auto px-6 pb-4 pt-1'>
                   {items.map((resource) => (
