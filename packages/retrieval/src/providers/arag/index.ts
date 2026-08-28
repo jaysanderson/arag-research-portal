@@ -588,6 +588,16 @@ export class AragProvider implements RetrievalProvider {
       features,
       page_size: opts.pageSize ?? 20,
       show: ['basic', 'origin'],
+      // Cross-encoder reranking pass over the retrieved candidates - verified
+      // live (docs/ARAG-DEV.md has no prior record of this; see the reranker
+      // note added there). This is in fact the platform's own default when
+      // `reranker` is omitted (confirmed via `score_type: RERANKER` on an
+      // unconfigured /find call), so pinning it here is defensive - it keeps
+      // the box's next default change from silently un-reranking this path -
+      // rather than a genuinely new capability. `findWithFallback` sheds it
+      // on a 4xx same as `search_configuration`, so a deployment that
+      // rejects the field still works.
+      reranker: 'predict',
     }
     // The named search configuration's own features override the request's,
     // which would make the mode switch inert - only attach it for the
@@ -664,8 +674,13 @@ export class AragProvider implements RetrievalProvider {
    * needs: a stored config can exist but return zero for every query on an
    * admin-connected box while a config-free find works - shed it and retry
    * once, on a zero-result response or a 4xx before the fallback would ever
-   * see output. Shared by `search` and the catalogue's filtered-query path
-   * (`catalog`/`catalogByQuery`) so both use the exact same retrieval call.
+   * see output. Also sheds `reranker` on that same 4xx retry - verified
+   * accepted on this deployment (see the reranker note in docs/ARAG-DEV.md),
+   * but a box on an older platform build could still reject it, and this is
+   * the same shed-and-retry-once pattern `ask` already uses for its own
+   * optional strategies. Shared by `search` and the catalogue's
+   * filtered-query path (`catalog`/`catalogByQuery`) so both use the exact
+   * same retrieval call.
    */
   private async findWithFallback(
     client: KbClient,
@@ -681,6 +696,7 @@ export class AragProvider implements RetrievalProvider {
     } catch (err) {
       if (err instanceof AragApiError && err.status >= 400 && err.status < 500) {
         delete body.search_configuration
+        delete body.reranker
         return await client.postJson<FindResponse>('/find', body)
       }
       throw err
@@ -1494,17 +1510,29 @@ export class AragProvider implements RetrievalProvider {
   /**
    * Ensure the portal's named search configurations exist on the box - one per
    * surface, so retrieval behaviour is configured centrally rather than ad hoc.
+   *
+   * `reranker: 'predict'` on portal-search/portal-ask pins the platform's
+   * cross-encoder reranking pass on the stored config too, not just the
+   * request body `search`/`ask` already send it in - verified accepted here
+   * (`docs/ARAG-DEV.md`'s reranker note; a bad value 422s with
+   * `str-enum[RerankerName]` naming exactly `'predict'`/`'noop'`, and a
+   * config created with it round-trips 201). Left off portal-typeahead,
+   * which is keyword-only prefix matching for short partial queries - not
+   * the kind of relevance ranking a semantic reranker is built for, and it
+   * is on the typeahead hot path where the platform's own default already
+   * applies with no extra round-trip cost from a stored field. Each entry's
+   * own try/catch below already no-ops if a deployment rejects the shape.
    */
   async ensureSearchConfigs(tenant: TenantConfig): Promise<string[]> {
     const client = this.client(tenant)
     const desired: Record<string, unknown> = {
       'portal-search': {
         kind: 'find',
-        config: { features: ['keyword', 'semantic'], top_k: 20 },
+        config: { features: ['keyword', 'semantic'], top_k: 20, reranker: 'predict' },
       },
       'portal-ask': {
         kind: 'ask',
-        config: { features: ['keyword', 'semantic'], citations: true },
+        config: { features: ['keyword', 'semantic'], citations: true, reranker: 'predict' },
       },
       'portal-typeahead': {
         kind: 'find',
@@ -1687,6 +1715,13 @@ export class AragProvider implements RetrievalProvider {
       citations: true,
       show: ['basic', 'origin'],
       search_configuration: 'portal-ask',
+      // Cross-encoder reranking of the grounding candidates - verified live
+      // (see the reranker note in docs/ARAG-DEV.md and search()'s comment
+      // above). Pinned defensively: it is already the platform's default
+      // when omitted, so this guards against that default changing rather
+      // than being a new capability. Shed on a pre-emission 4xx below, same
+      // as rag_strategies/search_configuration/rag_images_strategies.
+      reranker: 'predict',
       // Nuclia's default RAG prompt answers "Not enough data to answer this."
       // as a guardrail even when relevant sources were retrieved - override it.
       prompt: {
@@ -1997,14 +2032,18 @@ export class AragProvider implements RetrievalProvider {
       } catch (err) {
         const status = err instanceof AragApiError ? err.status : 0
         // A 4xx before any output usually means an optional capability
-        // (graph strategy) is unsupported here - shed it and go again.
+        // (graph strategy, reranker) is unsupported here - shed it and go
+        // again. MAX_ATTEMPTS still bounds the loop, so this and the
+        // attempt-count retries below can't run indefinitely together.
         if (
           !emitted && status >= 400 && status < 500 &&
-          (body.rag_strategies || body.search_configuration || body.rag_images_strategies)
+          (body.rag_strategies || body.search_configuration || body.rag_images_strategies ||
+            body.reranker)
         ) {
           delete body.rag_strategies
           delete body.search_configuration
           delete body.rag_images_strategies
+          delete body.reranker
           continue
         }
         const retryable = status === 412 || status >= 500

@@ -63,6 +63,23 @@ search configurations are all configurable objects ON the KB, viewable in the ad
 - **Multi-doc summaries:** `POST /kb/{id}/summarize` `{resources: [uids] (REQUIRED), summary_kind:
   'simple'|'extended', user_prompt?}` - verified 2xx; response has a combined `summary` plus
   per-resource summaries. Missing uids are silently ignored.
+- **Reranker:** both `/find` and `/ask` accept a top-level `reranker` field -
+  `'predict'` (cross-encoder rerank pass) or `'noop'` (raw BM25/vector/hybrid
+  scores) - verified live by sending an invalid value: the 422 names the
+  exact enum (`str-enum[RerankerName]`, `"Input should be 'predict' or
+  'noop'"`). **The platform's default when the field is omitted is already
+  `'predict'`** - confirmed by comparing `score_type` on retrieved paragraphs
+  (`RERANKER` by default and with `reranker:'predict'` explicit; `BM25` /
+  `VECTOR` / `BOTH` only with `reranker:'noop'`). A named `search_configuration`
+  does not override an explicit request-level `reranker` (unlike `features` -
+  see below) and its own `config` object also accepts a `reranker` key.
+  Pinning it explicitly (in the request body and the stored config) is
+  therefore defensive, not a new capability - it stops a future platform
+  default change from silently un-reranking these paths. An object form
+  (`{name:'predict', ...}`, discriminator field `name`) is also accepted but
+  extra keys inside it (`top_k`, etc.) are silently ignored by validation, so
+  don't rely on them without separately confirming they do something - the
+  plain string form is the only fully-verified shape.
 - **Prequeries (deep research):** `rag_strategies: [{name:'prequeries', queries:[{request:
   {query, features:['keyword','semantic']}, weight: 1}], ...}]` - max 10 queries, each `request`
   is a full FindRequest. `full_resource` and `page_image`/`tables` (under `rag_images_strategies`)
