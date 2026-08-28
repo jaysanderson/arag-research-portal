@@ -49,6 +49,25 @@ jobs:
         # apps/web/dist/index.html is present) exercises a real bundle, the
         # same way `deno task dev` and the Dockerfile both build before serving.
         run: deno task check
+      - name: Cache Chromium (astral/e2e)
+        # @astral/astral downloads its own Chromium on first run - cache it
+        # keyed on its pinned version in deno.json so most runs skip the
+        # ~100MB download. Cache dir per astral's cache.ts (XDG on Linux).
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/astral
+          key: astral-chromium-${{ runner.os }}-${{ hashFiles('deno.json') }}
+      - name: Browser E2E persona journeys
+        # Drives a real headless Chromium against the built SPA + API with a
+        # scripted test-double retrieval provider (no real ARAG account) -
+        # see e2e/persona-journeys.test.ts. Separate from the unit gate above
+        # (deno task test) since it downloads/drives a real browser.
+        # Report-only for now: this passes locally, but must be seen green in
+        # CI once before it blocks deploys - a headless-browser quirk in the
+        # runner must never block a delivery-day deploy. Flip to blocking (drop
+        # continue-on-error) after the first green CI run.
+        continue-on-error: true
+        run: deno task test:e2e
 
   deploy:
     name: Deploy to fly.io
@@ -61,3 +80,19 @@ jobs:
         run: flyctl deploy --remote-only --env BUILD_SHA=${GITHUB_SHA}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Post-deploy persona smoke
+        # Live check against the just-deployed portal (real ARAG, no
+        # mocking) - search + one cited in-corpus ask + one refused
+        # out-of-corpus ask, quick mode (a single tenant, 2 LLM asks). Fails
+        # the workflow visibly if a deploy breaks the persona journey. See
+        # apps/api/scripts/persona-smoke.ts.
+        run: deno run --allow-net --allow-env apps/api/scripts/persona-smoke.ts --quick
+        env:
+          BASE_URL: https://arag-research-portal.fly.dev
+          # The live tenant carrying real, connected content. frdc-2 is the
+          # 2,604-document FRDC corpus; add gdrc here once it holds real
+          # grains content so the smoke gates on it too.
+          PERSONA_SMOKE_TENANTS: frdc-2
