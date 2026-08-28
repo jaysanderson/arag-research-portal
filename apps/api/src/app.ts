@@ -82,6 +82,9 @@ const sessionPutSchema = z.object({
 const watchBodySchema = z.object({ query: z.string().min(2).max(500) })
 const sourceBodySchema = z.object({ url: z.string().url(), auto: z.boolean().optional() })
 const hiddenBodySchema = z.object({ hidden: z.boolean() })
+// Purge is destructive - default TRUE means "just show me the scope", never
+// "go ahead and delete". An explicit { dryRun: false } is required to delete.
+const purgeFailedBodySchema = z.object({ dryRun: z.boolean().optional() })
 const investigationCreateSchema = z.object({
   name: z.string().min(1).max(160),
   question: z.string().max(500).optional(),
@@ -1630,6 +1633,38 @@ export function buildApp(opts: BuildAppOptions): Hono {
     const unavailable = requireManagement(c)
     if (unavailable) return unavailable
     return c.json(await management!.corpusHealth(config))
+  })
+
+  // Permanently removes failed-crawl junk (bot-challenge pages, blank-titled
+  // error resources) - see AragProvider.purgeFailedResources/isPurgeEligible
+  // for the exact, deliberately conservative eligibility rule. Defaults to a
+  // dry run: the caller must send an explicit { dryRun: false } to delete
+  // anything. Streamed over SSE (like kg/implement) since a full-catalogue
+  // purge on a large box can run long enough to risk a plain-JSON timeout.
+  app.post('/api/admin/t/:slug/purge-failed', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailable = requireManagement(c)
+    if (unavailable) return unavailable
+    const parsed = purgeFailedBodySchema.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+    // Absent, or anything other than exactly `false`, stays a dry run.
+    const dryRun = parsed.data.dryRun !== false
+    return streamSSE(c, async (stream) => {
+      await stream.writeSSE({ data: JSON.stringify({ type: 'started', dryRun }) })
+      try {
+        const result = await management!.purgeFailedResources(config, { dryRun })
+        await stream.writeSSE({ data: JSON.stringify({ type: 'done', dryRun, ...result }) })
+      } catch (err) {
+        console.error(err)
+        await stream.writeSSE({
+          data: JSON.stringify({
+            type: 'error',
+            message: err instanceof Error ? err.message : 'The purge could not complete.',
+          }),
+        })
+      }
+    })
   })
 
   app.get('/api/admin/t/:slug/insights', (c) => {

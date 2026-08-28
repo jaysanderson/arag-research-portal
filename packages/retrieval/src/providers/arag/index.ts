@@ -33,6 +33,10 @@ const CATALOG_MAX_PAGES = 40
 /** Health scan reads full text per resource - sample the newest slice. */
 const HEALTH_SCAN_LIMIT = 400
 const HEALTH_SCAN_CONCURRENCY = 12
+/** Bounded delete concurrency for `purgeFailedResources` - never hammer the box. */
+const PURGE_DELETE_CONCURRENCY = 5
+/** Dry-run/confirmation sample size for `purgeFailedResources`. */
+const PURGE_SAMPLE_SIZE = 20
 
 /**
  * Reference-list / front-matter heuristic: bibliography chunks match query
@@ -109,6 +113,29 @@ export function isDisplayableResource(raw: DisplayabilityInput): boolean {
   if (looksLikeRawHashTitle(title)) return false
   if (looksLikeBotChallengeTitle(title)) return false
   return true
+}
+
+/**
+ * Eligibility for `purgeFailedResources`'s PERMANENT delete - deliberately
+ * much narrower than `isDisplayableResource` (which merely hides a resource
+ * from user-facing lists; nothing there is destructive). A resource is
+ * eligible only if:
+ *  - its title is a known bot-challenge string (a crawl that "succeeded" but
+ *    only captured a Cloudflare/bot-wall page as its content), OR
+ *  - its ingest failed outright (status ERROR) AND it never got any title at
+ *    all.
+ * A raw hash title (title extraction failed but the underlying document may
+ * be real) is NEVER eligible on its own, even under an ERROR status, and
+ * NEITHER is any other genuine human title, even under an ERROR status - an
+ * error with a real title may be a real document that just needs
+ * re-ingesting, not deleting. If in doubt, this returns false; deletion is
+ * irreversible.
+ */
+export function isPurgeEligible(raw: DisplayabilityInput): boolean {
+  const title = (raw.title ?? '').trim()
+  if (looksLikeBotChallengeTitle(title)) return true
+  const isError = (raw.metadata?.status ?? '').toUpperCase() === 'ERROR'
+  return isError && title === ''
 }
 
 /**
@@ -1404,6 +1431,75 @@ export class AragProvider implements RetrievalProvider {
   async setResourceHidden(tenant: TenantConfig, id: string, hidden: boolean): Promise<void> {
     await this.client(tenant).patchJson(`/resource/${id}`, { hidden })
     this.invalidateCatalogue(tenant.slug)
+  }
+
+  /**
+   * Purge failed-crawl junk (bot-challenge pages, and error-status resources
+   * that never got a title) - see `isPurgeEligible` for the exact,
+   * deliberately conservative rule. Pages the ENTIRE catalogue (not the
+   * health-scan's newest-slice sample), same page/max-page pattern as
+   * `listResources`, so a box with thousands of resources is fully scanned.
+   *
+   * `dryRun` (the caller's default) never calls `deleteResource` - it only
+   * reports what WOULD be deleted, so a caller can confirm scope before
+   * committing. A real run deletes in bounded waves of
+   * `PURGE_DELETE_CONCURRENCY` so the box is never hit with an unbounded
+   * burst of parallel deletes; one resource's delete failing is logged and
+   * counted but never aborts the rest of the run.
+   */
+  async purgeFailedResources(
+    tenant: TenantConfig,
+    opts: { dryRun: boolean },
+  ): Promise<
+    { scanned: number; eligible: number; deleted: number; failed: number; sampleTitles: string[] }
+  > {
+    const client = this.client(tenant)
+    const candidates: { id: string; title: string }[] = []
+    let scanned = 0
+    for (let page = 0; page < CATALOG_MAX_PAGES; page++) {
+      const catalog = await client.getJson<{ resources?: Record<string, RawResource> }>(
+        `/catalog?page_number=${page}&page_size=${CATALOG_PAGE_SIZE}&show=basic`,
+      )
+      const batch = Object.entries(catalog.resources ?? {})
+      scanned += batch.length
+      for (const [id, raw] of batch) {
+        if (isPurgeEligible(raw)) {
+          candidates.push({ id, title: (raw.title ?? '').trim() || '(untitled)' })
+        }
+      }
+      if (batch.length < CATALOG_PAGE_SIZE) break
+    }
+    const sampleTitles = candidates.slice(0, PURGE_SAMPLE_SIZE).map((r) => `${r.title} (${r.id})`)
+
+    if (opts.dryRun) {
+      return { scanned, eligible: candidates.length, deleted: 0, failed: 0, sampleTitles }
+    }
+
+    let deleted = 0
+    let failed = 0
+    for (let start = 0; start < candidates.length; start += PURGE_DELETE_CONCURRENCY) {
+      const wave = candidates.slice(start, start + PURGE_DELETE_CONCURRENCY)
+      const results = await Promise.allSettled(
+        wave.map((r) =>
+          this.deleteResource(tenant, r.id).catch((err) => {
+            throw new Error(
+              `failed to delete "${r.title}" (${r.id}): ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            )
+          })
+        ),
+      )
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          deleted++
+        } else {
+          failed++
+          console.error(`purgeFailedResources(${tenant.slug}):`, result.reason)
+        }
+      }
+    }
+    return { scanned, eligible: candidates.length, deleted, failed, sampleTitles }
   }
 
   /**

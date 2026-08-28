@@ -144,7 +144,7 @@ export function AssessmentQuiz({
                     aria-pressed={isChosen}
                     onClick={() => setSelected((prev) => ({ ...prev, [qi]: oi }))}
                     style={optStyle}
-                    className={`rp-focus block w-full rounded-[var(--rp-radius)] border px-4 py-2.5 text-left text-sm transition-colors duration-150 disabled:cursor-default ${cls}`}
+                    className={`rp-focus block w-full rounded-[var(--rp-radius)] border px-4 py-2.5 text-left text-sm text-ink transition-colors duration-150 disabled:cursor-default ${cls}`}
                   >
                     {opt}
                     {answerHint && <span className='sr-only'>{answerHint}</span>}
