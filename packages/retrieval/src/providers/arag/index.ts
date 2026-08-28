@@ -38,6 +38,37 @@ const HEALTH_SCAN_CONCURRENCY = 12
 const PURGE_DELETE_CONCURRENCY = 5
 /** Dry-run/confirmation sample size for `purgeFailedResources`. */
 const PURGE_SAMPLE_SIZE = 20
+/** Extra attempts (beyond the first) for an ingestion call that hits back-pressure. */
+const BACKPRESSURE_MAX_RETRIES = 2
+/** Never let one request wait longer than this for the platform's queue to clear. */
+const BACKPRESSURE_MAX_WAIT_MS = 20_000
+/** Floor for the wait even when try_after is already in the past. */
+const BACKPRESSURE_MIN_WAIT_MS = 1_000
+
+/**
+ * Retry a single ingestion write (createText/createLink) across the
+ * platform's ingestion back-pressure (HTTP 429, `back_pressure_type`
+ * present). Honours the server's `try_after` hint, capped so one request
+ * never hangs indefinitely. Any other error - or back-pressure that is still
+ * present after the retry budget - is rethrown as-is (a typed AragApiError
+ * with `.backpressure` set, for the caller to distinguish from a hard
+ * failure).
+ */
+async function withBackpressureRetry<T>(fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 0;; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      const backpressure = err instanceof AragApiError ? err.backpressure : null
+      if (!backpressure || attempt >= BACKPRESSURE_MAX_RETRIES) throw err
+      const waitMs = Math.min(
+        Math.max(backpressure.tryAfter * 1000 - Date.now(), BACKPRESSURE_MIN_WAIT_MS),
+        BACKPRESSURE_MAX_WAIT_MS,
+      )
+      await new Promise((resolve) => setTimeout(resolve, waitMs))
+    }
+  }
+}
 
 /**
  * Reference-list / front-matter heuristic: bibliography chunks match query
@@ -612,12 +643,11 @@ export class AragProvider implements RetrievalProvider {
     tenant: TenantConfig,
     input: { filename: string; contentType: string; bytes: Uint8Array },
   ): Promise<{ id: string }> {
-    const res = (await this.client(tenant).postRaw(
-      '/upload',
-      input.bytes,
-      input.contentType,
-      input.filename,
-    )) as { uuid?: string; resource?: string }
+    const client = this.client(tenant)
+    const res =
+      (await withBackpressureRetry(() =>
+        client.postRaw('/upload', input.bytes, input.contentType, input.filename)
+      )) as { uuid?: string; resource?: string }
     this.invalidateCatalogue(tenant.slug)
     return { id: res.uuid ?? res.resource ?? '' }
   }
@@ -626,13 +656,16 @@ export class AragProvider implements RetrievalProvider {
     tenant: TenantConfig,
     input: { url: string; title?: string; hidden?: boolean },
   ): Promise<{ id: string }> {
-    const res = await this.client(tenant).postJson<{ uuid?: string }>('/resources', {
-      title: input.title ?? input.url,
-      icon: 'application/stf-link',
-      origin: { url: input.url },
-      links: { link: { uri: input.url } },
-      ...(input.hidden ? { hidden: true } : {}),
-    })
+    const client = this.client(tenant)
+    const res = await withBackpressureRetry(() =>
+      client.postJson<{ uuid?: string }>('/resources', {
+        title: input.title ?? input.url,
+        icon: 'application/stf-link',
+        origin: { url: input.url },
+        links: { link: { uri: input.url } },
+        ...(input.hidden ? { hidden: true } : {}),
+      })
+    )
     this.invalidateCatalogue(tenant.slug)
     return { id: res.uuid ?? '' }
   }
@@ -660,7 +693,10 @@ export class AragProvider implements RetrievalProvider {
       body.usermetadata = { classifications: [{ labelset: 'topic', label: input.topicId }] }
     }
     if (input.extraMetadata) body.extra = { metadata: input.extraMetadata }
-    const res = await this.client(tenant).postJson<{ uuid?: string }>('/resources', body)
+    const client = this.client(tenant)
+    const res = await withBackpressureRetry(() =>
+      client.postJson<{ uuid?: string }>('/resources', body)
+    )
     this.invalidateCatalogue(tenant.slug)
     return { id: res.uuid ?? '' }
   }

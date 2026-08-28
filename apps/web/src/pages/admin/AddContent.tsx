@@ -1,5 +1,11 @@
 import { type ChangeEvent, type DragEvent, type FormEvent, useState } from 'react'
-import { addAdminLink, addAdminText, discoverCrawl, uploadAdminFile } from '../../api/client.ts'
+import {
+  addAdminLink,
+  addAdminText,
+  ApiError,
+  discoverCrawl,
+  uploadAdminFile,
+} from '../../api/client.ts'
 import { MessagePanel } from './MessagePanel.tsx'
 import { errorMessage, type Message } from './shared.ts'
 
@@ -72,18 +78,40 @@ function CrawlTab({
     setIngesting(true)
     setMessage(null)
     setProgress({ done: 0, total: selectedLinks.length })
+    let added = 0
     let failures = 0
-    for (const [index, link] of selectedLinks.entries()) {
+    let busy = false
+    let attempted = 0
+    for (const link of selectedLinks) {
+      attempted += 1
       try {
         await addAdminLink(slug, passcode, { url: link })
-      } catch {
+        added += 1
+      } catch (err) {
+        // The knowledge box's processing queue is full - stop the batch
+        // here rather than hammering it for every remaining link. The ones
+        // not yet attempted can be re-run once it has drained.
+        if (err instanceof ApiError && err.status === 503) {
+          busy = true
+          setProgress({ done: attempted, total: selectedLinks.length })
+          break
+        }
         failures += 1
       }
-      setProgress({ done: index + 1, total: selectedLinks.length })
+      setProgress({ done: attempted, total: selectedLinks.length })
     }
+    const deferred = selectedLinks.length - attempted
     setIngesting(false)
     setMessage(
-      failures === 0
+      busy
+        ? {
+          tone: 'ok',
+          text: `Added ${added} of ${selectedLinks.length} links - the knowledge box is busy ` +
+            `processing recent changes, so the remaining ${deferred} ${
+              deferred === 1 ? 'link was' : 'links were'
+            } not attempted. Try again in a few minutes.`,
+        }
+        : failures === 0
         ? {
           tone: 'ok',
           text: `Added ${selectedLinks.length} ${

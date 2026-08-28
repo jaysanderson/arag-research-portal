@@ -1002,7 +1002,9 @@ export function deleteSource(
 
 export type SourceSyncEvent =
   | { type: 'item'; label: string }
-  | { type: 'done'; added: number }
+  // `deferred` counts pages left un-synced this run (e.g. the knowledge box
+  // was busy) - they are picked up automatically on the next sync.
+  | { type: 'done'; added: number; deferred?: number }
   | { type: 'error'; message: string }
 
 export async function syncSource(

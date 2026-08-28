@@ -372,6 +372,24 @@ export function buildApp(opts: BuildAppOptions): Hono {
     return 'The answer service had a problem - please try again.'
   }
 
+  /**
+   * Ingestion writes (link/text/upload) can hit the platform's processing
+   * queue back-pressure (HTTP 429) even after the provider's own bounded
+   * retry - the queue is still full a few seconds later. That is not a bug,
+   * it's the platform under load, so it must never surface as a bare 500.
+   * Returns the 503 body to send when `err` is that condition, else null so
+   * the caller can rethrow anything genuinely unexpected.
+   */
+  const ingestionBusyBody = (err: unknown) =>
+    err instanceof AragApiError && err.backpressure
+      ? {
+        error: 'ingestion_busy' as const,
+        message: 'The knowledge box is busy processing recent changes and cannot accept new ' +
+          'content right now - please try again in a few minutes.',
+        retryAfter: err.backpressure.tryAfter,
+      }
+      : null
+
   // Unauthenticated liveness/readiness check for Fly's health checker - no
   // upstream/ARAG calls. Also verifies the SPA bundle is present, so an
   // image built without `deno task build:web` fails health checks instead
@@ -1268,37 +1286,47 @@ export function buildApp(opts: BuildAppOptions): Hono {
     // index holds body text, and bot walls never enter the corpus. Falls back
     // to the platform crawler when the site blocks server fetches.
     try {
-      const res = await fetch(parsed.data.url, {
-        headers: { 'user-agent': 'Mozilla/5.0 (research-portal-ingest)' },
-        signal: AbortSignal.timeout(25_000),
-      })
-      if (res.ok && (res.headers.get('content-type') ?? '').includes('html')) {
-        const html = await res.text()
-        const cleaned = extractMainContent(html)
-        if (cleaned) {
-          const created = await management!.createText(config, {
-            title: parsed.data.title?.trim() || cleaned.title,
-            body: cleaned.body,
-            format: 'MARKDOWN',
-            originUrl: parsed.data.url,
-          })
-          if (parsed.data.hidden) {
-            await management!.setResourceHidden(config, created.id, true).catch(() => {})
+      try {
+        const res = await fetch(parsed.data.url, {
+          headers: { 'user-agent': 'Mozilla/5.0 (research-portal-ingest)' },
+          signal: AbortSignal.timeout(25_000),
+        })
+        if (res.ok && (res.headers.get('content-type') ?? '').includes('html')) {
+          const html = await res.text()
+          const cleaned = extractMainContent(html)
+          if (cleaned) {
+            const created = await management!.createText(config, {
+              title: parsed.data.title?.trim() || cleaned.title,
+              body: cleaned.body,
+              format: 'MARKDOWN',
+              originUrl: parsed.data.url,
+            })
+            if (parsed.data.hidden) {
+              await management!.setResourceHidden(config, created.id, true).catch(() => {})
+            }
+            return c.json(created)
           }
-          return c.json(created)
+          if (looksLikeChallengePage(html)) {
+            return c.json({
+              error: 'challenge_page',
+              message:
+                'That page serves a bot wall to automated fetches - the content cannot be ingested cleanly. Try uploading the document itself.',
+            }, 422)
+          }
         }
-        if (looksLikeChallengePage(html)) {
-          return c.json({
-            error: 'challenge_page',
-            message:
-              'That page serves a bot wall to automated fetches - the content cannot be ingested cleanly. Try uploading the document itself.',
-          }, 422)
-        }
+      } catch (err) {
+        // A knowledge-box back-pressure error is not a fetch/parse failure -
+        // falling through to createLink below would just hit the same full
+        // queue again. Let it escape to the outer catch instead.
+        if (err instanceof AragApiError && err.backpressure) throw err
+        // Any other failure (network, parsing) falls through to the platform crawler.
       }
-    } catch {
-      // fall through to the platform crawler
+      return c.json(await management!.createLink(config, parsed.data))
+    } catch (err) {
+      const busy = ingestionBusyBody(err)
+      if (busy) return c.json(busy, 503)
+      throw err
     }
-    return c.json(await management!.createLink(config, parsed.data))
   })
 
   app.post('/api/admin/t/:slug/resources/text', async (c) => {
@@ -1308,7 +1336,13 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (unavailable) return unavailable
     const parsed = textBodySchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
-    return c.json(await management!.createText(config, { ...parsed.data, format: 'MARKDOWN' }))
+    try {
+      return c.json(await management!.createText(config, { ...parsed.data, format: 'MARKDOWN' }))
+    } catch (err) {
+      const busy = ingestionBusyBody(err)
+      if (busy) return c.json(busy, 503)
+      throw err
+    }
   })
 
   app.post('/api/admin/t/:slug/resources/upload', async (c) => {
@@ -1321,7 +1355,13 @@ export function buildApp(opts: BuildAppOptions): Hono {
     const bytes = new Uint8Array(await c.req.arrayBuffer())
     if (bytes.length === 0) return c.json({ error: 'empty_file' }, 400)
     if (bytes.length > 100 * 1024 * 1024) return c.json({ error: 'file_too_large' }, 413)
-    return c.json(await management!.uploadFile(config, { filename, contentType, bytes }))
+    try {
+      return c.json(await management!.uploadFile(config, { filename, contentType, bytes }))
+    } catch (err) {
+      const busy = ingestionBusyBody(err)
+      if (busy) return c.json(busy, 503)
+      throw err
+    }
   })
 
   app.post('/api/admin/t/:slug/disable', (c) => {
@@ -1861,14 +1901,14 @@ export function buildApp(opts: BuildAppOptions): Hono {
     return streamSSE(c, async (stream) => {
       const emit = (event: unknown) => stream.writeSSE({ data: JSON.stringify(event) })
       try {
-        const added = await syncSource(
+        const { added, deferred } = await syncSource(
           management,
           sources,
           config,
           source,
           (label) => emit({ type: 'item', label }),
         )
-        await emit({ type: 'done', added })
+        await emit({ type: 'done', added, deferred })
       } catch (err) {
         await emit({ type: 'error', message: err instanceof Error ? err.message : 'sync_failed' })
       }

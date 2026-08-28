@@ -36,14 +36,64 @@ export function parseKbUrl(raw: string): { baseUrl: string; kbId: string } | nul
   return { baseUrl: `${url.origin}${url.pathname}`, kbId: match[1] }
 }
 
+/**
+ * Ingestion back-pressure the platform reports via HTTP 429 when its
+ * processing queue is full, e.g.
+ * `{"detail":{"message":"Too many messages pending to ingest. Retry after
+ * <ts>","try_after":<epoch seconds>,"back_pressure_type":"processing"}}`.
+ * This is an expected, transient condition under load - not a hard failure.
+ */
+export interface BackPressureInfo {
+  /** Epoch seconds after which the platform expects capacity to free up. */
+  tryAfter: number
+  /** e.g. "processing", "ingestion" - whichever queue is full. */
+  kind: string
+  /** The platform's own human-readable explanation. */
+  message: string
+}
+
+function parseBackPressure(status: number, detail: string): BackPressureInfo | null {
+  if (status !== 429) return null
+  try {
+    const parsed = JSON.parse(detail) as {
+      detail?: { message?: string; try_after?: number; back_pressure_type?: string }
+    }
+    const d = parsed.detail
+    if (d && typeof d.try_after === 'number') {
+      return {
+        tryAfter: d.try_after,
+        kind: d.back_pressure_type ?? 'unknown',
+        message: d.message ?? 'Too many messages pending to ingest.',
+      }
+    }
+  } catch {
+    // Not JSON, or not the shape we expect - fall through to "not back-pressure".
+  }
+  return null
+}
+
 export class AragApiError extends Error {
+  /** Set when this 429 is recognised ingestion back-pressure; null for every other error. */
+  readonly backpressure: BackPressureInfo | null
+
   constructor(
     readonly status: number,
     readonly url: string,
     detail: string,
   ) {
-    super(`Agentic RAG API ${status} for ${url}: ${detail.slice(0, 300)}`)
+    const backpressure = parseBackPressure(status, detail)
+    super(
+      backpressure
+        ? `Agentic RAG API 429 for ${url}: back-pressure (${backpressure.kind}) - ${backpressure.message}`
+        : `Agentic RAG API ${status} for ${url}: ${detail.slice(0, 300)}`,
+    )
     this.name = 'AragApiError'
+    this.backpressure = backpressure
+  }
+
+  /** True when the caller should back off and retry rather than treat this as a hard failure. */
+  get retryable(): boolean {
+    return this.backpressure !== null
   }
 }
 

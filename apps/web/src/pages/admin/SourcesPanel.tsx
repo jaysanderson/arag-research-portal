@@ -42,9 +42,17 @@ function SourceRow({
       await syncSource(slug, passcode, source.id, (event) => {
         setLog((prev) => [...prev, event])
         if (event.type === 'done') {
+          const deferred = event.deferred ?? 0
           setMessage({
+            // Deferring pages under back-pressure is graceful handling, not a
+            // failure - the sync still made progress and will finish itself.
             tone: 'ok',
-            text: `Synced - ${event.added} ${event.added === 1 ? 'page' : 'pages'} added.`,
+            text: deferred > 0
+              ? `Synced - ${event.added} ${event.added === 1 ? 'page' : 'pages'} added. ` +
+                `The knowledge box was busy, so ${deferred} ${
+                  deferred === 1 ? 'page was' : 'pages were'
+                } left for the next sync.`
+              : `Synced - ${event.added} ${event.added === 1 ? 'page' : 'pages'} added.`,
           })
         }
         if (event.type === 'error') setMessage({ tone: 'error', text: event.message })

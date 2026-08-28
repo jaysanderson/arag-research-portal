@@ -1,5 +1,5 @@
 import type { TenantConfig } from '@research-portal/core'
-import type { AragProvider } from '@research-portal/retrieval'
+import { AragApiError, type AragProvider } from '@research-portal/retrieval'
 import { discoverLinks, extractMainContent, looksLikeChallengePage } from './crawl.ts'
 import { type Source, SourceStore, WatchStore } from './stores.ts'
 import type { TenantStore } from './tenants.ts'
@@ -16,14 +16,14 @@ const DISCOVER_CAP = 500
 /** New pages ingested per sync run - the rest arrive on later runs. */
 const SYNC_CAP = 60
 
-/** Ingest new pages from one source; returns how many were added. */
+/** Ingest new pages from one source; reports how many were added vs left for next time. */
 export async function syncSource(
   management: AragProvider,
   sources: SourceStore,
   config: TenantConfig,
   source: Source,
   emit: (label: string) => void | Promise<void>,
-): Promise<number> {
+): Promise<{ added: number; deferred: number }> {
   const discovered = await discoverLinks(source.url, DISCOVER_CAP)
   const known = new Set(source.synced ?? [])
   const freshAll = discovered.links.filter((l) => !known.has(l))
@@ -34,7 +34,8 @@ export async function syncSource(
   )
   let added = 0
   let rejected = 0
-  for (const url of fresh) {
+  let deferred = 0
+  for (const [i, url] of fresh.entries()) {
     try {
       // Fetch and clean the page ourselves so the index holds body content,
       // not nav chrome - and so bot walls never enter the corpus.
@@ -61,7 +62,10 @@ export async function syncSource(
             continue
           }
         }
-      } catch {
+      } catch (err) {
+        // A knowledge-box back-pressure error is not a fetch failure - let it
+        // through to the outer catch rather than masking it as a crawler fallback.
+        if (err instanceof AragApiError && err.backpressure) throw err
         // fall through to the platform crawler
       }
       if (!ingested) {
@@ -70,7 +74,19 @@ export async function syncSource(
       known.add(url)
       added += 1
       if (added % 5 === 0) await emit(`Ingested ${added} of ${fresh.length} new pages…`)
-    } catch {
+    } catch (err) {
+      if (err instanceof AragApiError && err.backpressure) {
+        // The box's ingestion queue is full. Stop this run cleanly rather
+        // than hammering it for every remaining page - they stay un-synced
+        // (not added to `known`) so the next scheduled or manual sync picks
+        // them up once the queue has drained.
+        deferred = fresh.length - i
+        await emit(
+          `Knowledge box is busy processing recent changes - stopping this run early. ` +
+            `${deferred} ${deferred === 1 ? 'page' : 'pages'} left for the next sync.`,
+        )
+        break
+      }
       await emit(`Skipped ${url} - the platform rejected it`)
     }
   }
@@ -83,7 +99,7 @@ export async function syncSource(
     synced: [...known].slice(-5000),
   })
   await emit(added > 0 ? `Sync complete - ${added} pages added` : 'Sync complete - nothing new')
-  return added
+  return { added, deferred }
 }
 
 /** Re-run every watch and flag the ones whose top results changed. */
