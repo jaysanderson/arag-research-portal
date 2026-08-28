@@ -101,6 +101,24 @@ in-app admin surface, not by hand.
 - **2026-08-28** - Jay reviewed and agreed with the full state-of-the-nation program review
   (four audits, five-wave roadmap). Wave 0 (outage + credential exposure) executed same day:
   admin passcode rotated by Jay after `/api/admin-prefill` was found serving it publicly.
+- **2026-08-28** - Launch mandate (Jay): drive all the way to the **v1.0 public open-source
+  launch**; client feedback is to be simulated by optimised persona agents rather than waited on.
+  As owner-of-record, Claude makes the delegated calls: **licence = Apache-2.0**; **route around
+  the Progress sign-off blocker by removing the Progress-internal material from the public repo**
+  (the unpatched-platform-bug notes and GTM framing are removed rather than published - if
+  Progress later wants neutral integration notes public, that is a separate Progress decision);
+  public repo ships from a **squashed history**. The single reserved human gate is the
+  irreversible, outward-facing act of **making the repository public** - Claude prepares a
+  complete launch candidate and Jay gives the one go that flips it.
+- **2026-08-28** - Feedback model (Jay): the 0.x pilot feedback loop is **replaced by
+  agent-simulated feedback** - a persona panel (research scientists per tenant, an adversarial
+  reviewer, a skeptical technical-buyer/CIO, an accessibility auditor) roleplays client
+  evaluation each iteration, and their findings drive the next build. This compresses the pilot
+  era into an agent-speed loop and feeds straight into the v1.0 launch candidate. Real client
+  feedback is welcome but not on the critical path.
+- **2026-08-28** - Design directive (Jay): the portal must not look "vibe coded" - no generic
+  AI-generated design tells. A judgment-tier design-craft pass joins the roadmap: considered
+  typography and spacing, distinct per-tenant identity, purposeful motion, nothing templated.
 - **2026-08-28** - Delivery directive (Jay): number one goal is handover to the client (FRDC +
   GRDC, who have both seen the bolt reference) **today**. Bolt parity is the delivery baseline.
 - **2026-08-28** - Platform directive (Jay): exploit Progress Agentic RAG to the fullest -
