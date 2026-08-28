@@ -142,6 +142,11 @@ in-app admin surface, not by hand.
   never see it) OR docs stored under a reserved label filtered out of tenant retrieval and
   filtered IN for the help widget. Deliverable: written user docs + ingestion + a scoped help
   assistant widget. Larger workstream, tracked for post-hero delivery.
+- **2026-08-28** - Large-screen directive (Jay): the app must use the full screen real estate on
+  large displays (27-inch, maximised windows are common) - a responsive strategy that scales UP,
+  not only down to mobile. Wider containers, more columns, content that breathes on 2xl+ screens,
+  while keeping prose reading columns at a comfortable measure (~65-75ch). Fixed centred max-w-6xl
+  columns that strand half a large monitor are the anti-pattern to remove. Cross-cutting design pass.
 - **2026-08-28** - Design directive (Jay): the portal must not look "vibe coded" - no generic
   AI-generated design tells. A judgment-tier design-craft pass joins the roadmap: considered
   typography and spacing, distinct per-tenant identity, purposeful motion, nothing templated.

@@ -406,7 +406,7 @@ body {
   --rp-ink-3: #6f6c64;
   --rp-line: var(--rp-surface-3);
   --rp-line-2: var(--rp-surface-2);
-  --rp-glass-bg: rgba(255, 255, 255, 0.72);
+  --rp-glass-bg: rgba(255, 255, 255, 0.94);
   --rp-ok-bg: #ecfdf5;
   --rp-ok-ink: #047857;
   --rp-ok-line: #a7f3d0;
@@ -462,7 +462,7 @@ html[data-theme='dark'] {
   --rp-ink-3: #7c828e;
   --rp-line: #272b33;
   --rp-line-2: #1e2228;
-  --rp-glass-bg: rgba(18, 20, 24, 0.72);
+  --rp-glass-bg: rgba(18, 20, 24, 0.94);
   --rp-ok-bg: rgba(16, 185, 129, 0.12);
   --rp-ok-ink: #34d399;
   --rp-ok-line: rgba(16, 185, 129, 0.35);

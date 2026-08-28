@@ -58,6 +58,32 @@ Capture the answers in `docs/VISION.md` as they're decided.
   Actions pipeline gates (typecheck, lint, format, tests, build) then deploys.
   A push that fails the gate never reaches production.
 
+## Operating rules (locked with Jay, 2026-08-28) - these are HARD rules
+See `docs/VISION.md` decisions log and `docs/BACKLOG.md` for the running detail. The essentials:
+
+- **Testing bar - do NOT call UI work "done" or "tested" on gates alone.** `deno task check` +
+  `build:web` are necessary, not sufficient. Every UI change must be VISUALLY verified in a real
+  browser on the live/deployed page: light mode AND dark mode, wide desktop AND ~390px mobile,
+  the change plus the surrounding chrome (header, rails, scroll). Only then is it "done", and say
+  what was visually verified - never claim "tested" for gates-only. Confirm it is actually served
+  (version/cache check) before telling Jay it is live.
+- **Nothing but the best.** No "vibe coded" look, no visual/theme bugs shipped. Translucent
+  surfaces must not let content bleed through (header, tiles); check both themes.
+- **Use the full screen on large displays.** Responsive scales UP (27-inch, maximised) not only
+  down to mobile - wider containers, more columns, content that breathes on 2xl+, prose kept at a
+  readable measure. Fixed centred `max-w-6xl` that strands half a monitor is the anti-pattern.
+- **Exploit Progress Agentic RAG maximally.** Use platform features rather than rebuilding them.
+- **SQLite (`node:sqlite`) for admin state** that cannot/should not live in the knowledge box.
+  This supersedes the earlier no-SQLite rule (JSON stores remain only until the migration).
+- **Search-config isolation is central, not per-request.** Encode label filters in the named
+  stored search configurations (portal-search/portal-ask exclude `documentation`; a docs config
+  includes only `documentation`), not in runtime filter params - so isolation is centrally managed.
+- **Merchandising:** resources display via DA-generated fields (title, hook, summary, key
+  takeaways, stat, year/authors, tags), never raw filenames like `1981-071-DLD.pdf`.
+- **Delivery:** drive to a v1.0 public open-source launch; agent-simulated persona feedback stands
+  in for a human pilot; the ONE reserved human gate is making the repo public. Client handover
+  needs a full functional acceptance sweep (every feature on the real FRDC corpus) all green.
+
 ## Model & orchestration
 Default is **`fable`** (set in `.claude/settings.json`). Fable acts as **product owner and
 orchestrator**: it owns product decisions, contracts (schemas, interfaces, API shape) and review,

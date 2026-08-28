@@ -255,7 +255,7 @@ function Hero({
 
 function StatTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className='rp-glass rp-shadow-md flex flex-col gap-0.5 rounded-[10px] border border-line px-4 py-3'>
+    <div className='rp-shadow-md flex flex-col gap-0.5 rounded-[10px] border border-line bg-surface px-4 py-3'>
       <span className='rp-display text-2xl text-ink'>{value}</span>
       <span className='rp-eyebrow text-ink-3'>{label}</span>
     </div>

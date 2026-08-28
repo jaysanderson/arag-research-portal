@@ -656,22 +656,27 @@ function ResourceViewer(
   }
 }
 
-/** Title, badges, description and actions below the viewer ("description down below"). */
-function DescriptionPanel(
-  { slug, resource, content, topicLabel, organisation }: {
+/**
+ * Top-of-page identity: type/kind badges, the document title, its topic tags,
+ * and the primary Save-to-investigation action - shown above the viewer so the
+ * reader knows what they are looking at, and can act on it, before scrolling.
+ * The title spans the full content width; the actions sit beside it on wide
+ * screens and stack beneath it on narrow ones.
+ */
+function ResourceHeader(
+  { slug, resource, originUrl, topicLabel, organisation }: {
     slug: string
     resource: ResourceSummary
-    content: ResourceContent | undefined
+    originUrl: string | undefined
     topicLabel: (id: string) => string | undefined
     organisation: string
   },
 ) {
-  const originUrl = content?.originUrl
   const year = resource.published ? formatYear(resource.published) : null
   const projectNumber = frdcProjectNumber(resource.title)
 
   return (
-    <article className='rp-card p-5 sm:p-6'>
+    <header className='mt-4'>
       <div className='flex flex-wrap items-center gap-2'>
         <TypeBadge type={resource.type} />
         {resource.kind
@@ -693,28 +698,72 @@ function DescriptionPanel(
           : null}
       </div>
 
-      <h1 className='rp-display mt-3 text-2xl text-ink'>{resource.title}</h1>
-      <p className='mt-3 text-sm leading-relaxed text-ink-2'>{resource.summary}</p>
+      <div className='mt-3 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-8'>
+        <div className='min-w-0'>
+          <h1 className='rp-display text-2xl leading-tight text-ink sm:text-[1.75rem]'>
+            {resource.title}
+          </h1>
+          {resource.topicIds.length > 0
+            ? (
+              <div className='mt-3 flex flex-wrap gap-1.5'>
+                {resource.topicIds.map((topicId) => {
+                  const label = topicLabel(topicId)
+                  if (!label) return null
+                  return (
+                    <Link
+                      key={topicId}
+                      to={`/t/${slug}/library?topics=${encodeURIComponent(topicId)}`}
+                      className='rp-focus rounded-[4px] bg-surface-2 px-2 py-1 text-[11px] font-medium text-ink-2 transition-colors duration-150 hover:text-ink'
+                    >
+                      {label}
+                    </Link>
+                  )
+                })}
+              </div>
+            )
+            : null}
+        </div>
 
-      {resource.topicIds.length > 0
-        ? (
-          <div className='mt-4 flex flex-wrap gap-1.5'>
-            {resource.topicIds.map((topicId) => {
-              const label = topicLabel(topicId)
-              if (!label) return null
-              return (
-                <Link
-                  key={topicId}
-                  to={`/t/${slug}/library?topics=${encodeURIComponent(topicId)}`}
-                  className='rp-focus rounded-[4px] bg-surface-2 px-2 py-1 text-[11px] font-medium text-ink-2 transition-colors duration-150 hover:text-ink'
-                >
-                  {label}
-                </Link>
-              )
-            })}
-          </div>
-        )
-        : null}
+        <div className='flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 lg:justify-end'>
+          <SaveEvidenceButton
+            slug={slug}
+            label='Save to investigation'
+            evidence={{
+              passage: resource.summary,
+              resourceId: resource.id,
+              resourceTitle: resource.title,
+            }}
+          />
+          {originUrl
+            ? (
+              <a
+                href={originUrl}
+                target='_blank'
+                rel='noopener noreferrer'
+                className='rp-focus flex items-center gap-1.5 rounded-[4px] text-sm font-medium underline decoration-dotted underline-offset-2'
+                style={{ color: 'var(--rp-accent)' }}
+              >
+                View original source <span aria-hidden='true'>&rarr;</span>
+              </a>
+            )
+            : null}
+        </div>
+      </div>
+    </header>
+  )
+}
+
+/**
+ * The "what is this" reading context shown directly under the viewer,
+ * YouTube-style beneath the video: the document summary and its key facts.
+ * The extracted/authored body lives inside the viewer itself (collapsible for
+ * PDFs, the reading pane for documents), so this panel stays a tight overview.
+ */
+function ResourceContext({ resource }: { resource: ResourceSummary }) {
+  return (
+    <article className='rp-card p-5 sm:p-6' aria-labelledby='summary-heading'>
+      <h2 id='summary-heading' className='rp-eyebrow text-ink-3'>Summary</h2>
+      <p className='mt-2 text-sm leading-relaxed text-ink-2'>{resource.summary}</p>
 
       {resource.keyFacts.length > 0
         ? (
@@ -731,31 +780,6 @@ function DescriptionPanel(
           </div>
         )
         : null}
-
-      <div className='mt-5 flex flex-wrap items-center gap-3 border-t border-line pt-4'>
-        <SaveEvidenceButton
-          slug={slug}
-          label='Save to investigation'
-          evidence={{
-            passage: resource.summary,
-            resourceId: resource.id,
-            resourceTitle: resource.title,
-          }}
-        />
-        {originUrl
-          ? (
-            <a
-              href={originUrl}
-              target='_blank'
-              rel='noopener noreferrer'
-              className='rp-focus flex items-center gap-1.5 rounded-[4px] text-sm font-medium underline decoration-dotted underline-offset-2'
-              style={{ color: 'var(--rp-accent)' }}
-            >
-              View original source <span aria-hidden='true'>&rarr;</span>
-            </a>
-          )
-          : null}
-      </div>
     </article>
   )
 }
@@ -1160,47 +1184,54 @@ export function ResourceDetailPage() {
 
         {!isLoading && !isError && resource
           ? (
-            <div className='grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]'>
-              <div className='min-w-0 space-y-6'>
-                <div className='relative' ref={contentRef} onMouseUp={handleContentMouseUp}>
-                  {contentLoading ? <ViewerSkeleton /> : content
-                    ? (
-                      <div className='rp-card p-4 sm:p-5'>
-                        <ResourceViewer
-                          slug={config.slug}
-                          content={content}
-                          blocks={blocks}
-                          passage={passage}
-                          page={page}
-                          flashIndex={flashIndex}
-                          hasTextMatches={matchIndices.length > 0}
+            <>
+              <ResourceHeader
+                slug={config.slug}
+                resource={resource}
+                originUrl={content?.originUrl}
+                topicLabel={topicLabel}
+                organisation={config.branding.organisation}
+              />
+
+              <div className='mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_368px]'>
+                <div className='min-w-0 space-y-6'>
+                  <div className='relative' ref={contentRef} onMouseUp={handleContentMouseUp}>
+                    {contentLoading ? <ViewerSkeleton /> : content
+                      ? (
+                        <div className='rp-card p-4 sm:p-5'>
+                          <ResourceViewer
+                            slug={config.slug}
+                            content={content}
+                            blocks={blocks}
+                            passage={passage}
+                            page={page}
+                            flashIndex={flashIndex}
+                            hasTextMatches={matchIndices.length > 0}
+                          />
+                        </div>
+                      )
+                      : (
+                        <EmptyState
+                          title='This document cannot be displayed'
+                          description='The full content is unavailable for this resource right now.'
                         />
-                      </div>
-                    )
-                    : (
-                      <EmptyState
-                        title='This document cannot be displayed'
-                        description='The full content is unavailable for this resource right now.'
-                      />
-                    )}
+                      )}
+                  </div>
+
+                  <ResourceContext resource={resource} />
                 </div>
 
-                <DescriptionPanel
-                  slug={config.slug}
-                  resource={resource}
-                  content={content}
-                  topicLabel={topicLabel}
-                  organisation={config.branding.organisation}
-                />
-
-                <DocumentChat slug={config.slug} resource={resource} />
+                <aside className='space-y-5 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-y-auto lg:pr-1'>
+                  <MatchesPanel
+                    indices={matchIndices}
+                    blockTexts={blockTexts}
+                    onJump={jumpToBlock}
+                  />
+                  <DocumentChat slug={config.slug} resource={resource} />
+                  <RecommendationsRail slug={config.slug} resource={resource} />
+                </aside>
               </div>
-
-              <aside className='space-y-5 lg:sticky lg:top-20 lg:self-start'>
-                <RecommendationsRail slug={config.slug} resource={resource} />
-                <MatchesPanel indices={matchIndices} blockTexts={blockTexts} onJump={jumpToBlock} />
-              </aside>
-            </div>
+            </>
           )
           : null}
       </div>

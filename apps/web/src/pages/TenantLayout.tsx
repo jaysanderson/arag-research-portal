@@ -5,7 +5,6 @@ import type { TenantConfig } from '@research-portal/core'
 import { ApiError, getKnowledgeBoxStatus, getTenantConfig } from '../api/client.ts'
 import { KbSwitcher } from '../components/KbSwitcher.tsx'
 import { ThemeToggle } from '../components/ThemeToggle.tsx'
-import { ChatFab } from '../components/ChatFab.tsx'
 import { CommandPalette } from '../components/CommandPalette.tsx'
 
 export type TenantOutletContext = {
@@ -304,8 +303,6 @@ export function TenantLayout() {
       <div key={location.pathname} className='rp-page-enter'>
         <Outlet context={{ config } satisfies TenantOutletContext} />
       </div>
-
-      <ChatFab slug={config.slug} />
 
       {paletteOpen
         ? (

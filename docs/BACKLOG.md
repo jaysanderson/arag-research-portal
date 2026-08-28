@@ -21,14 +21,20 @@ Owner-tracked so nothing drops. Status: DONE (live) | MERGED (deploying) | IN BU
 - GRDC purge-failed endpoint. MERGED/deploying. NEXT: dry-run on gdrc, confirm count, execute.
 
 ## Queued (larger)
-- Merchandising data-augmentation agent (Jay, high value): a DA generator agent configured in
-  Management with a JSON schema that writes per-resource "merchandising" fields, so cards show a
-  real title + summary + scannable fields instead of the raw filename (1981-071-DLD.pdf). Schema:
-  clean title, one-line hook, summary, 3 key takeaways, a standout statistic, year/authors/org,
-  species/region/method tags, doc-type, read length. Then display them on Explore/Library/Search
-  cards and the resource page. PLATFORM RISK: ARAG-DEV.md records the json-output DA generator is
-  buggy (422s) - verify the working path first, do not assume. Starts right after the resource-
-  page redesign lands (shares provider toSummary + card code - sequenced to avoid conflicts).
+- Merchandising / ENRICHMENTS (Jay, high value, expanded 2026-08-28): a DA generator agent with a
+  JSON schema writes structured JSON onto each resource; the app renders that schema PROGRAMMATICALLY
+  (whatever fields the schema defines), replacing raw filenames (1981-071-DLD.pdf) with a real
+  title + summary + scannable fields on cards and the resource page.
+  - **Default research schema** (generic, ships by default): title, summary, key takeaways, quotes
+    of interest - a good default that provides the initial resource summary.
+  - **Enrichments model:** resources carry one or more "enrichments", each = a DA agent + schema +
+    generated JSON, shown as enrichments in the UI. The default schema is the FIRST enrichment.
+  - Users can **choose a different schema** for the default summary, and **create additional DA
+    generation agents** (in Management) to add specific "lenses" on resources - each appears as a
+    further enrichment. Display each enrichment programmatically from its schema.
+  - PLATFORM RISK: ARAG-DEV.md records the json-output DA generator is buggy (422s) - verify the
+    working path first, do not assume. Starts right after the resource-page work lands (shares
+    provider toSummary + card code).
 
 - User documentation stored in a knowledge box + a dedicated help chatbot scoped ONLY to the
   docs, excluded from all normal search/ask. QUEUED - separate help KB approach.
