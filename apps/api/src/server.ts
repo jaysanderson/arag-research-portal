@@ -1,4 +1,5 @@
 import { serveStatic } from 'hono/deno'
+import { readFileSync } from 'node:fs'
 import process from 'node:process'
 import { AragProvider } from '@research-portal/retrieval'
 import { buildApp } from './app.ts'
@@ -38,7 +39,26 @@ const app = buildApp({
 startScheduler(provider, tenants, sources, watches)
 
 // Serve the built SPA (deno task build:web) alongside the API - one origin, no proxy.
+// Cache-bust the entry bundle so a deploy is never masked by a stale copy in the
+// browser: the versioned ?v=<sha> asset URLs change every release, and the HTML
+// itself is served no-cache so it always revalidates and hands out the new URLs.
+const buildSha = process.env.BUILD_SHA ?? 'dev'
+let indexHtml = ''
+try {
+  indexHtml = readFileSync('./apps/web/dist/index.html', 'utf8')
+    .replace('"/app.js"', `"/app.js?v=${buildSha}"`)
+    .replace('"/styles.css"', `"/styles.css?v=${buildSha}"`)
+} catch {
+  // No build present (e.g. a dev server before build:web) - the health check
+  // reports web:false and the catch-all below returns 503.
+  indexHtml = ''
+}
+
 app.use('*', serveStatic({ root: './apps/web/dist' }))
-app.get('*', serveStatic({ path: './apps/web/dist/index.html' }))
+app.get('*', (c) => {
+  if (!indexHtml) return c.text('The web build is not available.', 503)
+  c.header('Cache-Control', 'no-cache')
+  return c.html(indexHtml)
+})
 
 Deno.serve({ port }, app.fetch)
