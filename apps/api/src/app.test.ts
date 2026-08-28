@@ -359,3 +359,98 @@ describe('POST /api/ask-estate', () => {
     expect(payload).toContain('had a problem (HTTP 500)')
   })
 })
+
+describe('rate limiting on anonymous LLM-spend routes', () => {
+  it('429s an EXPENSIVE route (ask) after the configured per-IP limit, with Retry-After', async () => {
+    const app = buildApp({
+      provider: new StubProvider(),
+      tenants: freshTenants(),
+      rateLimitAskPerMin: 2,
+    })
+    const ask = () =>
+      app.request('/api/t/frdc/ask', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'fly-client-ip': '203.0.113.5' },
+        body: JSON.stringify({ query: 'What is known about abalone stock health?' }),
+      })
+
+    expect((await ask()).status).toBe(200)
+    expect((await ask()).status).toBe(200)
+    const third = await ask()
+
+    expect(third.status).toBe(429)
+    expect(await third.json()).toEqual({ error: 'rate_limited' })
+    expect(Number(third.headers.get('retry-after'))).toBeGreaterThan(0)
+  })
+
+  it('isolates the limit per client IP - a different caller is unaffected', async () => {
+    const app = buildApp({
+      provider: new StubProvider(),
+      tenants: freshTenants(),
+      rateLimitAskPerMin: 1,
+    })
+    const askAs = (ip: string) =>
+      app.request('/api/t/frdc/ask', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'fly-client-ip': ip },
+        body: JSON.stringify({ query: 'What is known about abalone stock health?' }),
+      })
+
+    expect((await askAs('203.0.113.1')).status).toBe(200)
+    expect((await askAs('203.0.113.1')).status).toBe(429)
+    expect((await askAs('203.0.113.2')).status).toBe(200)
+  })
+
+  it('applies the ESTATE tier (not the EXPENSIVE tier) to POST /api/ask-estate', async () => {
+    const app = buildApp({
+      provider: new StubProvider(),
+      tenants: freshTenants(),
+      rateLimitAskPerMin: 20,
+      rateLimitEstatePerMin: 1,
+    })
+    const askEstate = () =>
+      app.request('/api/ask-estate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'fly-client-ip': '203.0.113.9' },
+        body: JSON.stringify({ query: 'What is known about abalone stock health?' }),
+      })
+
+    expect((await askEstate()).status).toBe(200)
+    const second = await askEstate()
+    expect(second.status).toBe(429)
+  })
+
+  it('0 disables the EXPENSIVE tier entirely', async () => {
+    const app = buildApp({
+      provider: new StubProvider(),
+      tenants: freshTenants(),
+      rateLimitAskPerMin: 0,
+    })
+    const ask = () =>
+      app.request('/api/t/frdc/ask', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'fly-client-ip': '203.0.113.5' },
+        body: JSON.stringify({ query: 'What is known about abalone stock health?' }),
+      })
+
+    for (let i = 0; i < 25; i++) {
+      expect((await ask()).status).toBe(200)
+    }
+  })
+
+  it('never rate-limits admin routes, even past the EXPENSIVE per-IP limit', async () => {
+    const passcode = 'test-passcode'
+    const app = buildApp({
+      provider: new StubProvider(),
+      tenants: freshTenants(),
+      adminPasscode: passcode,
+      rateLimitAskPerMin: 1,
+    })
+    const headers = { 'x-admin-passcode': passcode, 'fly-client-ip': '203.0.113.5' }
+
+    for (let i = 0; i < 5; i++) {
+      const response = await app.request('/api/admin/overview', { headers })
+      expect(response.status).toBe(200)
+    }
+  })
+})

@@ -37,6 +37,7 @@ import {
 } from './stores.ts'
 import { syncSource } from './scheduler.ts'
 import { implementSuggestion, runInterrogation, SuggestionStore } from './interrogate.ts'
+import { clientIp, rateLimit, SlidingWindowLimiter } from './rate-limit.ts'
 
 const searchQuerySchema = z.object({ q: z.string().min(1) })
 const askBodySchema = z.object({
@@ -245,12 +246,23 @@ export interface BuildAppOptions {
   /** The live provider's management surface; absent in tests. */
   management?: AragProvider
   bindings?: BindingStore
+  /** Source registry; shared with startScheduler in server.ts so a scheduled sync and a
+   *  concurrent HTTP write don't clobber each other. A fresh store when omitted (tests). */
+  sources?: SourceStore
+  /** Watch registry; same sharing rationale as `sources`. */
+  watches?: WatchStore
   zone?: string
   adminPasscode?: string
   /** Where the built SPA lives; overridable in tests. Defaults to ./apps/web/dist. */
   webDistPath?: string
   /** Called after a tenant is rebound so the provider can drop its caches. */
   invalidate?: (slug: string) => void
+  /** Requests/min/IP for the paid-LLM routes (ask, generate, summarize, subqueries, verdicts,
+   *  synthesise). Defaults to env RATE_LIMIT_ASK_PER_MIN, or 20. 0 disables. */
+  rateLimitAskPerMin?: number
+  /** Requests/min/IP for POST /api/ask-estate, which fans one request across every tenant.
+   *  Defaults to env RATE_LIMIT_ESTATE_PER_MIN, or 6. 0 disables. */
+  rateLimitEstatePerMin?: number
 }
 
 export function buildApp(opts: BuildAppOptions): Hono {
@@ -259,12 +271,25 @@ export function buildApp(opts: BuildAppOptions): Hono {
   const tenants = opts.tenants ?? new TenantStore({})
   const insights = new InsightsStore()
   const sessions = new SessionsStore()
-  const watches = new WatchStore()
-  const sources = new SourceStore()
+  const watches = opts.watches ?? new WatchStore()
+  const sources = opts.sources ?? new SourceStore()
   const investigations = new InvestigationStore()
   const suggestions = new SuggestionStore()
   const clientId = (c: Context): string => c.req.header('x-rp-client') ?? 'anonymous'
   const app = new Hono()
+
+  // Rate limiting for the anonymous, paid-LLM routes - see rate-limit.ts.
+  // Publishing this source open publishes the recipe for draining the
+  // connected ARAG account unless every such route is throttled per caller.
+  // Admin routes are passcode-gated separately and are NOT rate limited here.
+  const askPerMin = opts.rateLimitAskPerMin ??
+    Number(process.env.RATE_LIMIT_ASK_PER_MIN ?? 20)
+  const estatePerMin = opts.rateLimitEstatePerMin ??
+    Number(process.env.RATE_LIMIT_ESTATE_PER_MIN ?? 6)
+  const expensiveLimiter = new SlidingWindowLimiter({ limit: askPerMin, windowMs: 60_000 })
+  const estateLimiter = new SlidingWindowLimiter({ limit: estatePerMin, windowMs: 60_000 })
+  const expensiveRateLimit = rateLimit(expensiveLimiter, clientIp)
+  const estateRateLimit = rateLimit(estateLimiter, clientIp)
 
   // Baseline security headers on every response. Deliberately narrow for now:
   // frame-ancestors only, not a full CSP - the app legitimately loads
@@ -538,7 +563,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
     return c.json(await opts.management.graphData(config, primary, secondary))
   })
 
-  app.post('/api/t/:slug/generate', async (c) => {
+  app.post('/api/t/:slug/generate', expensiveRateLimit, async (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
@@ -621,7 +646,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
     }
   })
 
-  app.post('/api/t/:slug/summarize', async (c) => {
+  app.post('/api/t/:slug/summarize', expensiveRateLimit, async (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
@@ -640,7 +665,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
     }
   })
 
-  app.post('/api/t/:slug/subqueries', async (c) => {
+  app.post('/api/t/:slug/subqueries', expensiveRateLimit, async (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
@@ -763,7 +788,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
   })
 
   // Federated ask: stream one grounded answer per enabled portal.
-  app.post('/api/ask-estate', async (c) => {
+  app.post('/api/ask-estate', estateRateLimit, async (c) => {
     const parsed = estateAskSchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return c.json({ error: 'invalid_query' }, 400)
     const targets = tenants.list().map((t) => tenants.get(t.slug)).filter(
@@ -920,7 +945,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
 
   // Synthesis from an investigation's own evidence - no fresh retrieval, so
   // every statement traces to a passage the researcher chose to keep.
-  app.post('/api/t/:slug/investigations/:id/synthesise', async (c) => {
+  app.post('/api/t/:slug/investigations/:id/synthesise', expensiveRateLimit, async (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
@@ -978,7 +1003,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
 
   // Per-source relevance verdicts for an answer's sources - one structured
   // generation covering all passages, so triage is a single scan.
-  app.post('/api/t/:slug/verdicts', async (c) => {
+  app.post('/api/t/:slug/verdicts', expensiveRateLimit, async (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     if (!opts.management) return c.json({ error: 'management_unavailable' }, 503)
@@ -1741,7 +1766,7 @@ export function buildApp(opts: BuildAppOptions): Hono {
     return c.json({ ok: true, status: bindings.status(config.slug), resourceCount })
   })
 
-  app.post('/api/t/:slug/ask', async (c) => {
+  app.post('/api/t/:slug/ask', expensiveRateLimit, async (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     const parsed = askBodySchema.safeParse(await c.req.json().catch(() => null))

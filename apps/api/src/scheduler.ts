@@ -136,13 +136,24 @@ export async function runAutoSyncs(
   }
 }
 
-/** Start the daily upkeep timer; returns a stop function. */
+/**
+ * Start the daily upkeep timer; returns a stop function.
+ *
+ * `sources` and `watches` must be the SAME store instances buildApp uses for
+ * its HTTP routes (POST /watches, the sources admin endpoints), not fresh
+ * ones. Both stores do a whole-file read-modify-write on each mutation,
+ * so a scheduled sync and a concurrent HTTP write against two separate
+ * instances can each read the file before the other's write lands and
+ * silently drop it. Sharing instances doesn't remove that race by itself,
+ * but it keeps both writers serialised through one in-process object
+ * instead of racing through the filesystem via two.
+ */
 export function startScheduler(
   management: AragProvider,
   tenants: TenantStore,
+  sources: SourceStore,
+  watches: WatchStore,
 ): () => void {
-  const sources = new SourceStore()
-  const watches = new WatchStore()
   const run = async () => {
     await runAutoSyncs(management, tenants, sources).catch(() => {})
     await runWatches(management, tenants, watches).catch(() => {})
