@@ -383,7 +383,16 @@ export class AragProvider implements RetrievalProvider {
     }
     const findWithFallback = async (): Promise<FindResponse> => {
       try {
-        return await client.postJson<FindResponse>('/find', body)
+        const first = await client.postJson<FindResponse>('/find', body)
+        // A stored search configuration can exist but be broken - seen live
+        // on admin-connected boxes where the configured find returns zero
+        // for every query while a config-free find works. Zero resources
+        // with a named config attached earns one config-free retry.
+        if (body.search_configuration && Object.keys(first.resources ?? {}).length === 0) {
+          delete body.search_configuration
+          return await client.postJson<FindResponse>('/find', body)
+        }
+        return first
       } catch (err) {
         if (err instanceof AragApiError && err.status >= 400 && err.status < 500) {
           delete body.search_configuration
@@ -1516,6 +1525,19 @@ export class AragProvider implements RetrievalProvider {
             yield { type: 'error', message: `Answer service returned status ${item.code}` }
             return
           }
+        }
+        // A configured ask that retrieved nothing looks exactly like an
+        // off-corpus question - but a broken stored 'portal-ask' config
+        // (seen live on admin-connected boxes) produces the same shape for
+        // EVERY query. Nothing user-visible has streamed in that case, so
+        // shed the named config once and ask again before accepting a
+        // refusal. The deleted key cannot re-trigger this branch.
+        if (
+          sources.length === 0 && !emitted && body.search_configuration &&
+          refusalPossible && fullAnswer.trim() && attempt < MAX_ATTEMPTS
+        ) {
+          delete body.search_configuration
+          continue
         }
         let refused = false
         if (refusalPossible && fullAnswer.trim()) {
