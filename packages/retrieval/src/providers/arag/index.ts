@@ -2,7 +2,6 @@ import type {
   AskEvent,
   CatalogItem,
   CatalogPage,
-  Citation,
   FacetCounts,
   GraphData,
   KbAgent,
@@ -25,6 +24,7 @@ import type {
   SearchOptions,
 } from '../../provider.ts'
 import { AragApiError, type KbBinding, KbClient, ndjson } from './client.ts'
+import { spliceCitationMarkers, stripInlineMarkers } from './citations.ts'
 
 const CATALOG_TTL_MS = 60_000
 /** Catalogue paging: 200 per call, up to 40 calls - 8,000 resources. */
@@ -1323,9 +1323,12 @@ export class AragProvider implements RetrievalProvider {
             'is partial - surface what IS known and be specific. Never reply that there is not ' +
             'enough data, and never refuse, when any relevant context is present. Write clear, ' +
             'well-structured prose with Markdown, in Australian English. Cite evidence at claim ' +
-            'level: after each factual claim, add a bracketed citation number like [1] matching ' +
-            'the order sources first appear in your answer. If a statement is your inference ' +
-            'rather than something the context states, mark it (inference). When the context ' +
+            'level: after each factual claim, add a bracketed marker like [1] to show a citation ' +
+            'belongs there. The number itself does not matter and does not need to be in any ' +
+            'particular order - this application assigns the real, correctly-bound citation ' +
+            "numbers itself from the platform's own source attribution, independently of " +
+            'whatever you write here. If a statement is your inference rather than something the ' +
+            'context states, mark it (inference). When the context ' +
             'contains conflicting, negative or nuanced findings (adverse observations, ' +
             'non-detections, disagreements between studies), state them explicitly with their ' +
             'specifics - a researcher needs the tension, never a smoothed summary.',
@@ -1373,8 +1376,12 @@ export class AragProvider implements RetrievalProvider {
     let refusalPossible = true
     let generating = false
     let emitted = false
-    let citationIndex = 0
-    const cited = new Map<string, Citation>()
+    // Raw citations-map entries accumulate across every `citations` NDJSON
+    // item (the platform can stream them progressively). Binding only runs
+    // once, on the complete map against the complete answer text - see
+    // `spliceCitationMarkers` for why: offsets are only meaningful once both
+    // are final.
+    let citationsMapAccum: Record<string, unknown> = {}
 
     const toSources = (
       retrieved: Record<
@@ -1416,27 +1423,6 @@ export class AragProvider implements RetrievalProvider {
         }
       })
 
-    const emitCitationsFor = (citations: Record<string, unknown>): Citation[] => {
-      const fresh: Citation[] = []
-      for (const key of Object.keys(citations)) {
-        // Keys look like "<rid>/<field-type>/<field-id>/...". Skip DA-generated
-        // fields - the platform can surface them as citation hits (known bug).
-        if (key.includes('/da-')) continue
-        const resourceId = key.split('/')[0]
-        if (!resourceId || cited.has(resourceId)) continue
-        citationIndex += 1
-        const known = byId.get(resourceId) ?? sources.find((s) => s.id === resourceId)
-        const citation: Citation = {
-          index: citationIndex,
-          resourceId,
-          title: known?.title ?? resourceId,
-        }
-        cited.set(resourceId, citation)
-        fresh.push(citation)
-      }
-      return fresh
-    }
-
     // Transient 412/5xx "unknown generative exception" happens before any text
     // streams; retry up to 3 times then, but never after output has started.
     const MAX_ATTEMPTS = 3
@@ -1449,8 +1435,7 @@ export class AragProvider implements RetrievalProvider {
         fullAnswer = ''
         refusalPossible = true
         generating = false
-        citationIndex = 0
-        cited.clear()
+        citationsMapAccum = {}
       }
       try {
         const res = await client.postStream('/ask', body, { 'x-show-consumption': 'true' })
@@ -1492,14 +1477,24 @@ export class AragProvider implements RetrievalProvider {
               }
               refusalPossible = false
               emitted = true
-              yield { type: 'delta', text: fullAnswer }
+              // Transient display only: strip whatever bracket markers the
+              // model has written so far so nothing wrongly-bound is ever
+              // shown mid-stream. The authoritative, correctly-bound text
+              // (spliced from the platform's own char-offsets) replaces this
+              // once generation and citation binding both finish - see the
+              // `done` event below.
+              yield { type: 'delta', text: stripInlineMarkers(fullAnswer) }
               continue
             }
             emitted = true
-            yield { type: 'delta', text: item.text }
+            yield { type: 'delta', text: stripInlineMarkers(item.text) }
           } else if (item.type === 'citations' && item.citations) {
-            for (const citation of emitCitationsFor(item.citations as Record<string, unknown>)) {
-              yield { type: 'citation', citation }
+            // Accumulate only - numbering and marker placement need the
+            // complete map plus the complete answer text, computed once the
+            // stream finishes (see spliceCitationMarkers below).
+            citationsMapAccum = {
+              ...citationsMapAccum,
+              ...(item.citations as Record<string, unknown>),
             }
           } else if (item.type === 'metadata') {
             const tokens = item.tokens as { input?: number; output?: number } | undefined
@@ -1535,6 +1530,26 @@ export class AragProvider implements RetrievalProvider {
               'the Library to see what it covers.',
           }
         }
+        // Deterministic citation binding: only runs once, here, against the
+        // COMPLETE answer text and the COMPLETE accumulated citations map -
+        // both are only meaningful once generation has finished. Emits the
+        // canonical Citation[] (evidence table + click-through targets) and
+        // the corrected answer text (model's own [n] markers stripped,
+        // authoritative markers spliced at the platform's char-offsets) so
+        // every rendering of a given citation index agrees by construction.
+        let boundText: string | undefined
+        if (!refused && fullAnswer.trim()) {
+          const bound = spliceCitationMarkers(
+            fullAnswer,
+            citationsMapAccum,
+            (resourceId) =>
+              byId.get(resourceId)?.title ?? sources.find((s) => s.id === resourceId)?.title,
+          )
+          for (const citation of bound.citations) {
+            yield { type: 'citation', citation }
+          }
+          boundText = bound.text
+        }
         yield { type: 'stage', stage: 'generating', status: 'completed' }
         yield { type: 'stage', stage: 'validating', status: 'started' }
         // REMi trust signal: score the finished answer against the full
@@ -1560,7 +1575,7 @@ export class AragProvider implements RetrievalProvider {
           }
         }
         yield { type: 'stage', stage: 'validating', status: 'completed' }
-        yield { type: 'done', refused }
+        yield { type: 'done', refused, ...(boundText !== undefined ? { text: boundText } : {}) }
         return
       } catch (err) {
         const status = err instanceof AragApiError ? err.status : 0

@@ -1406,7 +1406,19 @@ export function AssistantPage() {
               }))
               break
             case 'done':
-              update((message) => ({ ...message, pending: false, refused: event.refused }))
+              update((message) => ({
+                ...message,
+                // event.text is the deterministically citation-bound answer
+                // (the model's own [n] markers stripped and replaced with
+                // markers spliced at the platform's own char-offsets) - it
+                // replaces the streamed text so the final prose, the
+                // evidence table badges and the click-through targets all
+                // agree on what each [n] means. Falls back to the streamed
+                // text when absent (e.g. a refusal, which carries no citations).
+                text: event.text ?? message.text,
+                pending: false,
+                refused: event.refused,
+              }))
               break
             case 'error':
               update((message) => ({

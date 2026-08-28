@@ -344,6 +344,17 @@ export const AskEventSchema = z.discriminatedUnion('type', [
     type: z.literal('done'),
     /** True when the corpus could not answer and guidance was shown instead. */
     refused: z.boolean().optional(),
+    /**
+     * The complete answer text with deterministic citation binding applied -
+     * the model's own inline `[n]` markers stripped and replaced with
+     * markers spliced at the platform's citation char-offsets, numbered to
+     * match the `citation` events emitted just before this one. Present
+     * whenever citation binding ran (a non-refused answer); the client
+     * should replace its accumulated streamed text with this string so the
+     * final rendered prose, the evidence table and the click-through
+     * targets agree by construction.
+     */
+    text: z.string().optional(),
   }),
   z.object({ type: z.literal('error'), message: z.string() }),
 ])
