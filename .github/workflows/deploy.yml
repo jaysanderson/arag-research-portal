@@ -27,11 +27,20 @@ jobs:
           ESBUILD_VERSION: 0.28.2
           TAILWINDCSS_VERSION: 4.3.3
         run: |
-          curl -fsSL "https://github.com/tailwindlabs/tailwindcss/releases/download/v${TAILWINDCSS_VERSION}/tailwindcss-linux-x64" \
+          curl -fsSL --retry 3 --retry-all-errors \
+            "https://github.com/tailwindlabs/tailwindcss/releases/download/v${TAILWINDCSS_VERSION}/tailwindcss-linux-x64" \
             -o /usr/local/bin/tailwindcss
           chmod +x /usr/local/bin/tailwindcss
-          curl -fsSL "https://unpkg.com/@esbuild/linux-x64@${ESBUILD_VERSION}/bin/esbuild" \
-            -o /usr/local/bin/esbuild
+          # npm registry tarball is the canonical esbuild source; unpkg mirrors
+          # it and stays as a fallback (it 500'd for hours on 2026-08-28).
+          { curl -fsSL --retry 3 --retry-all-errors \
+              "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-${ESBUILD_VERSION}.tgz" \
+              -o /tmp/esbuild.tgz \
+            && tar -xzf /tmp/esbuild.tgz -C /tmp \
+            && sudo mv /tmp/package/bin/esbuild /usr/local/bin/esbuild ; } \
+          || curl -fsSL --retry 3 --retry-all-errors \
+              "https://unpkg.com/@esbuild/linux-x64@${ESBUILD_VERSION}/bin/esbuild" \
+              -o /usr/local/bin/esbuild
           sudo chmod +x /usr/local/bin/esbuild
       - name: Build web
         run: deno task build:web
