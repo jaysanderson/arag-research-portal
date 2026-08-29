@@ -33,6 +33,7 @@ const NAV_ITEMS: { path: string; label: string; end: boolean }[] = [
   { path: '/generate', label: 'Generate', end: false },
   { path: '/assessment', label: 'Assessment', end: false },
   { path: '/graph', label: 'Graph', end: false },
+  { path: '/help', label: 'Help', end: false },
   { path: '/manage', label: 'Manage', end: false },
 ]
 

@@ -119,6 +119,60 @@ export function searchTenantFull(
   return request<SearchResults>(`/api/t/${encodeURIComponent(slug)}/search?${params.toString()}`)
 }
 
+/**
+ * Search the in-app documentation ONLY (the Help section). Scoped server-side
+ * to documentation content; never returns research resources.
+ */
+export function searchDocs(slug: string, query: string): Promise<SearchResults> {
+  const params = new URLSearchParams({ q: query })
+  return request<SearchResults>(
+    `/api/t/${encodeURIComponent(slug)}/docs/search?${params.toString()}`,
+  )
+}
+
+/**
+ * Stream a grounded, cited answer about USING the portal, scoped to the
+ * documentation only. Same event contract as `streamAsk`; aborts via the signal.
+ */
+export async function streamDocsAsk(
+  slug: string,
+  body: { query: string; context?: { author: 'USER' | 'AGENT'; text: string }[] },
+  onEvent: (event: AskEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(`/api/t/${encodeURIComponent(slug)}/docs/ask`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!res.ok || !res.body) {
+    throw new ApiError(res.status, res.statusText || 'The help assistant is unavailable')
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const emit = (frame: string) => {
+    const line = frame.trim()
+    if (!line) return
+    const data = line.startsWith('data: ') ? line.slice('data: '.length) : line
+    try {
+      onEvent(JSON.parse(data) as AskEvent)
+    } catch {
+      // A truncated trailing frame (dropped connection) is not an event.
+    }
+  }
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) emit(frame)
+  }
+  emit(buffer)
+}
+
 export function getCatalog(
   slug: string,
   opts: {
