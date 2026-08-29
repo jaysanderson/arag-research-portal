@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useOutletContext } from 'react-router-dom'
 import type { GenerateKind, ResourceSummary } from '@research-portal/core'
 import { generateArtifact } from '../api/client.ts'
+import { CurrencyNote } from '../components/CurrencyNote.tsx'
 import { EmptyState } from '../components/ui.tsx'
 import { SaveArtefactButton } from '../components/SaveEvidence.tsx'
 import { suggestedTopicChips } from '../lib/generate-suggestions.ts'
@@ -518,6 +519,7 @@ function SourcesRow({ sources }: { sources: ResourceSummary[] }) {
           ))}
         </div>
       )}
+      <CurrencyNote className='mt-3' sources={sources} />
     </div>
   )
 }

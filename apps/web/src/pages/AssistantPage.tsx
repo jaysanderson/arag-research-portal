@@ -21,6 +21,7 @@ import {
   streamAsk,
 } from '../api/client.ts'
 import { citationHref, ContextJourney } from '../components/AnswerStream.tsx'
+import { CurrencyNote } from '../components/CurrencyNote.tsx'
 import {
   type EvidenceSource,
   EvidenceTable,
@@ -854,6 +855,12 @@ function AssistantCard({
                 )
               })}
             </div>
+            <CurrencyNote
+              className='mt-3'
+              sources={message.sources.filter((source) =>
+                message.citations.some((citation) => citation.resourceId === source.id)
+              )}
+            />
           </div>
         )
         : null}

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import type { AskEvent, Citation, ScoredResource } from '@research-portal/core'
 import { ApiError, streamAsk } from '../api/client.ts'
 import { citationHref } from './AnswerStream.tsx'
+import { CurrencyNote } from './CurrencyNote.tsx'
 import { ConfidenceIndicator, type QualityScores } from './QualityGauge.tsx'
 import { ErrorCard, LiveStatus, Skeleton } from './ui.tsx'
 
@@ -367,6 +368,17 @@ export function SearchAnswer({ slug, query, onResult }: SearchAnswerProps) {
                       <p className='mt-3 text-xs text-ink-3'>
                         {citations.length} {citations.length === 1 ? 'source' : 'sources'} cited
                       </p>
+                    )
+                    : null}
+
+                  {status === 'done' && !refused
+                    ? (
+                      <CurrencyNote
+                        className='mt-2'
+                        sources={sources.filter((source) =>
+                          citations.some((citation) => citation.resourceId === source.id)
+                        )}
+                      />
                     )
                     : null}
                 </>
