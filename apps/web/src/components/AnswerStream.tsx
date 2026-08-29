@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import type { AskEvent, Citation, ScoredResource } from '@research-portal/core'
 import { type AskRequest, streamAsk } from '../api/client.ts'
 import { AnswerJourney } from './AnswerJourney.tsx'
+import { CurrencyNote } from './CurrencyNote.tsx'
 import { type QualityScores, TrustSignals } from './QualityGauge.tsx'
 
 type Status = 'idle' | 'streaming' | 'done' | 'error'
@@ -368,6 +369,10 @@ export function AnswerStream({ slug, request, onSources, onRetry }: AnswerStream
             <p className='mt-2 text-xs text-ink-3'>
               {citations.length} {citations.length === 1 ? 'source' : 'sources'} cited
             </p>
+            <CurrencyNote
+              className='mt-2'
+              sources={citedSources.filter((source) => source.citedCount > 0)}
+            />
           </>
         )
         : null}
