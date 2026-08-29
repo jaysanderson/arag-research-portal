@@ -15,7 +15,15 @@
  * This is deliberately a pure function over the sources the retrieval provider
  * already returns - no new coupling to any LLM or vector store. The caller
  * decides which sources count (the ones actually cited / grounded on) and passes
- * them in; this module reads only their published year.
+ * them in.
+ *
+ * YEAR SOURCE: a source's real publication metadata (`published`) is preferred,
+ * but on the FRDC/GRDC corpora that field is usually empty - the year instead
+ * lives in the project code (`sourceName`, e.g. "1975-022-DLD.pdf") and the
+ * merchandised `title` ("Project 1975-022"). So the guard falls back
+ * published -> project code -> title, and reads whichever first yields a
+ * plausible year. Without this fallback the recency signal never fires on the
+ * real corpus (verified on the live FRDC box).
  */
 
 /**
@@ -27,10 +35,23 @@
  */
 export const CURRENCY_CAVEAT_MAX_AGE_YEARS = 8
 
-/** The single field this guard reads: a source's ISO publication date, when known. */
+/**
+ * The fields this guard reads to date a source, in order of preference:
+ * `published` (real metadata), else the project code in `sourceName`, else the
+ * merchandised `title`. All optional - a source that yields none is simply
+ * excluded from the span.
+ */
 export interface CurrencySource {
   /** ISO date the source was published (e.g. "1998" or "1998-06-01"), when known. */
   published?: string
+  /**
+   * The raw source name / project code (e.g. "1975-022-DLD.pdf"), whose leading
+   * digits encode the year on the FRDC/GRDC corpora. Fallback when `published`
+   * is absent.
+   */
+  sourceName?: string
+  /** The merchandised title (e.g. "Project 1975-022"); last-resort year source. */
+  title?: string
 }
 
 export interface CurrencySpan {
@@ -78,6 +99,15 @@ export function yearOf(published: string | undefined): number | undefined {
   return match ? Number(match[1]) : undefined
 }
 
+/**
+ * The best available year for a source: its `published` date, else the year in
+ * its project code (`sourceName`), else the year in its `title`. Returns
+ * undefined when none yields a plausible year.
+ */
+export function sourceYear(source: CurrencySource): number | undefined {
+  return yearOf(source.published) ?? yearOf(source.sourceName) ?? yearOf(source.title)
+}
+
 /** The recency line copy for a computed span (single year vs a range). */
 function recencyLabelFor(span: CurrencySpan): string {
   return span.earliest === span.latest
@@ -106,8 +136,10 @@ export function assessCurrency(
 ): CurrencySignal {
   const years: number[] = []
   for (const source of sources) {
-    const year = yearOf(source.published)
-    if (year !== undefined) years.push(year)
+    const year = sourceYear(source)
+    // Ignore a "year" in the future - it is a spurious number (e.g. a target
+    // year in a title), not a publication date, and would falsely freshen the span.
+    if (year !== undefined && year <= now) years.push(year)
   }
 
   if (years.length === 0) {

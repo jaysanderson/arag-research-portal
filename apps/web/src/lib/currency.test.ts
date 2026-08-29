@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd'
 import { expect } from '@std/expect'
-import { assessCurrency, CURRENCY_CAVEAT_MAX_AGE_YEARS, yearOf } from './currency.ts'
+import { assessCurrency, CURRENCY_CAVEAT_MAX_AGE_YEARS, sourceYear, yearOf } from './currency.ts'
 
 // A fixed "now" so the age-threshold boundary is deterministic.
 const NOW = 2026
@@ -34,6 +34,31 @@ describe('yearOf', () => {
   it('does not treat a bare project code as a year', () => {
     // A four-digit run glued to more digits is not a standalone year.
     expect(yearOf('19981234')).toBeUndefined()
+  })
+})
+
+describe('sourceYear (layered fallback)', () => {
+  it('prefers real published metadata over the project code and title', () => {
+    expect(
+      sourceYear({
+        published: '2010-01-01',
+        sourceName: '1975-022-DLD.pdf',
+        title: 'Project 1975-022',
+      }),
+    ).toBe(2010)
+  })
+
+  it('falls back to the year in the project code when published is absent', () => {
+    // The FRDC/GRDC case: no published date, year in the project code prefix.
+    expect(sourceYear({ sourceName: '1975-022-DLD.pdf', title: 'Project 1975-022' })).toBe(1975)
+  })
+
+  it('falls back to the title when neither published nor project code carries a year', () => {
+    expect(sourceYear({ sourceName: 'DLD-report.pdf', title: 'Barramundi survey 2003' })).toBe(2003)
+  })
+
+  it('is undefined when no field yields a plausible year', () => {
+    expect(sourceYear({ sourceName: 'report.pdf', title: 'Barramundi survey' })).toBeUndefined()
   })
 })
 
@@ -139,6 +164,34 @@ describe('assessCurrency', () => {
       const result = assessCurrency([{ published: '1990' }, {}], NOW)
       expect(result.showCaveat).toBe(true)
       expect(result.caveatText).toContain('up to 1990')
+    })
+  })
+
+  describe('real-corpus shape (year only in project code / title)', () => {
+    it('builds the span from FRDC-style sources that have no published date', () => {
+      // Exactly the live FRDC case that first rendered nothing: empty published,
+      // year in the project code.
+      const result = assessCurrency(
+        [
+          { sourceName: '1975-022-DLD.pdf', title: 'Project 1975-022' },
+          { sourceName: '2003-051-DLD.pdf', title: 'Project 2003-051' },
+        ],
+        NOW,
+      )
+      expect(result.span).toEqual({ earliest: 1975, latest: 2003 })
+      expect(result.recencyLabel).toBe('Sources: 1975-2003')
+      expect(result.showCaveat).toBe(true)
+      expect(result.caveatText).toContain('up to 2003')
+    })
+
+    it('ignores an implausible future year (e.g. a target year in a title)', () => {
+      const result = assessCurrency(
+        [{ title: 'Project 1998-014' }, { title: 'Aquaculture 2050 strategy targets' }],
+        NOW,
+      )
+      // 2050 is in the future, so it must not freshen the span.
+      expect(result.span).toEqual({ earliest: 1998, latest: 1998 })
+      expect(result.mostRecentYear).toBe(1998)
     })
   })
 
