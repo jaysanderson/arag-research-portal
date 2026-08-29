@@ -70,6 +70,15 @@ const askBodySchema = z.object({
   depth: z.enum(['default', 'deep']).optional(),
   prequeries: z.string().min(3).array().max(8).optional(),
 })
+/** The Help assistant: a question about using the portal, optional prior turns. */
+const docsAskBodySchema = z.object({
+  query: z.string().min(1),
+  context: z
+    .object({ author: z.enum(['USER', 'AGENT']), text: z.string() })
+    .array()
+    .max(24)
+    .optional(),
+})
 const connectBodySchema = z.object({
   url: z.string().min(12),
   token: z.string().min(20),
@@ -472,6 +481,19 @@ export function buildApp(opts: BuildAppOptions): Hono {
     const kindIds = (c.req.query('kinds') ?? '').split(',').filter(Boolean)
     const results = await provider.search(config, parsed.data.q, { mode, topicIds, kindIds })
     return c.json(merchandiseSearchResults(enrichments, config.slug, results))
+  })
+
+  // Documentation-scoped search (the Help section). Retrieves ONLY the in-app
+  // documentation via the doc-scoped stored config + server-side cross-check;
+  // never touches the research corpus. Not merchandised - doc pages carry no
+  // research enrichments.
+  app.get('/api/t/:slug/docs/search', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const parsed = searchQuerySchema.safeParse({ q: c.req.query('q') })
+    if (!parsed.success) return c.json({ error: 'missing_query' }, 400)
+    const results = await provider.search(config, parsed.data.q, { docScope: true })
+    return c.json(results)
   })
 
   app.get('/api/t/:slug/catalog', async (c) => {
@@ -1732,6 +1754,28 @@ export function buildApp(opts: BuildAppOptions): Hono {
     return c.json({ ok: true, created })
   })
 
+  // Ingest (or update) the in-app documentation into the box as resources
+  // labelled `documentation`. A clean, idempotent admin action the orchestrator
+  // runs once the box is free (it is back-pressured during a corpus reload).
+  // Ensures the label-isolated search configs exist first, so the Help search
+  // and the research exclusion are both wired the moment the docs land. On a
+  // busy box the ingestion returns 503 (ingestion_busy) rather than a bare 500.
+  app.post('/api/admin/t/:slug/docs/ingest', async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const unavailableDi = requireManagement(c)
+    if (unavailableDi) return unavailableDi
+    try {
+      const configs = await management!.ensureSearchConfigs(config).catch(() => [] as string[])
+      const result = await management!.ingestDocumentation(config)
+      return c.json({ ok: true, searchConfigs: configs, ...result })
+    } catch (err) {
+      const busy = ingestionBusyBody(err)
+      if (busy) return c.json(busy, 503)
+      throw err
+    }
+  })
+
   app.get('/api/admin/t/:slug/crawl', async (c) => {
     const config = tenant(c.req.param('slug'))
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
@@ -2149,6 +2193,32 @@ export function buildApp(opts: BuildAppOptions): Hono {
         })
       } catch {
         // insights are best-effort - never fail the answer over them
+      }
+    })
+  })
+
+  // The Help assistant: a grounded, cited answer about USING the portal,
+  // scoped to the in-app documentation only (docScope). It uses the same
+  // streamed ask contract as the research assistant, but never retrieves,
+  // grounds or cites research content - and research ask never sees these docs.
+  // Documentation questions are not logged to the research insights store.
+  app.post('/api/t/:slug/docs/ask', expensiveRateLimit, async (c) => {
+    const config = tenant(c.req.param('slug'))
+    if (!config) return c.json({ error: 'unknown_tenant' }, 404)
+    const parsed = docsAskBodySchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: 'invalid_query' }, 400)
+    return streamSSE(c, async (stream) => {
+      const { query, context } = parsed.data
+      try {
+        for await (
+          const event of provider.ask(config, query, { context, docScope: true })
+        ) {
+          await stream.writeSSE({ data: JSON.stringify(event) })
+        }
+      } catch (err) {
+        await stream.writeSSE({
+          data: JSON.stringify({ type: 'error', message: publicErrorMessage(err) }),
+        })
       }
     })
   })

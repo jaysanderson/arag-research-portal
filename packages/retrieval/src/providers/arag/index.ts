@@ -16,7 +16,17 @@ import type {
   SearchResults,
   TenantConfig,
 } from '@research-portal/core'
-import { ResourceSummarySchema } from '@research-portal/core'
+import {
+  DOC_PAGES,
+  docPageToMarkdown,
+  docResourceOrigin,
+  docResourceSlug,
+  DOCUMENTATION_LABEL,
+  DOCUMENTATION_LABELSET,
+  isDocOrigin,
+  ResourceSummarySchema,
+} from '@research-portal/core'
+import type { DocPage } from '@research-portal/core'
 import type {
   AskOptions,
   CatalogOptions,
@@ -360,6 +370,9 @@ interface RawResource {
   }
   extra?: { metadata?: PortalMetadata }
   metadata?: { status?: string }
+  /** Resource slug and origin - the documentation cross-check reads both. */
+  slug?: string
+  origin?: { url?: string }
 }
 
 /**
@@ -385,6 +398,67 @@ function classificationLabels(raw: RawResource, labelset: string): string[] {
     if (c.labelset === labelset && c.label && !c.cancelled_by_user) labels.add(c.label)
   }
   return [...labels]
+}
+
+// ---------------------------------------------------------------------------
+// Documentation isolation - the CENTRAL search-config isolation contract (see
+// packages/retrieval/CLAUDE.md). The named stored configs carry the label
+// filter; these pure helpers build the exact filter shapes and identify a
+// documentation resource for the server-side cross-check that guarantees
+// isolation even if the platform's stored `filter_expression` misbehaves.
+// ---------------------------------------------------------------------------
+
+/** Stored search-configuration names, one per surface. */
+export const SEARCH_CONFIG_RESEARCH_FIND = 'portal-search'
+export const SEARCH_CONFIG_RESEARCH_ASK = 'portal-ask'
+export const SEARCH_CONFIG_DOC_FIND = 'portal-doc-search'
+export const SEARCH_CONFIG_DOC_ASK = 'portal-doc-ask'
+
+/**
+ * A single-label field filter in the platform's `filter_expression` grammar.
+ * On `/find` and `/ask` the expression is keyed under `field` (it is `resource`
+ * on `/catalog` - see docs/ARAG-DEV.md). A label field predicate is
+ * `{ prop: 'label', labelset, label }`, combinable with `and`/`or`/`not`.
+ *
+ * NOTE FOR DEPLOY: this exact `filter_expression` shape could not be verified
+ * against the live platform from this worktree. The stored config is the
+ * primary isolation mechanism, but the server-side cross-check below
+ * (`isDocumentationResource` + the filtering in `search`/`ask`) is authoritative
+ * and holds even if this shape is wrong - so isolation does not depend on it.
+ */
+export function labelFieldExpression(): {
+  prop: 'label'
+  labelset: string
+  label: string
+} {
+  return { prop: 'label', labelset: DOCUMENTATION_LABELSET, label: DOCUMENTATION_LABEL }
+}
+
+/** filter_expression EXCLUDING documentation - for portal-search / portal-ask. */
+export function researchExcludeFilterExpression(): Record<string, unknown> {
+  return { field: { not: labelFieldExpression() } }
+}
+
+/** filter_expression including ONLY documentation - for portal-doc-search / portal-doc-ask. */
+export function docOnlyFilterExpression(): Record<string, unknown> {
+  return { field: labelFieldExpression() }
+}
+
+/**
+ * Whether a retrieved raw resource is a portal documentation page. Checks the
+ * reserved classification label first (the primary signal), then the
+ * app-stamped origin URL and slug (deterministic fallbacks set by
+ * `ingestDocumentation`, present on a retrieval payload's `origin`/`slug` even
+ * when classification labels are not returned). Used by both the doc-scoped
+ * paths (keep only docs) and the research paths (drop any doc that leaked
+ * through the platform's weak `/ask` filtering - see docs/ARAG-DEV.md).
+ */
+export function isDocumentationResource(
+  raw: { slug?: string; origin?: { url?: string } } & RawResource,
+): boolean {
+  if (classificationLabels(raw, DOCUMENTATION_LABELSET).includes(DOCUMENTATION_LABEL)) return true
+  if (isDocOrigin(raw.origin?.url)) return true
+  return typeof raw.slug === 'string' && raw.slug.startsWith('doc-')
 }
 
 /** Shape of a /find response's resources map - shared by `search` and `catalogByQuery`. */
@@ -574,13 +648,14 @@ export class AragProvider implements RetrievalProvider {
     const resources: ResourceSummary[] = []
     for (let page = 0; page < CATALOG_MAX_PAGES; page++) {
       const catalog = await client.getJson<{ resources?: Record<string, RawResource> }>(
-        `/catalog?page_number=${page}&page_size=${CATALOG_PAGE_SIZE}&show=basic&show=extra`,
+        `/catalog?page_number=${page}&page_size=${CATALOG_PAGE_SIZE}&show=basic&show=extra&show=origin`,
       )
       const batch = Object.entries(catalog.resources ?? {})
       for (const [id, raw] of batch) {
         // Failed ingests and junk (hash/bot-challenge) titles never reach a
-        // user-facing list - see isDisplayableResource.
-        if (!isDisplayableResource(raw)) continue
+        // user-facing list - see isDisplayableResource. In-app documentation
+        // is research-invisible: it never appears in the research catalogue.
+        if (!isDisplayableResource(raw) || isDocumentationResource(raw)) continue
         resources.push(this.toSummary(id, raw))
       }
       if (batch.length < CATALOG_PAGE_SIZE) break
@@ -800,8 +875,11 @@ export class AragProvider implements RetrievalProvider {
     }
     // The named search configuration's own features override the request's,
     // which would make the mode switch inert - only attach it for the
-    // default hybrid mode.
-    if (mode === 'hybrid') body.search_configuration = 'portal-search'
+    // default hybrid mode. The documentation surface always uses its own
+    // doc-scoped config (which carries the documentation-only stored filter);
+    // isolation lives in that stored config, not a per-request filter.
+    if (opts.docScope) body.search_configuration = SEARCH_CONFIG_DOC_FIND
+    else if (mode === 'hybrid') body.search_configuration = SEARCH_CONFIG_RESEARCH_FIND
     const filters = [
       ...(opts.topicIds ?? []).map((t) => `/classification.labels/topic/${t}`),
       ...(opts.kindIds ?? []).map((k) => `/classification.labels/kind/${k}`),
@@ -813,10 +891,14 @@ export class AragProvider implements RetrievalProvider {
     ])
     const byId = new Map(all.map((r) => [r.id, r]))
     // Failed ingests and junk (hash/bot-challenge) titles never surface as a
-    // search result - see isDisplayableResource.
-    const entries = Object.entries(found.resources ?? {}).filter(([, raw]) =>
-      isDisplayableResource(raw)
-    )
+    // search result - see isDisplayableResource. Then the documentation
+    // cross-check (authoritative safety net, independent of the stored filter):
+    // a doc-scoped search keeps ONLY documentation; a research search DROPS any
+    // documentation that leaked through (the config could have been shed on a
+    // fallback retry - see findWithFallback).
+    const entries = Object.entries(found.resources ?? {})
+      .filter(([, raw]) => isDisplayableResource(raw))
+      .filter(([, raw]) => isDocumentationResource(raw) === Boolean(opts.docScope))
     // Relevance floor: below this a match is noise, and an off-corpus query
     // should say "no results" honestly rather than surface weak hits.
     const MIN_SCORE = 0.1
@@ -915,6 +997,7 @@ export class AragProvider implements RetrievalProvider {
     params.set('page_size', String(opts.pageSize ?? 24))
     params.append('show', 'basic')
     params.append('show', 'extra')
+    params.append('show', 'origin')
     params.set('sort_field', opts.sortField ?? 'created')
     params.set('sort_order', opts.sortOrder ?? 'desc')
     params.set('hidden', 'false')
@@ -930,8 +1013,11 @@ export class AragProvider implements RetrievalProvider {
       total?: number
     }>(`/catalog?${params.toString()}`)
     // Failed ingests and junk (hash/bot-challenge) titles never surface in
-    // the library - see isDisplayableResource.
-    const entries = Object.entries(raw.resources ?? {}).filter(([, r]) => isDisplayableResource(r))
+    // the library - see isDisplayableResource. In-app documentation is
+    // research-invisible: it never surfaces in the research library.
+    const entries = Object.entries(raw.resources ?? {}).filter(([, r]) =>
+      isDisplayableResource(r) && !isDocumentationResource(r)
+    )
     const items: CatalogItem[] = entries.map(([id, r]) => catalogItemFromRaw(id, r))
     return { items, total: raw.fulltext?.total ?? raw.total ?? items.length }
   }
@@ -960,6 +1046,7 @@ export class AragProvider implements RetrievalProvider {
     params.set('page_size', String(limit))
     params.append('show', 'basic')
     params.append('show', 'extra')
+    params.append('show', 'origin')
     params.set('sort_field', 'created')
     params.set('sort_order', 'desc')
     params.set('hidden', 'false')
@@ -968,9 +1055,9 @@ export class AragProvider implements RetrievalProvider {
       `/catalog?${params.toString()}`,
     )
     // Failed ingests and junk (hash/bot-challenge) titles never surface in a
-    // topic row - see isDisplayableResource.
+    // topic row - see isDisplayableResource. Documentation is research-invisible.
     return Object.entries(raw.resources ?? {})
-      .filter(([, r]) => isDisplayableResource(r))
+      .filter(([, r]) => isDisplayableResource(r) && !isDocumentationResource(r))
       .map(([id, r]) => this.toSummary(id, r))
   }
 
@@ -990,8 +1077,8 @@ export class AragProvider implements RetrievalProvider {
       query,
       features: ['keyword', 'semantic'],
       page_size: 200,
-      show: ['basic', 'extra'],
-      search_configuration: 'portal-search',
+      show: ['basic', 'extra', 'origin'],
+      search_configuration: SEARCH_CONFIG_RESEARCH_FIND,
     }
     const filters = [
       ...(opts.topicIds ?? []).map((t) => `/classification.labels/topic/${t}`),
@@ -1001,7 +1088,7 @@ export class AragProvider implements RetrievalProvider {
     const found = await this.findWithFallback(client, body)
     const MIN_SCORE = 0.1
     const scored = Object.entries(found.resources ?? {})
-      .filter(([, raw]) => isDisplayableResource(raw))
+      .filter(([, raw]) => isDisplayableResource(raw) && !isDocumentationResource(raw))
       .map(([id, raw]) => {
         let best = 0
         for (const field of Object.values(raw.fields ?? {})) {
@@ -1830,19 +1917,64 @@ export class AragProvider implements RetrievalProvider {
    * which is keyword-only prefix matching for short partial queries - not
    * the kind of relevance ranking a semantic reranker is built for, and it
    * is on the typeahead hot path where the platform's own default already
-   * applies with no extra round-trip cost from a stored field. Each entry's
-   * own try/catch below already no-ops if a deployment rejects the shape.
+   * applies with no extra round-trip cost from a stored field.
+   *
+   * DOCUMENTATION ISOLATION (the CENTRAL directive): the research configs
+   * (portal-search / portal-ask) carry a stored `filter_expression` that
+   * EXCLUDES the `documentation` label, and two doc-scoped configs
+   * (portal-doc-search / portal-doc-ask) carry one that includes ONLY it. The
+   * documentation surface selects the doc configs; every other surface uses
+   * the research configs, so isolation is centrally managed rather than passed
+   * per request. A server-side cross-check in `search`/`ask` (see
+   * `isDocumentationResource`) is the authoritative safety net for the
+   * platform's known weak `/ask` filtering.
+   *
+   * Idempotent: a config that already exists is PATCHed to the desired shape
+   * (a plain POST 409s on an existing name and would leave a previously-stored
+   * config without the new filter), so re-running this converges every config
+   * - crucially, it back-fills the exclusion filter onto research configs that
+   * were created before documentation isolation existed.
    */
   async ensureSearchConfigs(tenant: TenantConfig): Promise<string[]> {
     const client = this.client(tenant)
+    const researchExclude = researchExcludeFilterExpression()
+    const docOnly = docOnlyFilterExpression()
     const desired: Record<string, unknown> = {
-      'portal-search': {
+      [SEARCH_CONFIG_RESEARCH_FIND]: {
         kind: 'find',
-        config: { features: ['keyword', 'semantic'], top_k: 20, reranker: 'predict' },
+        config: {
+          features: ['keyword', 'semantic'],
+          top_k: 20,
+          reranker: 'predict',
+          filter_expression: researchExclude,
+        },
       },
-      'portal-ask': {
+      [SEARCH_CONFIG_RESEARCH_ASK]: {
         kind: 'ask',
-        config: { features: ['keyword', 'semantic'], citations: true, reranker: 'predict' },
+        config: {
+          features: ['keyword', 'semantic'],
+          citations: true,
+          reranker: 'predict',
+          filter_expression: researchExclude,
+        },
+      },
+      [SEARCH_CONFIG_DOC_FIND]: {
+        kind: 'find',
+        config: {
+          features: ['keyword', 'semantic'],
+          top_k: 20,
+          reranker: 'predict',
+          filter_expression: docOnly,
+        },
+      },
+      [SEARCH_CONFIG_DOC_ASK]: {
+        kind: 'ask',
+        config: {
+          features: ['keyword', 'semantic'],
+          citations: true,
+          reranker: 'predict',
+          filter_expression: docOnly,
+        },
       },
       'portal-typeahead': {
         kind: 'find',
@@ -1855,10 +1987,92 @@ export class AragProvider implements RetrievalProvider {
         await client.postJson(`/search_configurations/${name}`, body)
         created.push(name)
       } catch {
-        // Exists already or the deployment rejects the shape - not fatal.
+        // Already exists (or the shape was rejected). Converge it in place so a
+        // pre-existing research config picks up the exclusion filter.
+        try {
+          await client.patchJson(`/search_configurations/${name}`, body)
+          created.push(name)
+        } catch {
+          // Deployment rejects the shape entirely - not fatal; the server-side
+          // cross-check still enforces isolation.
+        }
       }
     }
     return created
+  }
+
+  /**
+   * Ingest (or update) the in-app documentation into the knowledge box as
+   * resources labelled `documentation`, so the Help section's scoped search and
+   * assistant can retrieve them. Built as a clean admin action the orchestrator
+   * runs once the box is free (it is back-pressured during a corpus reload), NOT
+   * on the request path.
+   *
+   * Every page becomes one text resource carrying:
+   *  - the `content-type/documentation` classification label (the primary
+   *    isolation signal the stored filters key on),
+   *  - a stable slug `doc-<pageId>` and origin `portal-doc:<pageId>` (the
+   *    deterministic signals the server-side cross-check trusts),
+   *  - the page rendered to Markdown as the field body.
+   *
+   * Idempotent by page id: a first run creates the resources; a re-run finds
+   * each by slug and PATCHes it in place, so editing the docs and re-running
+   * updates rather than duplicating. Honours the platform's ingestion
+   * back-pressure with the same bounded retry as the other write paths.
+   */
+  async ingestDocumentation(
+    tenant: TenantConfig,
+    pages: DocPage[] = DOC_PAGES,
+  ): Promise<{ created: string[]; updated: string[]; failed: { id: string; error: string }[] }> {
+    const client = this.client(tenant)
+    const created: string[] = []
+    const updated: string[] = []
+    const failed: { id: string; error: string }[] = []
+    const classifications = [{ labelset: DOCUMENTATION_LABELSET, label: DOCUMENTATION_LABEL }]
+    for (const page of pages) {
+      const slug = docResourceSlug(page.id)
+      const markdown = docPageToMarkdown(page)
+      const createBody = {
+        title: page.title,
+        slug,
+        icon: 'text/plain',
+        origin: { url: docResourceOrigin(page.id) },
+        texts: { body: { body: markdown, format: 'MARKDOWN' } },
+        usermetadata: { classifications },
+      }
+      try {
+        await withBackpressureRetry(() => client.postJson('/resources', createBody))
+        created.push(page.id)
+        continue
+      } catch (err) {
+        // A slug clash (or another write conflict) means the page already
+        // exists - update it in place so ingestion is idempotent by page id.
+        const status = err instanceof AragApiError ? err.status : 0
+        const conflict = status === 409 || status === 419 || status === 422
+        if (!conflict) {
+          failed.push({ id: page.id, error: err instanceof Error ? err.message : 'create failed' })
+          continue
+        }
+      }
+      try {
+        const existing = await client.getJson<{ id?: string; uuid?: string }>(`/slug/${slug}`)
+        const id = existing.id ?? existing.uuid
+        if (!id) throw new Error('could not resolve the existing documentation resource id')
+        await withBackpressureRetry(() =>
+          client.patchJson(`/resource/${id}`, {
+            title: page.title,
+            origin: { url: docResourceOrigin(page.id) },
+            texts: { body: { body: markdown, format: 'MARKDOWN' } },
+            usermetadata: { classifications },
+          })
+        )
+        updated.push(page.id)
+      } catch (err) {
+        failed.push({ id: page.id, error: err instanceof Error ? err.message : 'update failed' })
+      }
+    }
+    this.invalidateCatalogue(tenant.slug)
+    return { created, updated, failed }
   }
 
   /** Entity groups the graph agent has extracted (native knowledge graph). */
@@ -2031,12 +2245,26 @@ export class AragProvider implements RetrievalProvider {
     yield { type: 'stage', stage: 'preprocessing', status: 'completed' }
     yield { type: 'stage', stage: 'retrieval', status: 'started' }
 
+    // A retrieved resource is kept only if its documentation membership matches
+    // the requested scope: the Help assistant (docScope) keeps ONLY
+    // documentation; the research assistant DROPS any documentation that leaked
+    // through the platform's known weak `/ask` filtering (docs/ARAG-DEV.md). The
+    // stored config carries the label filter; this is the authoritative
+    // cross-check that guarantees isolation regardless.
+    const inScope = (raw: { slug?: string; origin?: { url?: string } } & RawResource): boolean =>
+      isDocumentationResource(raw) === Boolean(opts.docScope)
+    // Ids that passed the cross-check this attempt, and whether any excluded
+    // resource appeared in the grounding set - the withhold decision below
+    // refuses an answer grounded ONLY in excluded content.
+    const validSourceIds = new Set<string>()
+    let excludedGroundingSeen = false
+
     const body: Record<string, unknown> = {
       query,
       features: ['keyword', 'semantic'],
       citations: true,
       show: ['basic', 'origin'],
-      search_configuration: 'portal-ask',
+      search_configuration: opts.docScope ? SEARCH_CONFIG_DOC_ASK : SEARCH_CONFIG_RESEARCH_ASK,
       // Cross-encoder reranking of the grounding candidates - verified live
       // (see the reranker note in docs/ARAG-DEV.md and search()'s comment
       // above). Pinned defensively: it is already the platform's default
@@ -2048,20 +2276,29 @@ export class AragProvider implements RetrievalProvider {
       // as a guardrail even when relevant sources were retrieved - override it.
       prompt: {
         system: opts.systemPrompt?.trim() ||
-          `You are a research analyst for ${tenant.branding.organisation}. Always answer the ` +
-            'question using the provided context. Synthesise across sources even when the context ' +
-            'is partial - surface what IS known and be specific. Never reply that there is not ' +
-            'enough data, and never refuse, when any relevant context is present. Write clear, ' +
-            'well-structured prose with Markdown, in Australian English. Cite evidence at claim ' +
-            'level: after each factual claim, add a bracketed marker like [1] to show a citation ' +
-            'belongs there. The number itself does not matter and does not need to be in any ' +
-            'particular order - this application assigns the real, correctly-bound citation ' +
-            "numbers itself from the platform's own source attribution, independently of " +
-            'whatever you write here. If a statement is your inference rather than something the ' +
-            'context states, mark it (inference). When the context ' +
-            'contains conflicting, negative or nuanced findings (adverse observations, ' +
-            'non-detections, disagreements between studies), state them explicitly with their ' +
-            'specifics - a researcher needs the tension, never a smoothed summary.',
+          (opts.docScope
+            ? `You are the help assistant for the ${tenant.branding.productName} research ` +
+              'portal. Answer the user\'s "how do I..." question about using the portal, using ' +
+              'ONLY the provided help documentation as your source. Be clear, concise and ' +
+              'practical, in Australian English, and write well-structured Markdown. Cite the ' +
+              'documentation at claim level with a bracketed marker like [1] after each step or ' +
+              'fact - the application assigns the real citation numbers itself. If the ' +
+              'documentation does not cover the question, say so plainly and suggest where in the ' +
+              'portal to look; never invent a feature that is not described in the documentation.'
+            : `You are a research analyst for ${tenant.branding.organisation}. Always answer the ` +
+              'question using the provided context. Synthesise across sources even when the ' +
+              'context is partial - surface what IS known and be specific. Never reply that there ' +
+              'is not enough data, and never refuse, when any relevant context is present. Write ' +
+              'clear, well-structured prose with Markdown, in Australian English. Cite evidence ' +
+              'at claim level: after each factual claim, add a bracketed marker like [1] to show ' +
+              'a citation belongs there. The number itself does not matter and does not need to ' +
+              'be in any particular order - this application assigns the real, correctly-bound ' +
+              "citation numbers itself from the platform's own source attribution, independently " +
+              'of whatever you write here. If a statement is your inference rather than something ' +
+              'the context states, mark it (inference). When the context ' +
+              'contains conflicting, negative or nuanced findings (adverse observations, ' +
+              'non-detections, disagreements between studies), state them explicitly with their ' +
+              'specifics - a researcher needs the tension, never a smoothed summary.'),
       },
     }
     if (opts.context && opts.context.length > 0) {
@@ -2170,6 +2407,8 @@ export class AragProvider implements RetrievalProvider {
         refusalPossible = true
         generating = false
         citationsMapAccum = {}
+        validSourceIds.clear()
+        excludedGroundingSeen = false
       }
       try {
         const res = await client.postStream('/ask', body, { 'x-show-consumption': 'true' })
@@ -2179,8 +2418,24 @@ export class AragProvider implements RetrievalProvider {
           const item = (line as { item?: { type?: string } & Record<string, unknown> }).item
           if (!item?.type) continue
           if (item.type === 'retrieval') {
-            const results = item.results as { resources?: Record<string, RawResource> } | undefined
-            sources = toSources(results?.resources ?? {})
+            const results = item.results as {
+              resources?: Record<string, RawResource & { slug?: string; origin?: { url?: string } }>
+            } | undefined
+            // Documentation cross-check: keep only resources whose scope
+            // matches (see `inScope`). Excluded resources never reach the
+            // sources, the grounding context or the citations, and their
+            // presence flags a potential isolation breach for the withhold
+            // decision below.
+            const kept: Record<string, RawResource> = {}
+            for (const [id, raw] of Object.entries(results?.resources ?? {})) {
+              if (inScope(raw)) {
+                kept[id] = raw
+                validSourceIds.add(id)
+              } else {
+                excludedGroundingSeen = true
+              }
+            }
+            sources = toSources(kept)
             yield { type: 'sources', resources: sources }
             if (!generating) {
               generating = true
@@ -2299,15 +2554,24 @@ export class AragProvider implements RetrievalProvider {
         // (BUG 3) and the retry gates above always agree with it.
         let refused = false
         let refusalMessage: string | undefined
-        if (isGuardrailRefusal(fullAnswer)) {
-          // The model produced only the guardrail sentence - replace it with
-          // guidance the reader can act on.
+        // Withhold an answer grounded ONLY in excluded content (docs/ARAG-DEV.md:
+        // `/ask` honours the stored filter weakly). If every retrieved grounding
+        // source failed the scope cross-check, the answer stands on content this
+        // surface must not use - refuse rather than present it.
+        const groundedOnlyOnExcluded = excludedGroundingSeen && validSourceIds.size === 0 &&
+          fullAnswer.trim().length > 0
+        if (isGuardrailRefusal(fullAnswer) || groundedOnlyOnExcluded) {
+          // The model produced only the guardrail sentence, or grounded solely
+          // in out-of-scope content - replace it with guidance the reader can
+          // act on, matched to the surface.
           refused = true
           fullAnswer = ''
-          refusalMessage =
-            "This portal's content does not hold enough relevant material to answer this " +
-            'confidently. Try rephrasing the question, narrowing it to a topic, or browsing ' +
-            'the Library to see what it covers.'
+          refusalMessage = opts.docScope
+            ? 'The help documentation does not cover this yet. Try rephrasing your question, or ' +
+              'browse the Help sections for the feature you are after.'
+            : "This portal's content does not hold enough relevant material to answer this " +
+              'confidently. Try rephrasing the question, narrowing it to a topic, or browsing ' +
+              'the Library to see what it covers.'
           yield { type: 'delta', text: refusalMessage }
           // A refusal must never carry the sources/citations retrieved for
           // it - they did not ground an answer, so showing them beside "not
@@ -2340,6 +2604,11 @@ export class AragProvider implements RetrievalProvider {
                 'Untitled resource',
           )
           for (const citation of bound.citations) {
+            // Citation cross-check: never cite a resource that failed the scope
+            // check (the platform can attribute a citation to content the stored
+            // filter should have excluded - docs/ARAG-DEV.md). Partial grounding
+            // keeps the answer with its in-scope citations only.
+            if (!validSourceIds.has(citation.resourceId)) continue
             yield { type: 'citation', citation }
           }
           boundText = bound.text

@@ -17,6 +17,13 @@ export interface SearchOptions {
   /** Labels in the 'kind' labelset to filter by. */
   kindIds?: string[]
   pageSize?: number
+  /**
+   * Scope the search to the in-app documentation ONLY (the Help section).
+   * Selects the documentation-scoped stored search config and cross-checks
+   * results to documentation resources. Default (false) is the research corpus,
+   * which excludes documentation. See packages/retrieval/CLAUDE.md.
+   */
+  docScope?: boolean
 }
 
 export interface AskOptions {
@@ -33,6 +40,14 @@ export interface AskOptions {
   prequeries?: string[]
   /** Also ground on page/table images (needs visual content in the box). */
   images?: boolean
+  /**
+   * Scope the answer to the in-app documentation ONLY (the Help assistant).
+   * Selects the documentation-scoped stored search config and applies the
+   * citation-vs-filter cross-check that withholds any answer grounded outside
+   * the documentation. Default (false) answers from the research corpus, which
+   * excludes documentation. See packages/retrieval/CLAUDE.md.
+   */
+  docScope?: boolean
 }
 
 export interface CatalogOptions {

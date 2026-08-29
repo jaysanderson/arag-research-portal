@@ -694,3 +694,9 @@ export type SearchResults = z.infer<typeof SearchResultsSchema>
 export type Citation = z.infer<typeof CitationSchema>
 export type AskStage = z.infer<typeof AskStageSchema>
 export type AskEvent = z.infer<typeof AskEventSchema>
+
+// ---------------------------------------------------------------------------
+// In-app user documentation (the Help section) + the documentation-isolation
+// contract shared by the web front end and the retrieval provider.
+// ---------------------------------------------------------------------------
+export * from './docs.ts'
