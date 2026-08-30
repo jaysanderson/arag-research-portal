@@ -87,11 +87,28 @@ export async function* analyseTenant(
     label: `Found ${resources.length} indexed ${resources.length === 1 ? 'resource' : 'resources'}`,
   }
 
-  const inventory = resources
-    .map((r, i) => `${i + 1}. ${r.title} - ${r.summary.slice(0, 180)}`)
-    .join('\n')
-  const prompt = `You are configuring a research portal for this knowledge box. Here is the ` +
-    `complete inventory of its ${resources.length} resources:\n\n${inventory}\n\n` +
+  // The design /ask query has a 20,000-char limit, and asking the model to
+  // assign every resource in a single call does not scale (a 1,000+ resource
+  // corpus overflowed it, 422 string_too_long). Design the taxonomy from a
+  // representative, char-bounded sample instead - the full corpus is labelled
+  // separately by the labeller agent (Manage -> Enrichments).
+  const INVENTORY_BUDGET = 14_000
+  const line = (r: { title: string; summary: string }, i: number) =>
+    `${i + 1}. ${r.title} - ${r.summary.slice(0, 180)}`
+  let sample = resources
+  if (resources.reduce((n, r, i) => n + line(r, i).length + 1, 0) > INVENTORY_BUDGET) {
+    // even stride across the whole corpus keeps the sample representative
+    const stride = Math.ceil(resources.length * 90 / INVENTORY_BUDGET)
+    sample = resources.filter((_, i) => i % stride === 0)
+    while (sample.reduce((n, r, i) => n + line(r, i).length + 1, 0) > INVENTORY_BUDGET) sample.pop()
+  }
+  const sampled = sample.length < resources.length
+  const inventory = sample.map(line).join('\n')
+  const prompt = `You are configuring a research portal for this knowledge box. Here is ` +
+    (sampled
+      ? `a representative sample of ${sample.length} of its ${resources.length} resources:`
+      : `the complete inventory of its ${resources.length} resources:`) +
+    `\n\n${inventory}\n\n` +
     `Design the portal configuration: (1) 4 to 8 topics that partition this corpus well, each ` +
     `with a kebab-case id and a short label in Australian English; (2) 3 to 5 "kinds" - a ` +
     `second, orthogonal way of classifying the same resources (for example document genre or ` +
@@ -99,7 +116,7 @@ export async function* analyseTenant(
     `assignment of exactly one topicId and one kindId; (4) 6 suggested questions a researcher ` +
     `would genuinely ask of this corpus; (5) a short search placeholder listing 3 or 4 corpus ` +
     `themes, e.g. "Search x, y, z…". Use only ids you defined. Cover every resource number ` +
-    `from 1 to ${resources.length}.`
+    `from 1 to ${sample.length}.`
 
   yield { type: 'stage', label: 'Designing taxonomy, graph dimensions and questions' }
   const { object } = await management.askStructured(config, ANALYSE_SCHEMA, prompt)
@@ -138,12 +155,15 @@ export async function* analyseTenant(
     }
   }
 
-  yield { type: 'stage', label: 'Labelling every resource' }
+  yield {
+    type: 'stage',
+    label: sampled ? 'Labelling the sampled resources' : 'Labelling every resource',
+  }
   const topicIds = new Set(topics.map((t) => t.id))
   const kindIds = new Set(kinds.map((k) => k.id))
   let labelled = 0
   for (const assignment of design.assignments ?? []) {
-    const resource = resources[assignment.number - 1]
+    const resource = sample[assignment.number - 1]
     if (!resource) continue
     const topicId = slugify(assignment.topicId)
     const kindId = slugify(assignment.kindId)
@@ -160,6 +180,15 @@ export async function* analyseTenant(
         label: `Could not label: ${resource.title.slice(0, 60)}`,
         detail: err instanceof Error ? err.message.slice(0, 120) : 'failed',
       }
+    }
+  }
+
+  if (sampled) {
+    yield {
+      type: 'item',
+      label: `Labelled ${labelled} sampled resources`,
+      detail:
+        `Taxonomy designed from a representative sample - run Enrichments to classify all ${resources.length}`,
     }
   }
 

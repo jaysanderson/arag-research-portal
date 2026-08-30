@@ -283,8 +283,9 @@ function CoverageStrip({ slug, organisation }: { slug: string; organisation: str
         <span key={label}>
           {index > 0 ? (index === kinds.length - 1 ? ' and ' : ', ') : ''}
           <span className='font-medium text-ink'>
-            {count} {prettyLabel(label, organisation).toLowerCase()}
-            {count === 1 ? '' : 's'}
+            {count} {((l) => (count === 1 || l.endsWith('s') ? l : `${l}s`))(
+              prettyLabel(label, organisation).toLowerCase(),
+            )}
           </span>
         </span>
       ))}.
