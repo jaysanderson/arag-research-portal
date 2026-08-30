@@ -672,6 +672,9 @@ function AssistantCard({
   onVerdicts: (verdicts: Record<string, EvidenceVerdictInfo>) => void
 }) {
   const [showPipeline, setShowPipeline] = useState(false)
+  // The sources/evidence block is collapsed by default: the reader chooses to
+  // open it, rather than every answer unfurling a wall of evidence on arrival.
+  const [showEvidence, setShowEvidence] = useState(false)
 
   if (message.error && !message.text.trim()) {
     return (
@@ -818,49 +821,23 @@ function AssistantCard({
         )
         : null}
 
+      {
+        /* Answer quality - kept prominent, directly under the answer. The
+          plain-language confidence headline plus the REMi mini-meters sit
+          together here so the cue to check the evidence lands with the answer,
+          not buried below the sources. */
+      }
       {!message.pending
         ? (
-          <div className='mt-3'>
+          <div className='mt-4 space-y-2.5'>
             <ConfidenceIndicator quality={message.quality} />
-          </div>
-        )
-        : null}
-
-      {message.citations.length > 0
-        ? (
-          <div className='mt-4 border-t border-line pt-3'>
-            <p className='text-xs font-medium text-ink-3'>
-              Sources: {message.citations.length}
-            </p>
-            <div className='mt-2 flex flex-wrap gap-1.5'>
-              {message.citations.map((citation) => {
-                const matchedPassage = message.sources.find((source) =>
-                  source.id === citation.resourceId
-                )?.matchedPassage
-                return (
-                  <Link
-                    key={citation.index}
-                    to={citationHref(slug, citation.resourceId, matchedPassage)}
-                    title={citation.title}
-                    className='rp-chip'
-                  >
-                    <span
-                      className='inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold text-white'
-                      style={{ backgroundColor: 'var(--rp-accent)' }}
-                    >
-                      {citation.index}
-                    </span>
-                    <span className='rp-clamp-2 max-w-[10rem]'>{citation.title}</span>
-                  </Link>
-                )
-              })}
-            </div>
-            <CurrencyNote
-              className='mt-3'
-              sources={message.sources.filter((source) =>
-                message.citations.some((citation) => citation.resourceId === source.id)
-              )}
-            />
+            {message.quality
+              ? (
+                <div className='rounded-[var(--rp-radius)] border border-line bg-surface-2 px-3 py-2.5'>
+                  <TrustSignals quality={message.quality} />
+                </div>
+              )
+              : null}
           </div>
         )
         : null}
@@ -905,67 +882,39 @@ function AssistantCard({
         )
         : null}
 
-      {message.usage
-        ? (
-          <p className='mt-3 text-xs text-ink-3'>
-            {message.usage.inputTokens} in / {message.usage.outputTokens} out tokens
-          </p>
-        )
-        : null}
-
       {isSparselyGrounded && evidenceSources.length > 0
         ? (
           <p className='mt-3 text-xs text-[var(--rp-warn-ink)]'>
-            Parts of this answer go beyond the retrieved passages - check the evidence below before
-            relying on it.
+            Parts of this answer go beyond the retrieved passages - open the evidence below to check
+            it before relying on it.
           </p>
         )
         : null}
 
-      {!message.pending && evidenceSources.length > 0
+      {/* Answer-level actions stay visible next to the quality signal. */}
+      {!message.pending && (message.learningId || question.trim().length > 0)
         ? (
-          <div className='mt-3'>
-            <EvidenceTable
-              slug={slug}
-              question={question}
-              sources={evidenceSources}
-              initialVerdicts={message.verdicts}
-              onVerdicts={onVerdicts}
-              citations={message.citations}
-              anchorPrefix={message.id}
-            />
+          <div className='mt-3 flex flex-wrap items-center gap-3'>
+            <FeedbackControl message={message} onFeedback={onFeedback} />
+            <WatchControl question={question} slug={slug} />
           </div>
         )
         : null}
 
-      {!message.pending && (message.quality || message.learningId || question.trim().length > 0)
-        ? (
-          <div className='mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3'>
-            {message.quality ? <TrustSignals quality={message.quality} /> : <span />}
-            <div className='flex flex-wrap items-center gap-3'>
-              <FeedbackControl message={message} onFeedback={onFeedback} />
-              <WatchControl question={question} slug={slug} />
-            </div>
-          </div>
-        )
-        : null}
-
-      {!message.pending && message.sources.length > 0
-        ? (
-          <div className='mt-4 border-t border-line pt-3'>
-            <ContextJourney slug={slug} sources={message.sources} query={question} />
-          </div>
-        )
-        : null}
-
-      {!message.pending && (message.sources.length > 0 || message.usage || message.quality)
+      {
+        /* Sources and evidence - collapsed by default, opened on the reader's
+          choice. Grouped into clear sections (sources, the evidence table,
+          then the journey/pipeline tools) so the opened panel stays navigable. */
+      }
+      {!message.pending && (message.sources.length > 0 || message.citations.length > 0)
         ? (
           <div className='mt-4 border-t border-line pt-3'>
             <button
               type='button'
-              onClick={() => setShowPipeline((prev) => !prev)}
-              aria-expanded={showPipeline}
-              className='flex items-center gap-1.5 text-xs font-medium text-ink-3 hover:text-ink'
+              onClick={() => setShowEvidence((prev) => !prev)}
+              aria-expanded={showEvidence}
+              aria-controls={`${message.id}-evidence`}
+              className='flex items-center gap-1.5 text-xs font-semibold text-ink-2 hover:text-ink'
             >
               <svg
                 viewBox='0 0 20 20'
@@ -976,21 +925,133 @@ function AssistantCard({
                 strokeLinejoin='round'
                 aria-hidden='true'
                 className={`h-3 w-3 shrink-0 transition-transform duration-150 ${
-                  showPipeline ? 'rotate-90' : ''
+                  showEvidence ? 'rotate-90' : ''
                 }`}
               >
                 <path d='M7 4l6 6-6 6' />
               </svg>
-              {showPipeline ? 'Hide the pipeline' : 'Show the pipeline'}
+              {showEvidence ? 'Hide sources and evidence' : 'Show sources and evidence'}
+              <span className='rounded-[4px] bg-surface-2 px-1.5 py-0.5 text-[10px] tabular-nums text-ink-3'>
+                {message.sources.length || message.citations.length}
+              </span>
             </button>
-            {showPipeline
+
+            {showEvidence
               ? (
-                <div className='mt-3'>
-                  <PipelinePanel
-                    sources={message.sources}
-                    usage={message.usage}
-                    quality={message.quality}
-                  />
+                <div id={`${message.id}-evidence`} className='mt-3 space-y-5'>
+                  {message.citations.length > 0
+                    ? (
+                      <div>
+                        <p className='text-xs font-semibold uppercase tracking-wide text-ink-3'>
+                          Sources: {message.citations.length}
+                        </p>
+                        <div className='mt-2 flex flex-wrap gap-1.5'>
+                          {message.citations.map((citation) => {
+                            const matchedPassage = message.sources.find((source) =>
+                              source.id === citation.resourceId
+                            )?.matchedPassage
+                            return (
+                              <Link
+                                key={citation.index}
+                                to={citationHref(slug, citation.resourceId, matchedPassage)}
+                                title={citation.title}
+                                className='rp-chip'
+                              >
+                                <span
+                                  className='inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold text-white'
+                                  style={{ backgroundColor: 'var(--rp-accent)' }}
+                                >
+                                  {citation.index}
+                                </span>
+                                <span className='rp-clamp-2 max-w-[10rem]'>{citation.title}</span>
+                              </Link>
+                            )
+                          })}
+                        </div>
+                        <CurrencyNote
+                          className='mt-3'
+                          sources={message.sources.filter((source) =>
+                            message.citations.some((citation) => citation.resourceId === source.id)
+                          )}
+                        />
+                      </div>
+                    )
+                    : null}
+
+                  {evidenceSources.length > 0
+                    ? (
+                      <EvidenceTable
+                        slug={slug}
+                        question={question}
+                        sources={evidenceSources}
+                        initialVerdicts={message.verdicts}
+                        onVerdicts={onVerdicts}
+                        citations={message.citations}
+                        anchorPrefix={message.id}
+                      />
+                    )
+                    : null}
+
+                  {message.sources.length > 0 || message.usage
+                    ? (
+                      <div className='flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-3'>
+                        {message.sources.length > 0
+                          ? (
+                            <ContextJourney
+                              slug={slug}
+                              sources={message.sources}
+                              query={question}
+                            />
+                          )
+                          : null}
+                        {message.sources.length > 0 || message.usage || message.quality
+                          ? (
+                            <button
+                              type='button'
+                              onClick={() =>
+                                setShowPipeline((prev) => !prev)}
+                              aria-expanded={showPipeline}
+                              className='flex items-center gap-1.5 text-xs font-medium text-ink-3 hover:text-ink'
+                            >
+                              <svg
+                                viewBox='0 0 20 20'
+                                fill='none'
+                                stroke='currentColor'
+                                strokeWidth='1.7'
+                                strokeLinecap='round'
+                                strokeLinejoin='round'
+                                aria-hidden='true'
+                                className={`h-3 w-3 shrink-0 transition-transform duration-150 ${
+                                  showPipeline ? 'rotate-90' : ''
+                                }`}
+                              >
+                                <path d='M7 4l6 6-6 6' />
+                              </svg>
+                              {showPipeline ? 'Hide the pipeline' : 'Show the pipeline'}
+                            </button>
+                          )
+                          : null}
+                        {message.usage
+                          ? (
+                            <p className='text-xs text-ink-3'>
+                              {message.usage.inputTokens} in / {message.usage.outputTokens}{' '}
+                              out tokens
+                            </p>
+                          )
+                          : null}
+                      </div>
+                    )
+                    : null}
+
+                  {showPipeline
+                    ? (
+                      <PipelinePanel
+                        sources={message.sources}
+                        usage={message.usage}
+                        quality={message.quality}
+                      />
+                    )
+                    : null}
                 </div>
               )
               : null}
