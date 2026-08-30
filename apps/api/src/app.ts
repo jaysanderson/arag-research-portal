@@ -609,7 +609,13 @@ export function buildApp(opts: BuildAppOptions): Hono {
     if (!config) return c.json({ error: 'unknown_tenant' }, 404)
     if (!opts.management) return c.json({ nodes: [], edges: [] })
     const entity = c.req.query('entity')?.trim()
-    const graph = await opts.management.relationsGraph(config, entity ? { entity, topK: 150 } : {})
+    const includeBuiltin = ['true', '1'].includes(
+      (c.req.query('includeBuiltin') ?? '').trim().toLowerCase(),
+    )
+    const graph = await opts.management.relationsGraph(config, {
+      ...(entity ? { entity, topK: 150 } : {}),
+      ...(includeBuiltin ? { includeBuiltin } : {}),
+    })
     // An empty graph with a registered agent means extraction is in flight -
     // the page should say so rather than telling users to configure it.
     let extracting = false

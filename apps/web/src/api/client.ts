@@ -762,8 +762,15 @@ export interface RelationsGraph {
   edges: { source: string; target: string; label: string }[]
 }
 
-export function getRelationsGraph(slug: string, entity?: string): Promise<RelationsGraph> {
-  const suffix = entity ? `?entity=${encodeURIComponent(entity)}` : ''
+export function getRelationsGraph(
+  slug: string,
+  entity?: string,
+  includeBuiltin?: boolean,
+): Promise<RelationsGraph> {
+  const params = new URLSearchParams()
+  if (entity) params.set('entity', entity)
+  if (includeBuiltin) params.set('includeBuiltin', 'true')
+  const suffix = params.size > 0 ? `?${params.toString()}` : ''
   return request(`/api/t/${encodeURIComponent(slug)}/graph/relations${suffix}`)
 }
 

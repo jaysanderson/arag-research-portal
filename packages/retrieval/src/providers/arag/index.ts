@@ -1523,35 +1523,41 @@ export class AragProvider implements RetrievalProvider {
   /** The REAL extracted knowledge graph: entity-relation-entity paths. */
   async relationsGraph(
     tenant: TenantConfig,
-    opts: { entity?: string; topK?: number } = {},
+    opts: { entity?: string; topK?: number; includeBuiltin?: boolean } = {},
   ): Promise<{
     nodes: { id: string; group: string; weight: number }[]
     edges: { source: string; target: string; label: string }[]
   }> {
     try {
-      // Only agent-extracted relations - the built-in NER pipeline floods the
-      // path index (PERSON/DATE/LOC) and would drown the curated graph. With
-      // an entity, scope to that node's neighbourhood in either direction.
+      // By default, only agent-extracted relations - the built-in NER pipeline
+      // floods the path index (PERSON/DATE/LOC) and would drown the curated
+      // graph. With an entity, scope to that node's neighbourhood in either
+      // direction. `includeBuiltin` is an explicit opt-in (surfaced as a
+      // toggle in the Graph page) that drops the `generated` filter so the
+      // raw NER output comes through too - the label-assignment and
+      // resource-id exclusions below still apply either way.
       const generated = { prop: 'generated', by: 'data-augmentation' }
-      const query = opts.entity
+      const pathFilter = opts.entity
         ? {
-          and: [
-            {
-              prop: 'path',
-              source: { value: opts.entity, match: 'exact' },
-              undirected: true,
-            },
-            generated,
-          ],
+          prop: 'path',
+          source: { value: opts.entity, match: 'exact' },
+          undirected: true,
         }
+        : null
+      const query = opts.includeBuiltin
+        ? pathFilter ?? undefined
+        : pathFilter
+        ? { and: [pathFilter, generated] }
         : generated
+      const body: Record<string, unknown> = { top_k: opts.topK ?? 400 }
+      if (query !== undefined) body.query = query
       const raw = await this.client(tenant).postJson<{
         paths?: {
           source?: { value?: string; group?: string }
           relation?: { label?: string }
           destination?: { value?: string; group?: string }
         }[]
-      }>('/graph', { query, top_k: opts.topK ?? 400 })
+      }>('/graph', body)
       const weight = new Map<string, { group: string; weight: number }>()
       const edges: { source: string; target: string; label: string }[] = []
       const seenEdge = new Set<string>()
@@ -1572,9 +1578,10 @@ export class AragProvider implements RetrievalProvider {
         if (!s || !d || s === d) continue
         const sg = path.source?.group ?? ''
         const dg = path.destination?.group ?? ''
-        // Entity-entity relations only: skip built-in NER groups, label
-        // assignment paths (topic/... targets) and raw resource-id nodes.
-        if (/^[A-Z0-9_]+$/.test(sg) || /^[A-Z0-9_]+$/.test(dg)) continue
+        // Entity-entity relations only: skip built-in NER groups unless the
+        // caller opted in. Label assignment paths (topic/... targets) and raw
+        // resource-id nodes are excluded regardless of mode - never useful.
+        if (!opts.includeBuiltin && (/^[A-Z0-9_]+$/.test(sg) || /^[A-Z0-9_]+$/.test(dg))) continue
         if (s.includes('/') || d.includes('/')) continue
         if (/^[0-9a-f]{32}$/.test(s) || /^[0-9a-f]{32}$/.test(d)) continue
         const label = path.relation?.label ?? 'related to'
