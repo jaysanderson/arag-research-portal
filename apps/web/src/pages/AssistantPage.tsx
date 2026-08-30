@@ -34,6 +34,7 @@ import {
   TrustSignals,
 } from '../components/QualityGauge.tsx'
 import { LiveStatus } from '../components/ui.tsx'
+import { isThinlyGrounded } from '../lib/confidence.ts'
 import type { TenantOutletContext } from './TenantLayout.tsx'
 
 // ---------------------------------------------------------------------------
@@ -691,14 +692,15 @@ function AssistantCard({
     )
   }
 
-  // Only offer the deep re-answer when the original ask was not already deep,
-  // and only for genuinely weak answers - REMi grades some corpora harshly, so
-  // a well-cited answer at 2/5 should not carry an amber warning.
+  // Offer the deep re-answer whenever an answer is genuinely thinly grounded -
+  // the SAME low-confidence signal that paints the red banner (isThinlyGrounded
+  // delegates to assessConfidence), so a low-confidence answer always carries
+  // the offer and a healthy one never does. Gate on the message state too: not
+  // while streaming, not once dismissed, and not on an answer that was already
+  // deep (nothing deeper to escalate to).
   const groundedness = message.quality?.groundedness
-  const citationCount = message.citations?.length ?? 0
-  const isThinlyGrounded = !message.pending && !message.healDismissed && !message.wasDeep &&
-    !message.deepBadge && groundedness !== null && groundedness !== undefined &&
-    (groundedness <= 1 || (groundedness <= 2 && citationCount <= 1))
+  const offerDeepReanswer = !message.pending && !message.healDismissed && !message.wasDeep &&
+    !message.deepBadge && isThinlyGrounded(message.quality)
   const isSparselyGrounded = !message.pending && groundedness !== null &&
     groundedness !== undefined &&
     groundedness <= 2
@@ -862,7 +864,7 @@ function AssistantCard({
         )
         : null}
 
-      {isThinlyGrounded
+      {offerDeepReanswer
         ? (
           <div
             className='mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[var(--rp-radius)] border p-3'
@@ -882,7 +884,7 @@ function AssistantCard({
         )
         : null}
 
-      {isSparselyGrounded && evidenceSources.length > 0
+      {isSparselyGrounded && !offerDeepReanswer && evidenceSources.length > 0
         ? (
           <p className='mt-3 text-xs text-[var(--rp-warn-ink)]'>
             Parts of this answer go beyond the retrieved passages - open the evidence below to check

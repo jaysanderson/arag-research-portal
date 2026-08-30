@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd'
 import { expect } from '@std/expect'
-import { assessConfidence } from './confidence.ts'
+import { assessConfidence, isThinlyGrounded } from './confidence.ts'
 
 describe('assessConfidence', () => {
   describe('unscored', () => {
@@ -129,5 +129,72 @@ describe('assessConfidence', () => {
       })
       expect(result.state).toBe('high')
     })
+  })
+})
+
+describe('isThinlyGrounded', () => {
+  it('offers a deep re-answer for the reported live case: groundedness 2.0 with citations', () => {
+    // The exact miss that motivated the fix: a 2.0/5 answer showed the red
+    // "Low confidence" banner but the old narrow trigger offered no re-answer.
+    expect(
+      isThinlyGrounded({ groundedness: 2, answerRelevance: 4, contextRelevance: 4 }),
+    ).toBe(true)
+  })
+
+  it('offers a deep re-answer whenever the answer is low confidence (weak grounding)', () => {
+    expect(
+      isThinlyGrounded({ groundedness: 1, answerRelevance: 5, contextRelevance: 5 }),
+    ).toBe(true)
+  })
+
+  it('offers a deep re-answer for a moderately-grounded but off-target answer (also low)', () => {
+    expect(
+      isThinlyGrounded({ groundedness: 3, answerRelevance: 1, contextRelevance: 5 }),
+    ).toBe(true)
+  })
+
+  it('offers a deep re-answer just below the 2.5 groundedness boundary', () => {
+    expect(
+      isThinlyGrounded({ groundedness: 2.49, answerRelevance: null, contextRelevance: null }),
+    ).toBe(true)
+  })
+
+  it('does NOT offer on a healthy high-confidence answer', () => {
+    expect(
+      isThinlyGrounded({ groundedness: 5, answerRelevance: 5, contextRelevance: 5 }),
+    ).toBe(false)
+  })
+
+  it('does NOT offer on a moderate-confidence answer', () => {
+    expect(
+      isThinlyGrounded({ groundedness: 3, answerRelevance: null, contextRelevance: null }),
+    ).toBe(false)
+  })
+
+  it('does NOT offer at the 2.5 groundedness boundary (moderate, not low)', () => {
+    expect(
+      isThinlyGrounded({ groundedness: 2.5, answerRelevance: null, contextRelevance: null }),
+    ).toBe(false)
+  })
+
+  it('does NOT offer on an unscored answer (never guess without REMi)', () => {
+    expect(isThinlyGrounded(undefined)).toBe(false)
+    expect(isThinlyGrounded(null)).toBe(false)
+    expect(
+      isThinlyGrounded({ groundedness: null, answerRelevance: 5, contextRelevance: 5 }),
+    ).toBe(false)
+  })
+
+  it('agrees with the low-confidence banner across the board', () => {
+    const cases = [
+      { groundedness: 0, answerRelevance: 0, contextRelevance: 0 },
+      { groundedness: 2, answerRelevance: 4, contextRelevance: 4 },
+      { groundedness: 3, answerRelevance: 5, contextRelevance: 5 },
+      { groundedness: 4, answerRelevance: 5, contextRelevance: 5 },
+      { groundedness: 5, answerRelevance: 2, contextRelevance: 5 },
+    ]
+    for (const quality of cases) {
+      expect(isThinlyGrounded(quality)).toBe(assessConfidence(quality).state === 'low')
+    }
   })
 })
