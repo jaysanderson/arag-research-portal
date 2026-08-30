@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { type EvidenceVerdict, getSourceVerdicts } from '../api/client.ts'
+import { type EvidenceVerdict } from '../api/client.ts'
 import { citationHref } from './AnswerStream.tsx'
 import { SaveEvidenceButton } from './SaveEvidence.tsx'
 
@@ -18,10 +18,14 @@ import { SaveEvidenceButton } from './SaveEvidence.tsx'
 // then a quiet separator, then everything else that was retrieved but never
 // used. Without `citations` the table renders one flat, unordered list (the
 // "closest passages found" case under a refusal, where nothing was cited).
+//
+// The per-source AI verdict (Supports / Not relevant) and its one-line "why"
+// are NOT generated here and are NOT produced on every answer: that judge
+// call costs tokens, so it runs only when the reader opens "Journey through
+// the context". This table is display-only - it shows verdicts the caller has
+// already obtained (`verdicts`), a shimmer while a judgement is in flight
+// (`judging`), and nothing at all in the verdict slot until one exists.
 // ---------------------------------------------------------------------------
-
-/** Cap on how many sources get an AI verdict in one call - keeps the judge call fast. */
-const MAX_JUDGED = 8
 
 export interface EvidenceSource {
   id: string
@@ -83,6 +87,7 @@ function EvidenceRow({
   source,
   verdict,
   judging,
+  verdictsKnown,
   citationIndices,
   citationsKnown,
   anchorId,
@@ -92,6 +97,8 @@ function EvidenceRow({
   source: EvidenceSource
   verdict?: EvidenceVerdictInfo
   judging: boolean
+  /** True once a judgement pass has run for this answer - gates the "Verdict unavailable" fallback. */
+  verdictsKnown: boolean
   /** Inline `[n]` marker(s) in the answer that point at this source, in ascending order. */
   citationIndices: number[]
   /** Whether the caller supplied `citations` at all - without it "not cited" can't be claimed. */
@@ -156,7 +163,9 @@ function EvidenceRow({
                 {verdictLabel(verdict.verdict)}
               </span>
             )
-            : <span className='text-xs text-ink-3'>Verdict unavailable</span>}
+            : verdictsKnown
+            ? <span className='text-xs text-ink-3'>Verdict unavailable</span>
+            : null}
         </div>
       </div>
 
@@ -225,12 +234,14 @@ export interface EvidenceTableProps {
   slug: string
   question: string
   sources: EvidenceSource[]
-  /** Verdicts already known (e.g. reloaded from a saved message) - skips the judge call entirely. */
-  initialVerdicts?: Record<string, EvidenceVerdictInfo>
-  /** Fires once new verdicts arrive from the judge call, so the parent can persist them. */
-  onVerdicts?: (verdicts: Record<string, EvidenceVerdictInfo>) => void
-  /** Set false to never call the judge - used for the "closest passages" view under a refusal. */
-  judge?: boolean
+  /**
+   * Per-source AI verdicts, when they exist. Generated on demand by opening
+   * "Journey through the context" (not on every answer), so the table renders
+   * with no verdict column until the reader asks for one.
+   */
+  verdicts?: Record<string, EvidenceVerdictInfo>
+  /** True while a judgement pass is in flight - rows show a shimmer in the verdict slot. */
+  judging?: boolean
   /** Header label - defaults to "Evidence", overridable for e.g. "Closest passages found". */
   title?: string
   /** The answer's inline `[n]` citations - when supplied, cited sources render first with a matching badge. */
@@ -241,77 +252,25 @@ export interface EvidenceTableProps {
 
 /**
  * Persistent, scannable record of every source behind an answer: title,
- * matched passage, retrieval score, an AI verdict on whether it actually
- * supports the answer, and a one-click save into an investigation. Static -
- * nothing autoplays. When mounted without `initialVerdicts` it asks the
- * platform to judge each source once (capped at eight, only those with a
- * passage) and shows a quiet shimmer per row while that call is in flight;
- * a failed judge call just leaves rows without a verdict rather than erroring.
+ * matched passage, retrieval score, and a one-click save into an
+ * investigation. Static - nothing autoplays, and it never calls the AI judge
+ * itself. The per-source verdict + "why" are token-costing, so they are
+ * produced only when the reader opens "Journey through the context"; this
+ * table just displays whatever `verdicts` the caller has obtained, a shimmer
+ * per row while `judging`, and nothing in the verdict slot until then.
  */
 export function EvidenceTable({
   slug,
   question,
   sources,
-  initialVerdicts,
-  onVerdicts,
-  judge = true,
+  verdicts,
+  judging = false,
   title = 'Evidence',
   citations,
   anchorPrefix,
 }: EvidenceTableProps) {
-  const [verdicts, setVerdicts] = useState<Record<string, EvidenceVerdictInfo>>(
-    initialVerdicts ?? {},
-  )
-  const [judgingIds, setJudgingIds] = useState<Set<string>>(new Set())
-  const onVerdictsRef = useRef(onVerdicts)
-  onVerdictsRef.current = onVerdicts
-
-  useEffect(() => {
-    if (!judge || initialVerdicts !== undefined) return
-    const candidates = sources
-      .filter((source) => (source.passage ?? '').trim().length > 0)
-      .slice(0, MAX_JUDGED)
-    if (candidates.length === 0) return
-
-    let cancelled = false
-    setJudgingIds(new Set(candidates.map((source) => source.id)))
-
-    getSourceVerdicts(
-      slug,
-      question,
-      candidates.map((source) => ({
-        id: source.id,
-        title: source.title,
-        passage: (source.passage ?? '').trim(),
-      })),
-    )
-      .then((result) => {
-        if (cancelled) return
-        const next: Record<string, EvidenceVerdictInfo> = {}
-        for (const item of result.verdicts) {
-          next[item.id] = { verdict: item.verdict, relevance: item.relevance }
-        }
-        setVerdicts((prev) => {
-          const merged = { ...prev, ...next }
-          onVerdictsRef.current?.(merged)
-          return merged
-        })
-      })
-      .catch(() => {
-        // Judging is advisory - a failure just leaves rows without a verdict.
-      })
-      .finally(() => {
-        if (!cancelled) setJudgingIds(new Set())
-      })
-
-    return () => {
-      cancelled = true
-    }
-    // Runs once on mount only: the answer this table describes never changes
-    // under it, so re-running on every prop identity change would re-fire
-    // the judge call for no reason.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const knownVerdicts = verdicts ?? {}
+  const verdictsKnown = Object.keys(knownVerdicts).length > 0
 
   if (sources.length === 0) return null
 
@@ -346,8 +305,9 @@ export function EvidenceTable({
         slug={slug}
         question={question}
         source={source}
-        verdict={verdicts[source.id]}
-        judging={judgingIds.has(source.id) && !verdicts[source.id]}
+        verdict={knownVerdicts[source.id]}
+        judging={judging && !knownVerdicts[source.id]}
+        verdictsKnown={verdictsKnown}
         citationIndices={citationsBySource.get(source.id) ?? []}
         citationsKnown={citationsKnown}
         anchorId={anchorPrefix ? `${anchorPrefix}-src-${source.id}` : undefined}
@@ -361,9 +321,13 @@ export function EvidenceTable({
         <h3 className='text-xs font-semibold uppercase tracking-wide text-ink-3'>
           {title}: {sources.length}
         </h3>
-        <p className='text-[11px] text-ink-3'>
-          AI verdicts are advisory - open a source to judge for yourself.
-        </p>
+        {verdictsKnown || judging
+          ? (
+            <p className='text-[11px] text-ink-3'>
+              AI verdicts are advisory - open a source to judge for yourself.
+            </p>
+          )
+          : null}
       </div>
       <div className='mt-2 space-y-2'>
         {citedSources.map(renderRow)}

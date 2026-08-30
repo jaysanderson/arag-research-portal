@@ -13,6 +13,7 @@ import {
   addWatch,
   deleteServerSession,
   getServerSession,
+  getSourceVerdicts,
   getSubqueries,
   getSuggestedQuestions,
   listServerSessions,
@@ -649,6 +650,9 @@ function WatchControl({ question, slug }: { question: string; slug: string }) {
   )
 }
 
+/** Cap on how many sources get an AI verdict in one judge call - keeps it fast. */
+const MAX_JUDGED = 8
+
 function AssistantCard({
   message,
   slug,
@@ -676,6 +680,41 @@ function AssistantCard({
   // The sources/evidence block is collapsed by default: the reader chooses to
   // open it, rather than every answer unfurling a wall of evidence on arrival.
   const [showEvidence, setShowEvidence] = useState(false)
+  // Per-source AI relevance judgement is token-costing, so it does NOT run on
+  // every answer. It runs once, lazily, when the reader opens "Journey through
+  // the context"; the results fill the evidence table's verdict column and
+  // persist onto the message so a reload never re-judges.
+  const [judging, setJudging] = useState(false)
+
+  async function requestVerdicts() {
+    if (judging) return
+    if (message.verdicts && Object.keys(message.verdicts).length > 0) return
+    const candidates = message.sources
+      .filter((source) => (source.matchedPassage ?? '').trim().length > 0)
+      .slice(0, MAX_JUDGED)
+    if (candidates.length === 0) return
+    setJudging(true)
+    try {
+      const result = await getSourceVerdicts(
+        slug,
+        question,
+        candidates.map((source) => ({
+          id: source.id,
+          title: source.title,
+          passage: (source.matchedPassage ?? '').trim(),
+        })),
+      )
+      const next: Record<string, EvidenceVerdictInfo> = {}
+      for (const item of result.verdicts) {
+        next[item.id] = { verdict: item.verdict, relevance: item.relevance }
+      }
+      onVerdicts(next)
+    } catch {
+      // Judging is advisory - a failure just leaves the table without verdicts.
+    } finally {
+      setJudging(false)
+    }
+  }
 
   if (message.error && !message.text.trim()) {
     return (
@@ -744,7 +783,6 @@ function AssistantCard({
                 slug={slug}
                 question={question}
                 sources={evidenceSources}
-                judge={false}
                 title='Closest passages found'
               />
             </div>
@@ -986,8 +1024,8 @@ function AssistantCard({
                         slug={slug}
                         question={question}
                         sources={evidenceSources}
-                        initialVerdicts={message.verdicts}
-                        onVerdicts={onVerdicts}
+                        verdicts={message.verdicts}
+                        judging={judging}
                         citations={message.citations}
                         anchorPrefix={message.id}
                       />
@@ -1003,6 +1041,7 @@ function AssistantCard({
                               slug={slug}
                               sources={message.sources}
                               query={question}
+                              onOpen={requestVerdicts}
                             />
                           )
                           : null}

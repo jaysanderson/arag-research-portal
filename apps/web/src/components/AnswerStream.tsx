@@ -120,6 +120,13 @@ export interface ContextJourneyProps {
    * callers keep working; the walk still runs without it.
    */
   query?: string
+  /**
+   * Fired when the reader opens the journey. The per-source AI relevance
+   * judgement is token-costing, so callers use this to run it lazily - only
+   * when someone actually asks to walk the context - rather than on every
+   * answer. Optional; the walk itself runs regardless.
+   */
+  onOpen?: () => void
 }
 
 /**
@@ -128,7 +135,7 @@ export interface ContextJourneyProps {
  * Search/Ask, the assistant and the agentic pipeline all offer the same
  * experience from the same one-line call.
  */
-export function ContextJourney({ slug, sources, query = '' }: ContextJourneyProps) {
+export function ContextJourney({ slug, sources, query = '', onOpen }: ContextJourneyProps) {
   const [isOpen, setIsOpen] = useState(false)
 
   const citedIds = useMemo(
@@ -142,7 +149,10 @@ export function ContextJourney({ slug, sources, query = '' }: ContextJourneyProp
     <>
       <button
         type='button'
-        onClick={() => setIsOpen(true)}
+        onClick={() => {
+          onOpen?.()
+          setIsOpen(true)
+        }}
         aria-haspopup='dialog'
         className='rp-chip group h-9 font-semibold sm:h-7'
       >

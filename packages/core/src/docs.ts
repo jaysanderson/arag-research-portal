@@ -206,12 +206,14 @@ export const DOC_PAGES: DocPage[] = [
         body: 'Under each answer you get the full picture of what it stands on:\n\n' +
           '- The **sources** it used, and a note of the years they span (for example "Sources: ' +
           '2016 to 2019"), so you can see how current the material is.\n' +
-          '- An **evidence** list - each source with its matched passage, a relevance score and a ' +
-          'short verdict on how well it supports the question.\n' +
+          '- An **evidence** list - each source with its matched passage and a relevance score.\n' +
           '- **Also retrieved** - relevant passages the answer did not lean on, kept visible so ' +
           'nothing is hidden.\n\n' +
           'Want to see the working? **Journey through the context** walks you through the ' +
-          'passages the answer was built from, and **Show the pipeline** reveals the retrieve, ' +
+          'passages the answer was built from, and adds a short AI verdict on each source - ' +
+          'whether it **Supports**, is **Partial** or is **Not relevant** to your question. ' +
+          '(That judgement is only worked out when you open the journey, so it is never generated ' +
+          'for answers you do not choose to dig into.) **Show the pipeline** reveals the retrieve, ' +
           'write and check stages behind it.\n\n' +
           'When an answer comes back thinly grounded, the Assistant offers to **re-answer it ' +
           'deeply** - re-running your question against the full text of the matching documents ' +
@@ -283,10 +285,14 @@ export const DOC_PAGES: DocPage[] = [
         heading: 'The evidence behind an answer',
         body:
           'Beneath an answer the evidence list shows every source it drew on. Each one carries ' +
-          'its matched passage, a relevance score as a percentage, and a short verdict on how ' +
-          'well it supports the question - for example **Supports**, **Partial** or **Not ' +
-          'relevant** (and occasionally "Verdict unavailable"). The verdicts are advisory, a ' +
-          'quick steer rather than the last word, so open a source to judge it for yourself.\n\n' +
+          'its matched passage and a relevance score as a percentage, so you can weigh the ' +
+          'sources at a glance.\n\n' +
+          "When you want the AI's read on each source, open **Journey through the context**. It " +
+          'adds a short verdict to every source - for example **Supports**, **Partial** or **Not ' +
+          'relevant** - which then appears alongside the evidence. Working this out costs a little ' +
+          'time, so it runs only when you ask for it, never automatically on every answer. The ' +
+          'verdicts are advisory, a quick steer rather than the last word, so open a source to ' +
+          'judge it for yourself.\n\n' +
           'Passages the answer did not rely on are still listed under **Also retrieved**, and you ' +
           'can open any source in place. Together this lets you audit an answer rather than take ' +
           'it on trust.',
