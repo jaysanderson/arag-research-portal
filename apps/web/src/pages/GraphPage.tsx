@@ -1062,6 +1062,8 @@ function NavigatorRail({
   onClose,
   mode,
   selectedId,
+  includeBuiltin,
+  onToggleIncludeBuiltin,
 }: {
   nodes: MapNode[]
   edges: MapEdge[]
@@ -1072,6 +1074,8 @@ function NavigatorRail({
   onClose: () => void
   mode: Mode
   selectedId: string | null
+  includeBuiltin: boolean
+  onToggleIncludeBuiltin: () => void
 }) {
   const top = useMemo(() => [...nodes].sort((a, b) => b.weight - a.weight).slice(0, 10), [nodes])
   return (
@@ -1103,6 +1107,39 @@ function NavigatorRail({
       </div>
 
       <div className='flex-1 overflow-y-auto px-4 py-3'>
+        {mode === 'entity'
+          ? (
+            <div className='mb-4 border-b border-line pb-4'>
+              <button
+                type='button'
+                role='switch'
+                aria-checked={includeBuiltin}
+                onClick={onToggleIncludeBuiltin}
+                className='rp-focus inline-flex items-center gap-2 rounded-[var(--rp-radius)] py-0.5 text-xs font-medium text-ink-2 transition-colors duration-150 hover:text-ink'
+              >
+                <span
+                  aria-hidden='true'
+                  className='relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors duration-150'
+                  style={{
+                    borderColor: includeBuiltin ? 'transparent' : 'var(--rp-line)',
+                    background: includeBuiltin ? 'var(--rp-accent)' : 'var(--rp-surface-2)',
+                  }}
+                >
+                  <span
+                    className='inline-block h-4 w-4 rounded-full bg-white rp-shadow-sm transition-transform duration-150'
+                    style={{ transform: includeBuiltin ? 'translateX(18px)' : 'translateX(2px)' }}
+                  />
+                </span>
+                Include built-in entities
+              </button>
+              <p className='mt-1 text-xs leading-relaxed text-ink-3'>
+                Adds the platform's raw NER output (people, dates, places) alongside the curated
+                relations - noisier, but complete.
+              </p>
+            </div>
+          )
+          : null}
+
         {groupColours.size > 1
           ? (
             <div className='mb-4'>
@@ -1234,6 +1271,7 @@ export function GraphPage() {
   const [noPath, setNoPath] = useState(false)
   const [extraGraph, setExtraGraph] = useState<RelationsGraph | null>(null)
   const [expanding, setExpanding] = useState(false)
+  const [includeBuiltin, setIncludeBuiltin] = useState(false)
   const [railOpen, setRailOpen] = useState<boolean>(() =>
     typeof globalThis.matchMedia === 'function'
       ? globalThis.matchMedia('(min-width: 768px)').matches
@@ -1241,8 +1279,8 @@ export function GraphPage() {
   )
 
   const relationsQuery = useQuery({
-    queryKey: ['relations-graph', slug],
-    queryFn: () => getRelationsGraph(slug),
+    queryKey: ['relations-graph', slug, includeBuiltin],
+    queryFn: () => getRelationsGraph(slug, undefined, includeBuiltin),
     staleTime: 5 * 60 * 1000,
     enabled: mode === 'entity',
   })
@@ -1358,6 +1396,13 @@ export function GraphPage() {
     }
   }, [selectedId])
 
+  // Switching the built-in-entities toggle re-fetches the base graph under
+  // the new filter - any expanded neighbourhood was fetched under the old
+  // one, so drop it rather than mix filtered and unfiltered relations.
+  useEffect(() => {
+    setExtraGraph(null)
+  }, [includeBuiltin])
+
   // Escape clears the current selection.
   useEffect(() => {
     if (!selectedId) return
@@ -1372,7 +1417,7 @@ export function GraphPage() {
     if (!selected) return
     setExpanding(true)
     try {
-      const more = await getRelationsGraph(slug, selected.label)
+      const more = await getRelationsGraph(slug, selected.label, includeBuiltin)
       setExtraGraph((prev) => {
         if (!prev) return more
         return {
@@ -1531,6 +1576,8 @@ export function GraphPage() {
                     onClose={() => setRailOpen(false)}
                     mode={mode}
                     selectedId={selectedId}
+                    includeBuiltin={includeBuiltin}
+                    onToggleIncludeBuiltin={() => setIncludeBuiltin((v) => !v)}
                   />
                 )}
 
