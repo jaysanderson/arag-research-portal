@@ -1544,8 +1544,12 @@ export class AragProvider implements RetrievalProvider {
           undirected: true,
         }
         : null
+      // For "include built-in", scope to the entity's paths when given, else ask
+      // for ALL relation paths. NOTE: the /graph endpoint 422s on a missing or
+      // empty ({}) query, so "everything" must be an explicit { prop: 'path' }
+      // (verified live) - this is the shape that returns built-in NER paths too.
       const query = opts.includeBuiltin
-        ? pathFilter ?? undefined
+        ? pathFilter ?? { prop: 'path' }
         : pathFilter
         ? { and: [pathFilter, generated] }
         : generated

@@ -113,13 +113,14 @@ describe('relationsGraph - includeBuiltin toggle', () => {
     })
   })
 
-  it('includeBuiltin:true drops the generated filter, passing no query when there is no entity', async () => {
+  it('includeBuiltin:true drops the generated filter, asking for all paths when there is no entity', async () => {
     const bodies: unknown[] = []
     const provider = providerCapturingGraphRequests(bodies)
     const result = await provider.relationsGraph(TENANT, { includeBuiltin: true })
 
-    expect(bodies[0]).toEqual({ top_k: 400 })
-    expect((bodies[0] as Record<string, unknown>).query).toBeUndefined()
+    // The /graph endpoint 422s on a missing/empty query, so "everything" is an
+    // explicit all-paths query (verified live).
+    expect(bodies[0]).toEqual({ query: { prop: 'path' }, top_k: 400 })
 
     const ids = result.nodes.map((n) => n.id)
     // Built-in NER relation now included.
