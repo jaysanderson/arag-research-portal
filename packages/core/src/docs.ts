@@ -104,24 +104,26 @@ export const DOC_PAGES: DocPage[] = [
       },
       {
         heading: 'Choosing a portal',
-        body: 'The landing page lists the portals available to you. Each card shows the ' +
-          "organisation's name and branding. Select one to enter its research portal.\n\n" +
-          'You can switch portals at any time from the switcher at the top left of the header. A ' +
-          'portal marked **Demo only** is running on demonstration content; one marked **Not ' +
-          'connected** has no knowledge box bound yet and an administrator needs to connect it ' +
-          'before search and answers work.',
+        body:
+          'You can run more than one portal, each on its own body of research. Switch between ' +
+          'them from the **Knowledge boxes** menu at the top left of the header - open it from the ' +
+          'name and logo in the corner. Each entry shows the organisation it belongs to, and the ' +
+          'one you are in is ticked.\n\n' +
+          'The same menu has **Add a portal** and **Manage portals** for administrators. A portal ' +
+          'with no knowledge box connected yet needs an administrator to connect one before ' +
+          'search and answers will work.',
       },
       {
         heading: 'Finding your way around',
         body: 'The header navigation is the same on every portal:\n\n' +
           '- **Explore** - the home surface: a question box, suggested questions and topic rows.\n' +
-          '- **Search** - find documents, or ask for a cited answer.\n' +
-          '- **Library** - browse and filter the whole corpus.\n' +
+          '- **Search** - find documents fast, or ask for a short cited answer over them.\n' +
+          '- **Library** - browse, sort and filter the whole corpus.\n' +
           '- **Assistant** - a full conversational research assistant with saved sessions.\n' +
-          '- **Investigations** - build up evidence around a research question over time.\n' +
+          '- **Investigations** - gather evidence around a research question over time.\n' +
           '- **Generate** - draft structured artefacts grounded in the corpus.\n' +
-          '- **Assessment** - test your knowledge of the corpus.\n' +
-          '- **Graph** - the knowledge graph of topics and how they connect.\n' +
+          '- **Assessment** - build a knowledge check to test yourself on the corpus.\n' +
+          '- **Graph** - a visual map of the corpus (titled the Knowledge map in the app).\n' +
           '- **Help** - this documentation, with its own scoped search.\n' +
           '- **Manage** - administration (connecting content, taxonomy, enrichments and health).\n\n' +
           'Press **Cmd/Ctrl+K** anywhere to open the command palette and jump straight to a ' +
@@ -133,39 +135,53 @@ export const DOC_PAGES: DocPage[] = [
   {
     id: 'search',
     category: 'Finding answers',
-    title: 'Search: Find versus Ask',
-    summary: 'The two ways to search - retrieve documents (Find) or get a cited answer (Ask).',
+    title: 'Search: results, or a cited answer',
+    summary: 'Two ways to search - Search returns matching documents, Ask AI adds a short cited ' +
+      'answer over them.',
     sections: [
       {
-        heading: 'Two modes, one search box',
-        body: 'Search gives you two distinct jobs from the same box:\n\n' +
-          '- **Find** returns a ranked list of matching documents with the passage that matched, ' +
-          'so you can go straight to the source.\n' +
-          '- **Ask** returns a written, cited answer synthesised across the matching documents, ' +
-          'with the sources it drew on listed beneath it.\n\n' +
-          'Use **Find** when you want to locate documents and read them yourself. Use **Ask** ' +
-          'when you want the portal to read across the corpus and answer the question for you.',
+        heading: 'Two buttons, one search box',
+        body: 'Type your query once, then choose what you want back:\n\n' +
+          '- **Search** returns a ranked list of matching documents, each with the passage that ' +
+          'matched, so you can judge a source and open it. It is fast and answer-free.\n' +
+          '- **Ask AI** reads the top results and writes a short, cited answer over them, with the ' +
+          'sources it drew on listed. Plain search stays instant; only Ask AI spends the extra ' +
+          'moment to synthesise.\n\n' +
+          'Use **Search** to find documents and read them yourself. Use **Ask AI** when you want ' +
+          'the portal to pull the thread together for you. From an Ask AI answer you can ' +
+          '**Continue in Assistant** to keep asking follow-ups.',
       },
       {
-        heading: 'Relevance and honest ranking',
-        body:
-          'Each Find result shows a relevance score calibrated to a comparable 0 to 100 scale, ' +
-          'so a weak match looks weak rather than being inflated to the top. Results below the ' +
-          'noise floor are dropped, and an off-corpus query honestly returns no results rather ' +
-          'than surfacing irrelevant hits.\n\n' +
-          'Reference-list and bibliography matches are kept findable but never allowed to outrank ' +
-          'real body text, and near-duplicate crawled pages are collapsed so you do not see the ' +
-          'same content twice.',
+        heading: 'How matching works',
+        body: 'Three retrieval modes sit under the box:\n\n' +
+          '- **Hybrid** (the default) combines keyword and semantic matching - the best all-round ' +
+          'choice.\n' +
+          '- **Semantic** matches on meaning, for when the right words are hard to pin down.\n' +
+          '- **Keyword** matches on the exact terms, for a known phrase, code or name.\n\n' +
+          'Open **Filters** to narrow by topic or by document kind (for example Report or ' +
+          'Submission). The **Match strength** control switches between **All** results and ' +
+          '**Strong** ones only - a strong match scores 60% or higher on the calibrated relevance ' +
+          'scale.',
       },
       {
-        heading: 'Refining a search',
+        heading: 'Reading results honestly',
         body:
-          'Filter by topic and by document kind to narrow a large result set. You can also change ' +
-          'the retrieval mode between hybrid (the default, combining keyword and semantic ' +
-          'matching), semantic only, or keyword only, when you want more precise control over how ' +
-          'matching works.\n\n' +
-          'Related questions appear alongside results when the corpus has suggested questions that ' +
-          'genuinely overlap with what you searched.',
+          'Each result carries a relevance score on a calibrated 0 to 100 scale, so a weak match ' +
+          'looks weak rather than being inflated to the top. Results below the noise floor are ' +
+          'dropped, and a query the corpus cannot answer honestly returns nothing rather than ' +
+          'surfacing irrelevant hits.\n\n' +
+          'Reference lists and bibliographies stay findable but never outrank real body text, and ' +
+          'near-duplicate pages are collapsed so you do not see the same content twice.',
+      },
+      {
+        heading: 'More you can do',
+        body:
+          '- **Summarise these results** writes a quick synthesis across the current result set.\n' +
+          '- **Watch this search** keeps the query and re-checks it daily - a dot appears next to ' +
+          'the saved search when new results turn up.\n' +
+          '- **People also ask** suggests related questions when the corpus has ones that ' +
+          'genuinely overlap with your search.\n' +
+          '- **Save** on any result adds it as evidence to your current investigation.',
       },
     ],
   },
@@ -178,35 +194,47 @@ export const DOC_PAGES: DocPage[] = [
       {
         heading: 'A grounded, cited conversation',
         body: 'The Assistant answers questions in plain language and grounds every answer in the ' +
-          'corpus. As an answer streams in you see the stages it moves through - preparing the ' +
-          'question, retrieving sources, generating and checking - then the finished answer with ' +
-          'claim-level citations you can click straight through to the source passage.\n\n' +
+          'corpus. As an answer streams in you see the stages it moves through - interpreting the ' +
+          'question, retrieving sources, writing and checking - then the finished answer with ' +
+          'numbered citations you can click straight through to the source passage. It also shows ' +
+          'how it read your question, as an "Interpreted as..." line above the answer.\n\n' +
           'Follow-up questions keep the context of the conversation, so you can drill in without ' +
           'restating everything each time.',
       },
       {
-        heading: 'Sessions and your research trail',
-        body:
-          'Each conversation is saved as a session in the sidebar. Start a new session, rename ' +
-          'one, or reopen an earlier one - your sessions sync so they follow you back. You can ' +
-          '**Export** a session as a Word-compatible document to keep the whole research trail: ' +
-          'questions, answers, sources and the quality scores.',
+        heading: 'Reading the answer',
+        body: 'Under each answer you get the full picture of what it stands on:\n\n' +
+          '- The **sources** it used, and a note of the years they span (for example "Sources: ' +
+          '2016 to 2019"), so you can see how current the material is.\n' +
+          '- An **evidence** list - each source with its matched passage, a relevance score and a ' +
+          'short verdict on how well it supports the question.\n' +
+          '- **Also retrieved** - relevant passages the answer did not lean on, kept visible so ' +
+          'nothing is hidden.\n\n' +
+          'Want to see the working? **Journey through the context** walks you through the ' +
+          'passages the answer was built from, and **Show the pipeline** reveals the retrieve, ' +
+          'write and check stages behind it.',
       },
       {
-        heading: 'Deep research and self-healing answers',
-        body: 'Turn on **Deep research** to have the portal first map the question into focused ' +
+        heading: 'Sessions and your research trail',
+        body: 'Each conversation is saved as a session in the sidebar. Start a **new session**, ' +
+          '**rename** one, **reopen** an earlier one, or **delete** one you no longer need. You ' +
+          'can **Export** a session as a Word-compatible document to keep the whole research ' +
+          'trail: questions, answers, sources and the quality scores.',
+      },
+      {
+        heading: 'Deep research',
+        body: 'Turn on **Deep research** to have the portal first map your question into focused ' +
           'sub-questions, research each of them, and then answer with full-document grounding. ' +
-          'It is slower but more thorough for broad or multi-part questions.\n\n' +
-          'When an answer comes back thinly grounded, the assistant offers to re-answer it deeply ' +
-          'against the full text of the matching documents. Evidence-seeking questions (about ' +
-          'risk, safety, effects or comparisons) are decomposed automatically so decisive ' +
+          'It is slower but more thorough for broad or multi-part questions. Questions about ' +
+          'risk, safety, effects or comparisons are broken down automatically so decisive ' +
           'passages are not missed.',
       },
       {
         heading: 'Feedback and watches',
         body:
-          'Mark an answer helpful or not - the rating feeds the platform learning loop. **Watch** ' +
-          'a question to be flagged in Search when new results turn up for it later.',
+          'Mark an answer **Helpful** or **Not helpful** to signal how well it landed. **Watch ' +
+          'this question** to keep an eye on it - the portal flags it when new results turn up ' +
+          'for it later.',
       },
     ],
   },
@@ -227,12 +255,15 @@ export const DOC_PAGES: DocPage[] = [
       {
         heading: 'The confidence signal',
         body:
-          'Answers are scored for quality using the REMi trust signal across three dimensions - ' +
-          'answer relevance, groundedness and context relevance. This is surfaced as an explicit ' +
-          'per-answer confidence state, not just a coloured meter.\n\n' +
-          'When an answer is weakly grounded you get an unmissable, plain-language warning to ' +
-          'treat it as a lead and verify it against the cited sources. A weak answer is never ' +
-          'presented as authoritative.',
+          'Every answer is scored for quality across three dimensions - how well it answers your ' +
+          'question (relevance), how firmly it is grounded in the sources (groundedness), and how ' +
+          'relevant the retrieved context was. Each is shown as a short, plain score you can read ' +
+          'at a glance, not just a coloured meter.\n\n' +
+          'When the sources only partly support an answer, a banner says so in plain language - ' +
+          'for example "Moderate confidence. The retrieved sources only partly support this ' +
+          'answer, check the citations before relying on it." A weakly supported answer is never ' +
+          'presented as authoritative; the banner is your cue to read the sources before you use ' +
+          'it.',
       },
       {
         heading: 'Honest refusals',
@@ -242,12 +273,16 @@ export const DOC_PAGES: DocPage[] = [
           'bluffing an answer. An honest "no direct evidence found" is a feature, not a failure.',
       },
       {
-        heading: 'The evidence table',
+        heading: 'The evidence behind an answer',
         body:
-          'Beneath an answer, the evidence table lists every source the answer drew on with its ' +
-          'matched passage, page and relevance. You can open any source in place, and the ' +
-          'portal can judge each source for how well it actually supports the question so you can ' +
-          'audit the answer rather than take it on trust.',
+          'Beneath an answer the evidence list shows every source it drew on. Each one carries ' +
+          'its matched passage, a relevance score as a percentage, and a short verdict on how ' +
+          'well it supports the question - for example **Supports**, **Partial** or **Not ' +
+          'relevant** (and occasionally "Verdict unavailable"). The verdicts are advisory, a ' +
+          'quick steer rather than the last word, so open a source to judge it for yourself.\n\n' +
+          'Passages the answer did not rely on are still listed under **Also retrieved**, and you ' +
+          'can open any source in place. Together this lets you audit an answer rather than take ' +
+          'it on trust.',
       },
     ],
   },
@@ -262,15 +297,17 @@ export const DOC_PAGES: DocPage[] = [
         body:
           'Explore is the portal home. A prominent question box lets you ask straight away, and ' +
           'suggested questions - drawn from the corpus itself - give you a starting point when you ' +
-          'are not sure what to ask. Selecting a suggested question hands it to the Assistant.',
+          'are not sure what to ask. Selecting a suggested question hands it to the Assistant.\n\n' +
+          'A row of figures underneath gives you a quick sense of the corpus behind the portal - ' +
+          'how many resources it holds, and its scale in paragraphs, sentences and index size.',
       },
       {
         heading: 'Topic rows',
         body:
           'Below the question box, topic rows show what the corpus covers, each with a selection ' +
           'of representative documents. The topics come from the box classification index, so ' +
-          'they reflect how the content has actually been labelled, not a fixed menu. Follow a ' +
-          'topic to see everything filed under it in the Library.',
+          'they reflect how the content has actually been labelled, not a fixed menu. **See all** ' +
+          'on a row takes you to everything filed under that topic in the Library.',
       },
     ],
   },
@@ -282,25 +319,30 @@ export const DOC_PAGES: DocPage[] = [
     sections: [
       {
         heading: 'Browsing the corpus',
-        body: 'The Library is the full catalogue of the connected content. Browse it, sort it by ' +
-          'when documents were created or modified or by title, and page through large corpora ' +
-          'without waiting on the whole set to load.',
+        body: 'The Library is the full catalogue of the connected content. Sort it by **Newest ' +
+          'added**, **Oldest added** or **Title A-Z**, and page through large corpora without ' +
+          'waiting on the whole set to load. The count at the top right tells you how many ' +
+          'resources the portal is holding.',
       },
       {
         heading: 'Filtering and searching within',
         body:
-          'Filter by topic and by document kind to narrow the catalogue. Type a query to search ' +
-          'within the Library - this uses real retrieval, the same engine as Search, rather than ' +
-          'a weak title match, so it finds documents a plain title filter would miss.',
+          'Use the **Topics** list on the left to narrow the catalogue to one area of research. ' +
+          '(To filter by document kind, such as Report or Submission, use **Search** instead.) ' +
+          'Type a query into **Search within the library** to look inside it - this uses real ' +
+          'retrieval, the same engine as Search, rather than a weak title match, so it finds ' +
+          'documents a plain title filter would miss.',
       },
       {
         heading: 'What you see - and do not',
         body:
-          'Documents are presented with a real, merchandised title and summary rather than a raw ' +
-          'filename or project code. Failed ingests and junk entries (bot-challenge pages, ' +
-          'system files) are hidden from the Library automatically, so what you browse is genuine ' +
-          'content. Administrators still see everything, including the entries that need fixing, ' +
-          'in the management views.',
+          'Documents are meant to read as real research, not raw filenames: once the corpus has ' +
+          'been enriched, each one shows a proper title and summary in place of a code like ' +
+          '`1981-071-DLD.pdf`. Until that enrichment has run, some cards fall back to the project ' +
+          'code and file name.\n\n' +
+          'Failed ingests and junk entries (bot-challenge pages, system files) are hidden from ' +
+          'the Library automatically, so what you browse is genuine content. Administrators still ' +
+          'see everything, including the entries that need fixing, in the management views.',
       },
     ],
   },
@@ -313,45 +355,68 @@ export const DOC_PAGES: DocPage[] = [
       {
         heading: 'The document view',
         body:
-          'Opening a document shows its title, a merchandised summary and key takeaways, and the ' +
-          'source itself in the viewer - a PDF reader, a web page, a video or audio player with ' +
-          'transcript, or the extracted text, depending on what the document is. A citation you ' +
-          'clicked through takes you to the matching passage.',
+          'Opening a document shows its title, a summary and key takeaways where they have been ' +
+          'generated, and the source itself in the viewer - a PDF reader, a web page, a video or ' +
+          'audio player with transcript, or the extracted text, depending on what the document ' +
+          'is. A citation you clicked through takes you to the matching passage. Use **Save to ' +
+          'investigation** to keep the document with an active line of research.',
       },
       {
         heading: 'Chatting with one document',
-        body: 'You can ask questions of a single document. The answer is grounded only on that ' +
-          "document's content, so it is a focused way to interrogate one report without the rest " +
-          'of the corpus getting in the way. The same citations and confidence signals apply.',
+        body: 'The **Chat with this document** panel lets you ask questions of a single ' +
+          "document. The answer is grounded only on that document's content, so it is a focused " +
+          'way to interrogate one report without the rest of the corpus getting in the way. ' +
+          'Suggested questions such as "Summarise the key findings" give you a quick start, and ' +
+          'the same citations and confidence signals apply.',
       },
       {
         heading: 'Related work',
-        body: 'The document view surfaces related documents from the corpus so you can follow a ' +
-          'thread of connected research rather than returning to search each time.',
+        body: 'A **You might also want** rail surfaces related documents from the corpus so you ' +
+          'can follow a thread of connected research rather than returning to search each time.',
       },
     ],
   },
   {
     id: 'knowledge-graph',
     category: 'Exploring the corpus',
-    title: 'The knowledge graph',
-    summary: 'See how topics and entities in the corpus connect.',
+    title: 'The knowledge map',
+    summary: 'A visual map of the corpus - an entity graph of what it is about, and a concept ' +
+      'map of how its themes overlap.',
     sections: [
       {
-        heading: 'A map of the corpus',
+        heading: 'Two views of the corpus',
         body:
-          'The Graph is a visual map of how the corpus hangs together. Topics become weighted ' +
-          'nodes and the connections between them - how often they co-occur across documents - ' +
-          'become the edges. Larger nodes and heavier edges mean more content and stronger ' +
-          'relationships.',
+          'The **Graph** in the header opens the **Knowledge map**, a visual picture of how the ' +
+          'corpus hangs together. It has two tabs:\n\n' +
+          '- **Entity graph** (the default) - the things the research is actually about.\n' +
+          '- **Concept map** - how the broad themes of the corpus overlap.\n\n' +
+          'Both are drawn from the content itself rather than a hand-made diagram, so they ' +
+          'reflect the real structure of the research.',
       },
       {
-        heading: 'Exploring connections',
+        heading: 'The entity graph',
         body:
-          'Open the graph full-screen and move through it to see which areas of research cluster ' +
-          'together and where the bridges between them are. Follow a node to the documents behind ' +
-          'it. The graph is built from the box own classification and knowledge-graph agents, so ' +
-          'it reflects the real structure of the content rather than a hand-drawn diagram.',
+          'The entity graph shows real entities pulled from the documents - species, regions, ' +
+          'programs, habitats, technologies and more - joined by the relationships found between ' +
+          'them. The legend lets you show or hide each type, a **Most connected** list ranks the ' +
+          'entities that appear most, and **Find in the map** jumps to one by name. Click a node ' +
+          'to see the evidence behind it or trace how two entities connect.\n\n' +
+          'By default the map shows the curated entities and relations. Turn on **Include ' +
+          "built-in entities** to add the platform's raw extraction of people, dates and places " +
+          'as well - more complete, but noisier.',
+      },
+      {
+        heading: 'The concept map',
+        body:
+          'The concept map steps back to the level of themes. Each node is a category - a topic ' +
+          'or a document kind - and categories that share more resources sit closer together. ' +
+          'Pick one to see what it pairs with, so you can spot where areas of research meet.',
+      },
+      {
+        heading: 'Getting around',
+        body:
+          'Drag to pan, scroll to zoom, and click a node to explore it. The zoom controls and a ' +
+          'full-screen button sit in the bottom corner if you want to give the map more room.',
       },
     ],
   },
@@ -362,10 +427,17 @@ export const DOC_PAGES: DocPage[] = [
     summary: 'Draft structured artefacts grounded in the corpus.',
     sections: [
       {
-        heading: 'Structured artefacts from real content',
-        body: 'Generate produces structured artefacts - briefings, comparisons and the like - by ' +
-          'having the portal write to a defined shape, grounded in retrieved corpus content. ' +
-          'Suggested topic chips per artefact type help you start.',
+        heading: 'Six kinds of artefact',
+        body: 'Generate writes to a defined shape, grounded in retrieved corpus content, so you ' +
+          'get a structured piece rather than a wall of text. Pick a type, describe what you ' +
+          'want (or use a suggested chip), and generate:\n\n' +
+          '- **Comparison** - a side-by-side matrix scoring options against the dimensions that ' +
+          'matter.\n' +
+          '- **Briefing** - a concise brief on a topic.\n' +
+          '- **Timeline** - how something developed over time.\n' +
+          '- **Pros and cons** - the case for and against.\n' +
+          '- **FAQ** - the common questions and their answers.\n' +
+          '- **Assessment** - a set of questions to test understanding.',
       },
       {
         heading: 'Grounding gate',
@@ -386,14 +458,24 @@ export const DOC_PAGES: DocPage[] = [
     id: 'assessment',
     category: 'Working with the portal',
     title: 'Assessment',
-    summary: 'Test your knowledge of the corpus with a self-assessment quiz.',
+    summary: 'Build a knowledge check on any area of the corpus and test yourself.',
     sections: [
       {
-        heading: 'Self-assessment',
-        body: 'The Assessment is a short quiz drawn from the corpus - a quick way to check your ' +
-          'understanding of the material or to onboard someone new to the content. Answer the ' +
-          'questions and see how you did, with the relevant sources to read up on anything you ' +
-          'missed.',
+        heading: 'Build a knowledge check',
+        body: "The Assessment lets you generate a short knowledge check grounded in the portal's " +
+          'content - a quick way to test your grasp of the material or to bring someone new up to ' +
+          'speed. It builds in three steps:\n\n' +
+          '1. **Choose a knowledge area** - pick one of the corpus topics (each card shows how ' +
+          'many sources sit behind it).\n' +
+          '2. **Set the shape** - choose how many questions (3, 5 or 10) and how deep to go ' +
+          '(Foundational, Intermediate or Advanced).\n' +
+          '3. **Generate the assessment** - the portal writes the questions from the sources in ' +
+          'that area.',
+      },
+      {
+        heading: 'Taking it',
+        body: 'Answer the questions and see how you did, with the relevant sources to read up on ' +
+          'anything you missed. Use **Change area** to build another check on a different topic.',
       },
     ],
   },
@@ -407,22 +489,35 @@ export const DOC_PAGES: DocPage[] = [
         heading: 'A first-class research question',
         body:
           'An Investigation is a persistent research question that accumulates evidence as you ' +
-          'work, rather than a search you run once and lose. Create one for a question you are ' +
-          'genuinely trying to answer and build it up over multiple sessions.',
+          'work, rather than a search you run once and lose. Give it a **name** and, if you like, ' +
+          'the **research question** it is trying to answer, then **Start investigation**. Mark ' +
+          'one as your **current** investigation with **Make current**, and **Close** or ' +
+          '**Delete** it when you are done. **Ask this question** hands the research question ' +
+          'straight to the Assistant.',
       },
       {
-        heading: 'Building the evidence',
-        body: 'As you find passages that bear on the question - from search, the assistant or a ' +
-          'document - save them into the investigation as evidence, each keeping its provenance ' +
-          'back to the source. The evidence table is persistent, so the case you are building ' +
-          'does not vanish when you move on.',
+        heading: 'Gathering evidence',
+        body: 'As you find passages that bear on the question - from Search, the Assistant or a ' +
+          'document - **Save** them into the investigation. Each piece keeps its provenance: the ' +
+          'source it came from and the query it was retrieved for. The evidence is persistent, so ' +
+          'the case you are building does not vanish when you move on.',
       },
       {
-        heading: 'Synthesis',
+        heading: 'Sorting what you find',
         body:
-          'When you have gathered enough, the portal can synthesise across the evidence you have ' +
-          'kept - grounded strictly on that evidence, not the whole corpus - to draw the threads ' +
-          'together, and you can generate artefacts from it and export the result.',
+          'Weigh each piece of evidence by marking it **Supports**, **Partial**, **Contradicts** ' +
+          'or **Not relevant** - the tabs across the top then let you see just the supporting or ' +
+          'just the contradicting evidence at a glance. You can **add a note** to any item, ' +
+          '**Ask about this** to dig into it, or **Remove** it. **Tags** let you group evidence ' +
+          'under the claims or themes you are testing, and the **Notebook** holds your working ' +
+          'notes, hunches and things still to check.',
+      },
+      {
+        heading: 'Synthesis and output',
+        body:
+          'When you have gathered enough, **Synthesise the evidence** draws the threads together ' +
+          '- grounded strictly on the evidence you have kept, not the whole corpus. From there ' +
+          'you can **Export to Word** to take the whole case with you.',
       },
     ],
   },
@@ -486,9 +581,10 @@ export const DOC_PAGES: DocPage[] = [
         heading: 'Enrichments',
         body:
           'Enrichments are the structured fields generated onto each document - a real title, a ' +
-          'summary, key takeaways and quotes of interest - that replace raw filenames and give ' +
-          'every document a scannable, credible presentation on cards, in the Library and on the ' +
-          'document page.\n\n' +
+          'summary, key takeaways and quotes of interest - designed to replace raw filenames and ' +
+          'give every document a scannable, credible presentation on cards, in the Library and on ' +
+          'the document page. Until the enrichment has been run over a corpus, documents fall ' +
+          'back to their project code and file name.\n\n' +
           'The default research enrichment ships as the first enrichment. Each enrichment is a ' +
           'generation agent plus a schema; the portal renders whatever fields the schema defines, ' +
           'so adding a new lens on the corpus is a configuration change, displayed automatically.',

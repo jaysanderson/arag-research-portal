@@ -48,10 +48,16 @@ describe('documentation content integrity', () => {
   })
 
   it('uses Australian English and no em dashes in user-facing copy', () => {
+    // US spellings chosen so they are not substrings of their Australian forms
+    // (e.g. "colour" does not contain "color", "artefact" does not contain "artifact").
+    const usSpellings = ['organization', 'organize', 'color', 'behavior', 'analyze', 'artifact']
     for (const page of DOC_PAGES) {
       const text = docPageToPlainText(page)
       expect(text).not.toContain('—') // em dash
-      expect(text.toLowerCase()).not.toContain('organization')
+      const lower = text.toLowerCase()
+      for (const us of usSpellings) {
+        expect(lower).not.toContain(us)
+      }
     }
   })
 })
