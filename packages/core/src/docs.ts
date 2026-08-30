@@ -212,7 +212,11 @@ export const DOC_PAGES: DocPage[] = [
           'nothing is hidden.\n\n' +
           'Want to see the working? **Journey through the context** walks you through the ' +
           'passages the answer was built from, and **Show the pipeline** reveals the retrieve, ' +
-          'write and check stages behind it.',
+          'write and check stages behind it.\n\n' +
+          'When an answer comes back thinly grounded, the Assistant offers to **re-answer it ' +
+          'deeply** - re-running your question against the full text of the matching documents ' +
+          'rather than the retrieved passages alone - so a weak first pass has a one-tap path to a ' +
+          'stronger one.',
       },
       {
         heading: 'Sessions and your research trail',
@@ -263,7 +267,10 @@ export const DOC_PAGES: DocPage[] = [
           'for example "Moderate confidence. The retrieved sources only partly support this ' +
           'answer, check the citations before relying on it." A weakly supported answer is never ' +
           'presented as authoritative; the banner is your cue to read the sources before you use ' +
-          'it.',
+          'it.\n\n' +
+          'When confidence is low, the Assistant also offers to **re-answer the question deeply**, ' +
+          'against the full text of the matching documents, so a thinly grounded first answer has ' +
+          'a direct path to a firmer one rather than leaving you at a dead end.',
       },
       {
         heading: 'Honest refusals',

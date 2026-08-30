@@ -63,6 +63,29 @@ function bandOf(score: number): Band {
  * generated answer itself) so on its own it can only pull `high` down to
  * `moderate`, never force `low`.
  */
+/**
+ * The confidence state at which the assistant proactively offers a deep
+ * re-answer - re-running the question against the full text of the matching
+ * documents. Anchored to the `low` state (groundedness in the "bad" band, or a
+ * moderately-grounded answer that is also off-target) so the offer appears on
+ * exactly the answers that already carry the red "Low confidence" banner:
+ * never on a healthy moderate/high answer, and never on an unscored one. One
+ * ruler for both, so the banner and the offer can never disagree.
+ */
+export const DEEP_REANSWER_CONFIDENCE: ConfidenceState = 'low'
+
+/**
+ * Whether an answer is thinly grounded enough to proactively offer a deep
+ * re-answer. Deliberately delegates to `assessConfidence` rather than
+ * re-deriving its own groundedness cut-off, so this predicate and the red
+ * confidence banner stay perfectly in step: a low-confidence answer always
+ * carries the offer, a moderate/high one never does, and an unscored one never
+ * does. Pure and side-effect free, so it is unit-tested directly.
+ */
+export function isThinlyGrounded(quality: QualityScores | null | undefined): boolean {
+  return assessConfidence(quality).state === DEEP_REANSWER_CONFIDENCE
+}
+
 export function assessConfidence(quality: QualityScores | null | undefined): Confidence {
   const groundedness = quality?.groundedness
   if (groundedness === null || groundedness === undefined) {
