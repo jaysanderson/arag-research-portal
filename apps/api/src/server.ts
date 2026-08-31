@@ -39,7 +39,7 @@ const app = buildApp({
   invalidate: (slug) => provider.invalidate(slug),
 })
 
-startScheduler(provider, tenants, sources, watches)
+startScheduler(provider, tenants, sources, watches, enrichments)
 
 // Serve the built SPA (deno task build:web) alongside the API - one origin, no proxy.
 // Cache-bust the entry bundle so a deploy is never masked by a stale copy in the

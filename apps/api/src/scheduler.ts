@@ -2,6 +2,7 @@ import type { TenantConfig } from '@research-portal/core'
 import { AragApiError, type AragProvider } from '@research-portal/retrieval'
 import { discoverLinks, extractMainContent, looksLikeChallengePage } from './crawl.ts'
 import { type Source, SourceStore, WatchStore } from './stores.ts'
+import { type EnrichmentStore, runEnrichmentOverCorpus } from './enrichments.ts'
 import type { TenantStore } from './tenants.ts'
 
 // ---------------------------------------------------------------------------
@@ -132,6 +133,45 @@ export async function runWatches(
   }
 }
 
+/** Merchandise up to this many still-unenriched resources per portal, per run. */
+const AUTO_ENRICH_CAP = 400
+
+/**
+ * Run the default merchandising enrichment over any resource that does not yet
+ * have it, across all portals (daily job). This is what keeps cards, the
+ * resource page and search showing real titles/summaries instead of raw
+ * filenames for EVERY future ingest, with no manual trigger.
+ *
+ * Bounded per run (`AUTO_ENRICH_CAP`) so a large freshly-ingested backlog is
+ * worked off over several daily runs rather than in one burst that would
+ * contend with live traffic and ingestion; the remainder is simply picked up
+ * on the next run (`scope: 'missing'` re-derives the outstanding set each time).
+ * For a big one-off backlog, the Manage -> Enrichments "run" endpoint drains it
+ * faster on demand.
+ */
+export async function runAutoEnrichments(
+  management: AragProvider,
+  tenants: TenantStore,
+  enrichments: EnrichmentStore,
+): Promise<void> {
+  for (const summary of tenants.list()) {
+    const config = tenants.get(summary.slug)
+    if (!config) continue
+    try {
+      for await (
+        const _event of runEnrichmentOverCorpus(management, enrichments, config, {
+          scope: 'missing',
+          limit: AUTO_ENRICH_CAP,
+        })
+      ) {
+        // Drain the generator; each resource's enrichment is persisted inside it.
+      }
+    } catch {
+      // Box offline or rebinding - the outstanding resources are picked up next cycle.
+    }
+  }
+}
+
 /** Sync every auto source across all portals (daily job). */
 export async function runAutoSyncs(
   management: AragProvider,
@@ -155,9 +195,10 @@ export async function runAutoSyncs(
 /**
  * Start the daily upkeep timer; returns a stop function.
  *
- * `sources` and `watches` must be the SAME store instances buildApp uses for
- * its HTTP routes (POST /watches, the sources admin endpoints), not fresh
- * ones. Both stores do a whole-file read-modify-write on each mutation,
+ * `sources`, `watches` and `enrichments` must be the SAME store instances
+ * buildApp uses for its HTTP routes (POST /watches, the sources admin
+ * endpoints, the enrichments run endpoint), not fresh ones. The stores do a
+ * whole-file read-modify-write on each mutation,
  * so a scheduled sync and a concurrent HTTP write against two separate
  * instances can each read the file before the other's write lands and
  * silently drop it. Sharing instances doesn't remove that race by itself,
@@ -169,10 +210,14 @@ export function startScheduler(
   tenants: TenantStore,
   sources: SourceStore,
   watches: WatchStore,
+  enrichments: EnrichmentStore,
 ): () => void {
   const run = async () => {
     await runAutoSyncs(management, tenants, sources).catch(() => {})
     await runWatches(management, tenants, watches).catch(() => {})
+    // After new content may have been synced, merchandise anything still missing
+    // its enrichment so future ingests never surface as raw filenames.
+    await runAutoEnrichments(management, tenants, enrichments).catch(() => {})
   }
   // First pass shortly after boot (machines may sleep between requests), then daily.
   const boot = setTimeout(() => run(), 90_000)

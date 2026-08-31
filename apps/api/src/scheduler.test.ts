@@ -28,8 +28,9 @@ const dir = await Deno.makeTempDir()
 Deno.env.set('DATA_DIR', dir)
 
 const { buildApp } = await import('./app.ts')
-const { runAutoSyncs, runWatches } = await import('./scheduler.ts')
+const { runAutoEnrichments, runAutoSyncs, runWatches } = await import('./scheduler.ts')
 const { SourceStore, WatchStore } = await import('./stores.ts')
+const { EnrichmentStore } = await import('./enrichments.ts')
 const { TenantStore } = await import('./tenants.ts')
 
 const freshTenants = () =>
@@ -151,5 +152,40 @@ Deno.test(
     // Proves runAutoSyncs walked OUR instance's data (list ran on the spy)
     // rather than a separately-constructed, empty SourceStore.
     expect(sources.calls).toContain('list')
+  },
+)
+
+class SpyEnrichmentStore extends EnrichmentStore {
+  calls: string[] = []
+  override get(
+    ...args: Parameters<InstanceType<typeof EnrichmentStore>['get']>
+  ): ReturnType<InstanceType<typeof EnrichmentStore>['get']> {
+    this.calls.push('get')
+    void args
+    // Return a truthy enrichment so every resource counts as already-done: the
+    // pass then attempts no generation (no live platform call), while still
+    // proving it consulted THIS shared store instance.
+    return {} as unknown as ReturnType<InstanceType<typeof EnrichmentStore>['get']>
+  }
+}
+
+Deno.test(
+  'runAutoEnrichments (the scheduler merchandising pass) reads through the shared EnrichmentStore instance',
+  async () => {
+    const tenants = freshTenants()
+    const enrichments = new SpyEnrichmentStore()
+    // A management double whose catalogue has one resource, so the pass reaches
+    // the per-resource `get` (the wiring under test). `get` returns truthy, so
+    // the resource counts as already-enriched and nothing is generated - no
+    // live platform dependency.
+    const management = {
+      listResources: () => Promise.resolve([{ id: 'r1', title: 'A report', summary: '' }]),
+    } as unknown as AragProvider
+
+    await runAutoEnrichments(management, tenants, enrichments)
+
+    // Proves runAutoEnrichments consulted OUR instance (get ran on the spy)
+    // rather than a separately-constructed EnrichmentStore.
+    expect(enrichments.calls).toContain('get')
   },
 )
