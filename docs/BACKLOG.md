@@ -78,6 +78,16 @@ full_resource, graph_beta, prequeries), labellers + classifier + graph + summari
 4. Page-image + `tables` grounding once OCR lands. 5. Wire the memory agent into /ask or drop it.
    6. Graph shortest-path "how is X connected to Y" explainer.
 
+## Idea bank (post-v1)
+- **Extraction Accuracy Lab (Jay, 2026-08-31, HIGH VALUE).** Let a user upload document(s), run
+  them through several extraction strategies / vision models, and see a side-by-side comparison of
+  ingestion accuracy (chars/page yield, structure/table fidelity, a quality score, cost, latency)
+  so they can choose the right strategy before committing to a full ingest. Productises the manual
+  extraction bake-off from this build. ARAG already has named extract strategies + the model
+  catalogue (`GET /kb/{id}/schema`); the work is putting it behind `RetrievalProvider`. Risks:
+  test-upload isolation (scratch/sandbox KB), objective scoring (needs ground-truth or a
+  model-judge), cost caps. Full writeup in `docs/HANDOVER.md` section 8.
+
 ## Standing
 - GRDC real content: Jay is loading it. FRDC is the demo hero.
 - Full functional acceptance sweep across every feature on the real FRDC corpus before handover.
