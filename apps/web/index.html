@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en-AU">
   <head>
     <meta charset="UTF-8" />
@@ -13,34 +13,34 @@
   </head>
   <body>
     <script>
-    // Apply the stored theme before first paint to avoid a flash.
-    ;(function () {
-      try {
-        var t = localStorage.getItem('rp-theme')
-        if (t !== 'dark' && t !== 'light') {
-          t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-        }
-        document.documentElement.dataset.theme = t
-      } catch (e) { /* default light */ }
-    })()
+      // Apply the stored theme before first paint to avoid a flash.
+      ;(function () {
+        try {
+          var t = localStorage.getItem('rp-theme')
+          if (t !== 'dark' && t !== 'light') {
+            t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+          }
+          document.documentElement.dataset.theme = t
+        } catch (e) { /* default light */ }
+      })()
     </script>
 
     <div id="root"></div>
     <link rel="stylesheet" href="/styles.css" />
     <script type="importmap">
-    {
-      "imports": {
-        "react": "https://esm.sh/react@18.3.1",
-        "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
-        "react-dom": "https://esm.sh/react-dom@18.3.1",
-        "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
-        "react-router-dom": "https://esm.sh/react-router-dom@7.1.1?deps=react@18.3.1,react-dom@18.3.1",
-        "@tanstack/react-query": "https://esm.sh/@tanstack/react-query@5.62.11?deps=react@18.3.1",
-        "zod": "https://esm.sh/zod@3.25.76",
-        "d3-force": "https://esm.sh/d3-force@3.0.0",
-        "pdfjs-dist": "https://esm.sh/pdfjs-dist@4.9.155"
+      {
+        "imports": {
+          "react": "https://esm.sh/react@18.3.1",
+          "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
+          "react-dom": "https://esm.sh/react-dom@18.3.1",
+          "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+          "react-router-dom": "https://esm.sh/react-router-dom@7.1.1?deps=react@18.3.1,react-dom@18.3.1",
+          "@tanstack/react-query": "https://esm.sh/@tanstack/react-query@5.62.11?deps=react@18.3.1",
+          "zod": "https://esm.sh/zod@3.25.76",
+          "d3-force": "https://esm.sh/d3-force@3.0.0",
+          "pdfjs-dist": "https://esm.sh/pdfjs-dist@4.9.155"
+        }
       }
-    }
     </script>
     <script type="module" src="/app.js"></script>
   </body>
