@@ -98,6 +98,10 @@ export class DoubleProvider implements RetrievalProvider {
     return Promise.resolve(counts)
   }
 
+  topicResources(_tenant: TenantConfig, topicId: string): Promise<ResourceSummary[]> {
+    return Promise.resolve(this.resources.filter((resource) => resource.topicIds.includes(topicId)))
+  }
+
   labelsets(_tenant: TenantConfig): Promise<Labelset[]> {
     return Promise.resolve([
       { id: 'topic', title: 'Topic', multiple: true, labels: ['stock-assessment'] },
